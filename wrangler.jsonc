@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sandbox-rabbit",
+  "main": "./src/worker/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  }
+
+  // --- Étapes suivantes (décommenter quand la ressource est créée) ---
+  // BDD : npx wrangler d1 create sandbox-rabbit
+  // "d1_databases": [
+  //   { "binding": "DB", "database_name": "sandbox-rabbit", "database_id": "<id>" }
+  // ],
+  // IA : aucun setup, juste le binding
+  // "ai": { "binding": "AI" }
+}

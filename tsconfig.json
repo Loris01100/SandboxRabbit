@@ -1,0 +1,19 @@
+{
+  // Côté navigateur : lib DOM, pas de types Workers (ils entrent en conflit).
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["vite/client"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true
+  },
+  "include": ["src/client", "vite.config.ts"]
+}

@@ -1,0 +1,17 @@
+{
+  // Côté Worker : types runtime générés par `npm run cf-typegen`, pas de DOM.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true
+  },
+  "include": ["src/worker", "worker-configuration.d.ts"]
+}

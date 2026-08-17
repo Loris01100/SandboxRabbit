@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Sandbox Rabbit — bac à sable</title>
+    <meta name="description" content="Un bac à sable cellulaire : sable, eau, feu, acide, lave. Déposez, mélangez, regardez." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🐇</text></svg>" />
+    <script type="module" src="/src/client/main.ts"></script>
+  </head>
+  <body>
+    <header class="bar">
+      <h1>Sandbox<span>Rabbit</span></h1>
+      <div class="stats"><span id="fps">–</span> fps · <span id="filled">0</span> cellules</div>
+    </header>
+
+    <main>
+      <div class="stage">
+        <canvas id="world" aria-label="Bac à sable"></canvas>
+      </div>
+
+      <aside class="panel">
+        <section>
+          <h2>Matière</h2>
+          <div id="palette" class="palette"></div>
+          <p id="hint" class="hint"></p>
+        </section>
+
+        <section>
+          <h2>Pinceau</h2>
+          <label class="row">
+            <span>Taille</span>
+            <input id="brush" type="range" min="1" max="24" value="5" />
+            <output id="brush-value">5</output>
+          </label>
+        </section>
+
+        <section>
+          <h2>Simulation</h2>
+          <div class="row buttons">
+            <button id="play" type="button">Pause</button>
+            <button id="step" type="button">Pas à pas</button>
+            <button id="clear" type="button">Vider</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Mondes</h2>
+          <div class="row buttons">
+            <button id="save" type="button">Sauvegarder</button>
+            <button id="refresh" type="button">Rafraîchir</button>
+          </div>
+          <ul id="worlds" class="worlds"></ul>
+          <p id="status" class="hint"></p>
+        </section>
+      </aside>
+    </main>
+  </body>
+</html>
