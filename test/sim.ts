@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { Engine } from "../src/client/sim/engine.ts";
 import { decode, encode } from "../src/client/sim/codec.ts";
 import {
-  EMPTY, FIRE, GLASS, ICE, LAVA, NANITE, PLANT, SALT, SALTWATER, SAND,
-  SEED, SOURCE, STONE, TNT, WATER, type MaterialId,
+  EMPTY, FIRE, GLASS, ICE, LAVA, NANITE, OIL, PLANT, SALT, SALTWATER, SAND,
+  SEED, SOURCE, STONE, TNT, WATER, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
 const W = 60, H = 40;
@@ -147,6 +147,24 @@ function count(e: Engine, id: MaterialId): number {
   const round = decode(encode(e.cells), W * H);
   assert.deepEqual([...round], [...e.cells], "encode/decode conserve la grille");
   assert.ok(encode(e.cells).length < 4000, "un monde tient dans une URL");
+}
+
+// `flammable` règle la vitesse de propagation : l'huile s'embrase, le bois traîne.
+{
+  /** Ticks moyens avant qu'une cellule collée à une flamme ne prenne feu. */
+  const delay = (id: MaterialId): number => {
+    let total = 0;
+    for (let trial = 0; trial < 25; trial++) {
+      const e = new Engine(16, 16);
+      e.set(8, 8, id);
+      let t = 0;
+      while (e.get(8, 8) === id && t < 300) { e.set(8, 7, FIRE); e.step(); t++; }
+      total += t;
+    }
+    return total / 25;
+  };
+  const oil = delay(OIL), wood = delay(WOOD);
+  assert.ok(oil * 3 < wood, `l'huile prend feu bien avant le bois (${oil} contre ${wood} ticks)`);
 }
 
 // Pinceau non destructif : ne remplit que le vide, sauf la gomme qui efface tout.

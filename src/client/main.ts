@@ -113,6 +113,15 @@ brushInput.addEventListener("input", () => {
 
 const keepInput = document.querySelector<HTMLInputElement>("#keep")!;
 
+/** Ticks de simulation par frame : 0,25 (ralenti) à 4 (accéléré). */
+let speed = 1;
+const speedInput = document.querySelector<HTMLInputElement>("#speed")!;
+const speedValue = document.querySelector<HTMLOutputElement>("#speed-value")!;
+speedInput.addEventListener("input", () => {
+  speed = Number(speedInput.value) / 4;
+  speedValue.value = `×${speed.toLocaleString("fr-FR")}`;
+});
+
 const windInput = document.querySelector<HTMLInputElement>("#wind")!;
 const windValue = document.querySelector<HTMLOutputElement>("#wind-value")!;
 windInput.addEventListener("input", () => {
@@ -243,10 +252,18 @@ const filledEl = document.querySelector<HTMLSpanElement>("#filled")!;
 let frames = 0;
 let lastReport = performance.now();
 
+/** Reliquat de tick quand la vitesse n'est pas entière (ralenti). */
+let pending = 0;
+
 function frame(now: number): void {
   // Clic maintenu sans bouger : on continue de déposer sous le curseur.
   if (painting && last) paintAt(last.x, last.y);
-  if (running) engine.step();
+  if (running) {
+    pending += speed;
+    // Plafonné : si une frame traîne, on saute des ticks plutôt que de s'enliser.
+    for (let n = Math.min(Math.floor(pending), 8); n > 0; n--) engine.step();
+    pending %= 1;
+  }
   renderer.draw();
 
   frames++;

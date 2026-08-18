@@ -17,6 +17,8 @@ source / fumée`, pinceau réglable, pause & pas à pas, sauvegarde de mondes.
 | Graine | Tombe comme une poudre, germe en plante au contact de l'eau. |
 | Nanites | Dévorent la matière et se répliquent, puis meurent de vieillesse. Seul le verre les arrête : on peut construire un bocal. |
 | Source | Émet en continu la dernière matière sélectionnée avant elle (stockée dans `life`). |
+| Feu | `flammable` est une probabilité **par tick et par flamme voisine** : la poudre part instantanément (1), l'huile s'embrase (0,6), la graine crépite (0,05), le bois met une seconde à prendre (0,02). C'est le seul réglage de vitesse de propagation. |
+| Vitesse | Curseur ×0,25 à ×4 : nombre de ticks de simulation par frame, avec reliquat pour le ralenti et plafond à 8 ticks pour ne pas s'enliser. |
 | Vent & gravité | Un curseur biaise la dérive horizontale, la touche `g` retourne la gravité. |
 | Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours). Clic maintenu = dépôt continu, même sans bouger la souris. |
 | Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. Ouvrir le lien recharge la scène. |
