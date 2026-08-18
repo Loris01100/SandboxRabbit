@@ -1,7 +1,7 @@
 import {
-  ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
+  ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FALLOUT, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
   MINE, NANITE, NITRO, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM,
-  STONE, SWITCH, THERMITE, TNT, WATER, WOOD, type MaterialId,
+  STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
 /** Température de l'air au repos, en °C. */
@@ -18,6 +18,12 @@ const PULSE = 24;
 const SHOCK = 4;
 /** Ticks de combustion de la thermite : assez pour percer, pas pour vider la scène. */
 const BURN = 150;
+/** Voisins d'uranium à partir desquels un tas s'emballe (4 = enfoui dans un bloc). */
+const CRITICAL = 3;
+/** Ticks d'emballement avant la détonation : le temps de casser le tas. */
+const MELTDOWN = 120;
+/** Rayon du souffle nucléaire. */
+const NUKE = 16;
 
 /**
  * Offsets d'un disque de rayon `radius`, du bord vers le centre — l'ordre dans
@@ -241,6 +247,8 @@ export class Engine {
       case C4: this.updateC4(i, x, y); return;
       case MINE: this.updateMine(x, y); return;
       case THERMITE: this.updateThermite(i, x, y); return;
+      case URANIUM: this.updateUranium(i, x, y); return;
+      case FALLOUT: this.updateFallout(i, x, y); return;
       case SALT: this.updateSalt(i, x, y); return;
       case SEED: this.updateSeed(i, x, y); return;
       case NANITE: this.updateNanite(i, x, y); return;
@@ -446,6 +454,41 @@ export class Engine {
       if (n === FIRE || n === LAVA || n === SPARK || lit) { this.life[i] = BURN; return; }
     }
     this.updatePowder(i, x, y, THERMITE);
+  }
+
+  /**
+   * Uranium. Son déclencheur n'est ni le feu ni le choc : c'est **sa propre
+   * masse**. Isolé il tiédit et sert de chauffage ; en tas il s'emballe,
+   * chauffe de plus en plus (visible en vue thermique), et finit par sauter.
+   * Casser le tas fait redescendre le compteur : c'est la seule parade.
+   */
+  private updateUranium(i: number, x: number, y: number): void {
+    let mass = 0;
+    for (const [nx, ny] of this.neighbors(x, y)) if (this.get(nx, ny) === URANIUM) mass++;
+    if (mass >= CRITICAL) {
+      if (++this.life[i] >= MELTDOWN) { this.nuke(x, y); return; }
+    } else if (this.life[i] > 0) this.life[i]--;
+    this.temp[i] = Math.max(this.temp[i], 60 + this.life[i] * 6);
+    this.updatePowder(i, x, y, URANIUM);
+  }
+
+  /** Le souffle, puis ce qui distingue le nucléaire : le nuage qui reste. */
+  private nuke(cx: number, cy: number): void {
+    this.explode(cx, cy, NUKE);
+    for (const [ox, oy] of disc(NUKE)) {
+      const x = cx + ox, y = cy + oy;
+      if (!this.inBounds(x, y)) continue;
+      if (this.cells[this.index(x, y)] === EMPTY && Math.random() < 0.2) this.set(x, y, FALLOUT);
+    }
+  }
+
+  /** Les retombées : un gaz ordinaire, sauf que rien de vivant n'y tient. */
+  private updateFallout(i: number, x: number, y: number): void {
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      const n = this.get(nx, ny);
+      if (n === PLANT || n === SEED) this.set(nx, ny, EMPTY);
+    }
+    this.updateGas(i, x, y, FALLOUT);
   }
 
   /**

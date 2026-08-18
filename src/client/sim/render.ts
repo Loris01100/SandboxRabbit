@@ -1,4 +1,4 @@
-import { EMPTY, MATERIALS, SWITCH, THERMITE } from "./materials";
+import { EMPTY, MATERIALS, SWITCH, THERMITE, URANIUM } from "./materials";
 import { AMBIENT, type Engine } from "./engine";
 
 /**
@@ -43,7 +43,8 @@ export class Renderer {
       // Une cellule figée est tramée en damier, pour la distinguer au premier coup d'œil.
       // Deux états n'ont pas de couleur propre et doivent pourtant se voir :
       // l'interrupteur fermé et la thermite allumée s'éclairent.
-      const glow = id === SWITCH && life[i] === 1 ? 55 : id === THERMITE && life[i] > 0 ? 110 : 0;
+      // L'uranium pâlit à mesure qu'il s'emballe : on voit venir le coup sans la vue thermique.
+    const glow = id === SWITCH && life[i] === 1 ? 55 : id === THERMITE && life[i] > 0 ? 110 : id === URANIUM ? life[i] >> 1 : 0;
       const d = frozen[i]
         ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
         : glow || (noise[i] * MATERIALS[id].noise) >> 7;

@@ -3,11 +3,11 @@
 Un bac à sable cellulaire (« falling sand ») qui tourne entièrement dans le
 navigateur, servi par un Worker Cloudflare qui héberge aussi l'API.
 
-Quarante matières, rangées en familles repliables (terrain, liquides,
+Quarante-trois matières, rangées en familles repliables (terrain, liquides,
 inflammable, explosifs, froid, vivant, électricité, gaz, outils) : `sable / eau /
 pierre / bois / huile / goudron / alcool / acide / lave / plante / feu / glace /
 neige / azote liquide / sel / eau salée / poudre / TNT / nitroglycérine / C4 /
-mine / thermite / grisou / graine / nanites / verre / verre fondu / mercure /
+mine / thermite / uranium / grisou / retombées / pétrole / graine / nanites / verre / verre fondu / mercure /
 cire / bougie / boue / braise / métal / pile / interrupteur / étincelle /
 source / fumée`, pinceau réglable, vue thermique, pause & pas à pas, galerie de
 mondes partagés.
@@ -20,6 +20,8 @@ mondes partagés.
 | TNT & poudre | La flamme déclenche l'explosion, l'explosion rallume les charges voisines : ça part en chaîne. |
 | Souffle | Une explosion ne se contente plus d'effacer un disque : elle **projette**. Chaque cellule part le long de son rayon et se dépose sur la dernière place libre rencontrée — les débris d'une charge enterrée ressortent donc par le cratère au lieu de s'écraser dans la roche voisine, et deux projections ne peuvent pas atterrir au même endroit, donc la matière est conservée. Le disque est traité du bord vers le centre, pour que chacune parte vers une place déjà libérée. Ce qui n'a nulle part où aller (un mur plein) est pulvérisé comme avant : sans ce repli, une charge ne percerait plus rien. À l'air libre, un souffle détruit ainsi deux fois moins de matière qu'enterré — il la déplace. |
 | Explosifs | Cinq matières, cinq **déclencheurs** différents — c'est là qu'est la variété, pas dans le rayon de souffle. La nitroglycérine obéit au choc : `life` compte ses cellules de chute et l'atterrissage au-delà de quatre détonne, la poser à la main ne risque rien. Le C4 ignore le feu et n'obéit qu'à l'étincelle : une charge amorcée par la détonation d'une voisine (`life` = 1) fait partir un mur entier, ce qui donne enfin un usage à la pile et à l'interrupteur. Le grisou obéit au volume : gaz `flammable` 1, il s'accumule au plafond puis toute la nappe part d'un coup. La mine obéit au poids, mais seulement de ce qui coule (`kind` poudre ou liquide) : on peut donc la murer. |
+| Nucléaire | Le seul explosif sans mise à feu : **sa masse est son déclencheur**. Un grain d'uranium isolé se contente de tiédir (60 °C, c'est un chauffage) ; dès qu'une cellule a trois voisins d'uranium, elle s'emballe — un compteur monte dans `life`, la température avec lui (jusqu'à ~750 °C, la matière pâlit et la vue thermique voit venir le coup), et au bout de 120 ticks c'est un souffle de rayon 16. Casser le tas fait redescendre le compteur : c'est la seule parade, et elle se joue à la souris. Ce qui reste distingue le nucléaire d'un gros TNT : les **retombées**, un gaz qui traîne 250 ticks et où rien de vivant ne tient. |
+| Pétrole | Il ne brûle pas. Une flamme posée dessus ne fait rien du tout — il faut le **chauffer** (200 °C, c'est-à-dire la lave ou la thermite, pas une allumette) et il se change alors en grisou. C'est le gaz qui explose, pas le liquide : une poche scellée sous la roche se remplit, et attend l'étincelle. |
 | Thermite | L'anti-explosif : elle ne souffle rien, elle perce. Elle impose 2800 °C sur place pendant 150 ticks, ce qui liquéfie la pierre (`boil` à 1400 °C, hors de portée de la lave qui plafonne à 800 °C dans la roche voisine), et elle continue de tomber en brûlant — densité 8, elle passe sous la lave qu'elle vient de créer. D'où un vrai puits, et pas un cratère. |
 | Sel | Se dissout dans l'eau (eau salée, plus lourde, gèle à -18 °C) et fait fondre la glace. |
 | Graine | Tombe comme une poudre, germe en plante au contact de l'eau. |

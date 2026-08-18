@@ -9,7 +9,7 @@ import { CHALLENGES } from "../src/client/challenges.ts";
 import {
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
-  SNOW, SOURCE, SPARK, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
+  SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
 const W = 60, H = 40;
@@ -524,6 +524,61 @@ function count(e: Engine, id: MaterialId): number {
   for (let x = 10; x < 50; x++) for (let y = 14; y < 20; y++) e.set(x, y, LAVA);
   for (let t = 0; t < 400; t++) e.step();
   assert.equal(count(e, STONE), before, "une nappe de lave ne creuse pas");
+}
+
+// Le pétrole ne brûle pas : il gaze. Une flamme ne suffit pas, la lave si.
+{
+  const e = engine();
+  for (let x = 10; x < 40; x++) for (let y = 30; y < 34; y++) e.set(x, y, PETROLEUM);
+  for (let x = 20; x < 26; x++) e.set(x, 29, FIRE);
+  for (let t = 0; t < 120; t++) e.step();
+  assert.equal(count(e, FIREDAMP), 0, "une flamme ne fait pas gazer le pétrole");
+  assert.ok(count(e, PETROLEUM) > 100, "et ne le consomme pas non plus");
+}
+
+// Poche scellée chauffée par la lave : elle se remplit de grisou.
+{
+  const e = engine();
+  for (let x = 10; x < 40; x++) for (let y = 20; y < 32; y++) e.set(x, y, STONE);
+  for (let x = 12; x < 38; x++) for (let y = 22; y < 30; y++) e.set(x, y, EMPTY);
+  for (let x = 12; x < 38; x++) for (let y = 26; y < 30; y++) e.set(x, y, PETROLEUM);
+  for (let x = 0; x < W; x++) for (let y = 32; y < H; y++) e.set(x, y, LAVA);
+  for (let t = 0; t < 120; t++) e.step();
+  assert.ok(count(e, FIREDAMP) > 60, `le pétrole chauffé remplit la poche (${count(e, FIREDAMP)})`);
+}
+
+// Uranium : le déclencheur, c'est la masse. Un tas s'emballe et saute.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) for (let y = 30; y < H; y++) e.set(x, y, STONE);
+  for (let x = 26; x < 34; x++) for (let y = 22; y < 30; y++) e.set(x, y, URANIUM);
+  const stone = count(e, STONE);
+  let hot = 0;
+  for (let t = 0; t < 200 && count(e, URANIUM) > 0; t++) {
+    e.step();
+    hot = Math.max(hot, e.temp[e.index(30, 26)]);
+  }
+  assert.ok(hot > 300, `le tas chauffe avant de sauter (${hot | 0} °C)`);
+  assert.equal(count(e, URANIUM), 0, "le tas a sauté");
+  assert.ok(count(e, STONE) < stone - 50, `le souffle creuse (${stone - count(e, STONE)})`);
+  assert.ok(count(e, FALLOUT) > 20, `il reste des retombées (${count(e, FALLOUT)})`);
+}
+
+// … mais un grain isolé ne fait que tiédir : c'est la parade, éparpiller le tas.
+{
+  const e = engine();
+  for (let x = 10; x < 40; x += 3) e.set(x, 38, URANIUM);
+  for (let t = 0; t < 400; t++) e.step();
+  assert.ok(count(e, URANIUM) > 0, "un grain isolé ne s'emballe pas");
+}
+
+// Les retombées stérilisent : rien ne pousse dedans.
+{
+  const e = engine();
+  for (let x = 20; x < 30; x++) e.set(x, 20, PLANT);
+  for (let x = 20; x < 30; x++) e.set(x, 19, FALLOUT);
+  for (let t = 0; t < 30; t++) e.step();
+  assert.equal(count(e, PLANT), 0, "les retombées tuent la plante");
 }
 
 // Le vide reste du vide.

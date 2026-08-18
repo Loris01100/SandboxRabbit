@@ -45,6 +45,9 @@ export const C4 = 37;
 export const FIREDAMP = 38;
 export const MINE = 39;
 export const THERMITE = 40;
+export const PETROLEUM = 41;
+export const URANIUM = 42;
+export const FALLOUT = 43;
 
 export type MaterialId = number;
 
@@ -129,6 +132,9 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [C4]: { id: C4, name: "C4", kind: "static", density: 8, color: [232, 228, 212], noise: 6, hint: "Insensible au feu : ne saute que sous l'étincelle, et entraîne ses voisins" },
   [FIREDAMP]: { id: FIREDAMP, name: "Grisou", kind: "gas", density: 1, color: [128, 172, 126], noise: 14, life: 250, flammable: 1, hint: "Gaz de mine : s'accumule au plafond et part d'un seul coup" },
   [MINE]: { id: MINE, name: "Mine", kind: "static", density: 8, color: [104, 116, 96], noise: 8, hint: "Saute sous le poids de ce qui coule ; on peut la murer sans risque" },
+  [PETROLEUM]: { id: PETROLEUM, name: "Pétrole", kind: "liquid", density: 3, color: [30, 28, 40], noise: 10, spread: 2, boil: { at: 200, into: FIREDAMP }, hint: "Ne brûle pas : chauffé, il dégage du grisou — c'est le gaz qui explose" },
+  [URANIUM]: { id: URANIUM, name: "Uranium", kind: "powder", density: 12, color: [96, 132, 88], noise: 14, heat: 60, hint: "Un grain tiédit ; un tas s'emballe, chauffe et finit par sauter — l'éparpiller le calme" },
+  [FALLOUT]: { id: FALLOUT, name: "Retombées", kind: "gas", density: 1, color: [176, 208, 96], noise: 22, life: 250, hint: "Nuage radioactif : rien ne pousse dedans, et il traîne longtemps" },
   [THERMITE]: { id: THERMITE, name: "Thermite", kind: "powder", density: 8, color: [124, 112, 102], noise: 20, hint: "Ne souffle rien : brûle à 2800 °C et perce la pierre" },
 };
 
@@ -138,13 +144,13 @@ export const MATERIALS: Record<MaterialId, Material> = {
  */
 export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
   { name: "Terrain", ids: [SAND, STONE, WOOD, GLASS, MUD, SALT] },
-  { name: "Liquides", ids: [WATER, SALTWATER, OIL, TAR, ALCOHOL, ACID, MERCURY, MOLTEN_WAX, MOLTEN_GLASS] },
+  { name: "Liquides", ids: [WATER, SALTWATER, OIL, PETROLEUM, TAR, ALCOHOL, ACID, MERCURY, MOLTEN_WAX, MOLTEN_GLASS] },
   { name: "Inflammable", ids: [FIRE, EMBER, LAVA, WAX, CANDLE] },
-  { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, THERMITE] },
+  { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, THERMITE, URANIUM] },
   { name: "Froid", ids: [ICE, SNOW, NITROGEN] },
   { name: "Vivant", ids: [SEED, PLANT, NANITE] },
   { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK] },
-  { name: "Gaz", ids: [SMOKE, STEAM, FIREDAMP] },
+  { name: "Gaz", ids: [SMOKE, STEAM, FIREDAMP, FALLOUT] },
   { name: "Outils", ids: [SOURCE, EMPTY] },
 ];
 
