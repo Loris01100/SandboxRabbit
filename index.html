@@ -33,10 +33,26 @@
             <input id="brush" type="range" min="1" max="24" value="5" />
             <output id="brush-value">5</output>
           </label>
+          <label class="row">
+            <span>Outil</span>
+            <select id="tool">
+              <option value="paint">Peindre</option>
+              <option value="freeze">Figer</option>
+              <option value="melt">Libérer</option>
+            </select>
+          </label>
           <label class="check">
             <input id="keep" type="checkbox" />
             <span>Ne pas remplacer la matière déjà posée</span>
           </label>
+          <label class="check">
+            <input id="only" type="checkbox" />
+            <span>Gomme sélective : n'efface que la dernière matière choisie</span>
+          </label>
+          <p class="hint">
+            <kbd>Maj</kbd> + clic trace une ligne droite depuis le dernier point ·
+            clic droit remplit la poche sous le curseur · <kbd>f</kbd> bascule Peindre / Figer
+          </p>
         </details>
 
         <details class="group" open>
@@ -64,6 +80,16 @@
             <span>Gravité</span>
             <button id="gravity" type="button">Vers le bas ↓</button>
           </div>
+          <label class="check">
+            <input id="heatmap" type="checkbox" />
+            <span>Vue thermique <kbd>h</kbd> : bleu = froid, blanc = 1200 °C</span>
+          </label>
+        </details>
+
+        <details class="group" open>
+          <summary>Défis</summary>
+          <div id="challenges" class="buttons"></div>
+          <p id="goal" class="hint"></p>
         </details>
 
         <details class="group" open>

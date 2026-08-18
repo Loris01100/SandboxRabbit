@@ -3,9 +3,11 @@
 Un bac à sable cellulaire (« falling sand ») qui tourne entièrement dans le
 navigateur, servi par un Worker Cloudflare qui héberge aussi l'API.
 
-Vingt matières : `sable / eau / pierre / bois / huile / acide / lave / plante /
-feu / glace / sel / eau salée / poudre / TNT / graine / nanites / verre /
-source / fumée`, pinceau réglable, pause & pas à pas, sauvegarde de mondes.
+Vingt-neuf matières : `sable / eau / pierre / bois / huile / acide / lave /
+plante / feu / glace / sel / eau salée / poudre / TNT / graine / nanites /
+verre / mercure / cire / bougie / neige / boue / braise / métal / étincelle /
+source / fumée`, pinceau réglable, vue thermique, pause & pas à pas,
+sauvegarde de mondes.
 
 ### Ce qui se passe quand on mélange
 
@@ -18,9 +20,19 @@ source / fumée`, pinceau réglable, pause & pas à pas, sauvegarde de mondes.
 | Nanites | Dévorent la matière et se répliquent, puis meurent de vieillesse. Seul le verre les arrête : on peut construire un bocal. |
 | Source | Émet en continu la dernière matière sélectionnée avant elle (stockée dans `life`). |
 | Feu | `flammable` est une probabilité **par tick et par flamme voisine** : la poudre part instantanément (1), l'huile s'embrase (0,6), la graine crépite (0,05), le bois met une seconde à prendre (0,02). C'est le seul réglage de vitesse de propagation. |
+| Mercure | Densité 13 : passe sous tout, même sous la pierre en train de couler. Gèle en métal à -39 °C, s'évapore à 357. |
+| Cire & bougie | La cire fond à 60 °C, coule, puis redurcit sous 55 : on peut faire couler une bougie. La bougie, elle, s'allume au contact d'une flamme (`life` = mèche allumée), réalimente sa flamme indéfiniment, et l'eau la souffle. |
+| Neige | Poudre froide (`heat` -12) plus légère que l'eau : elle s'amoncelle, flotte, et fond dès 2 °C. |
+| Boue | Liquide lent et lourd qui engloutit, et sèche en sable au-dessus de 60 °C. |
+| Braise | Le bois brûlé passe une fois sur deux par la braise au lieu de disparaître : le foyer continue de chauffer (350 °C) et de rallumer bien après la flamme. |
+| Électricité | L'étincelle ne circule que dans le métal, à la vitesse d'un tick. Elle enflamme et fait sauter le TNT à l'autre bout du fil. Le métal traversé se repose 8 ticks, sinon l'étincelle rebondirait sans fin. Une `source` réglée sur l'étincelle donne une horloge. |
+| Vue thermique | Case à cocher ou touche `h` : affiche `temp` au lieu de la matière, bleu pour le froid, corps noir jusqu'au blanc à 1200 °C. |
 | Vitesse | Curseur ×0,25 à ×4 : nombre de ticks de simulation par frame, avec reliquat pour le ralenti et plafond à 8 ticks pour ne pas s'enliser. |
 | Vent & gravité | Un curseur biaise la dérive horizontale, la touche `g` retourne la gravité. |
-| Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours). Clic maintenu = dépôt continu, même sans bouger la souris. |
+| Figer | L'outil « Figer » (touche `f`) immobilise la matière sous le pinceau : elle garde son identité et sa couleur (tramée en damier), mais aucune règle ne s'applique plus et rien ne peut la pousser. « Libérer » la rend à la gravité, repeindre par-dessus aussi. De quoi bâtir une structure en sable ou suspendre une cascade. |
+| Ligne & remplissage | `Maj` + clic trace une ligne droite depuis le dernier point posé, clic droit remplit toute la poche de matière identique sous le curseur. |
+| Défis | Quatre scènes prêtes à jouer (Débâcle, Mèche lente, Court-circuit, Jardin) avec leur objectif et sa détection de victoire, construites en code dans `challenges.ts`. |
+| Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours), case « Gomme sélective » : la gomme ne retire que la dernière matière choisie. Clic maintenu = dépôt continu, même sans bouger la souris. |
 | Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. Ouvrir le lien recharge la scène. |
 
 ## Stack

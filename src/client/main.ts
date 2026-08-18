@@ -3,6 +3,7 @@ import { AMBIENT, Engine } from "./sim/engine.ts";
 import { Renderer } from "./sim/render";
 import { decode, encode } from "./sim/codec";
 import { EMPTY, MATERIALS, PALETTE, SAND, SOURCE, STONE, WATER, type MaterialId } from "./sim/materials.ts";
+import { CHALLENGES, type Challenge } from "./challenges.ts";
 
 const WIDTH = 320;
 const HEIGHT = 180;
@@ -51,6 +52,8 @@ addEventListener("keydown", (e) => {
   if (!Number.isNaN(n) && PALETTE[n - 1] !== undefined) select(PALETTE[n - 1]);
   if (e.key === "0") select(EMPTY);
   if (e.key === "g") flipGravity();
+  if (e.key === "f") toolInput.value = toolInput.value === "paint" ? "freeze" : "paint";
+  if (e.key === "h") { heatmapInput.checked = !heatmapInput.checked; renderer.heatmap = heatmapInput.checked; }
 });
 
 /* ------------------------------------------------------------------ souris */
@@ -68,38 +71,55 @@ function toCell(e: PointerEvent): { x: number; y: number } {
 
 /** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */
 function paintAt(x: number, y: number): void {
+  if (toolInput.value !== "paint") {
+    engine.setFrozen(x, y, brush, toolInput.value === "freeze");
+    return;
+  }
   const kind = MATERIALS[current].kind;
   const density = kind === "liquid" || kind === "gas" ? 0.35 : 1;
-  engine.paint(x, y, brush, current, density, !keepInput.checked);
+  // Gomme sélective : on n'efface que la dernière matière choisie avant la gomme.
+  const only = current === EMPTY && onlyInput.checked ? engine.emit : undefined;
+  engine.paint(x, y, brush, current, density, !keepInput.checked, only);
 }
 
+/** Trace un segment de cellules (geste rapide, ou ligne droite au Maj). */
+function strokeTo(from: { x: number; y: number }, to: { x: number; y: number }): void {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y));
+  for (let s = 1; s < steps; s++) {
+    paintAt(
+      Math.round(from.x + ((to.x - from.x) * s) / steps),
+      Math.round(from.y + ((to.y - from.y) * s) / steps),
+    );
+  }
+  paintAt(to.x, to.y);
+}
+
+// Le clic droit sert au remplissage : pas de menu contextuel sur le bac.
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
 canvas.addEventListener("pointerdown", (e) => {
-  painting = true;
-  canvas.setPointerCapture(e.pointerId);
   const p = toCell(e);
+  if (e.button === 2) { engine.fill(p.x, p.y, current); return; }
+  canvas.setPointerCapture(e.pointerId);
+  painting = true;
+  // Maj : on relie le dernier point posé, même si le pinceau a été relâché entre-temps.
+  if (e.shiftKey && last) strokeTo(last, p);
+  else paintAt(p.x, p.y);
   last = p;
-  paintAt(p.x, p.y);
 });
 
 canvas.addEventListener("pointermove", (e) => {
   if (!painting) return;
   const p = toCell(e);
   // Interpolation : à 60 fps un geste rapide saute des dizaines de cellules.
-  if (last) {
-    const steps = Math.max(Math.abs(p.x - last.x), Math.abs(p.y - last.y));
-    for (let s = 1; s < steps; s++) {
-      paintAt(
-        Math.round(last.x + ((p.x - last.x) * s) / steps),
-        Math.round(last.y + ((p.y - last.y) * s) / steps),
-      );
-    }
-  }
-  paintAt(p.x, p.y);
+  if (last) strokeTo(last, p);
+  else paintAt(p.x, p.y);
   last = p;
 });
 
 for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
-  canvas.addEventListener(type, () => { painting = false; last = null; });
+  // `last` est conservé : c'est l'ancre de la ligne droite au Maj.
+  canvas.addEventListener(type, () => (painting = false));
 }
 
 /* ----------------------------------------------------------------- réglages */
@@ -112,6 +132,8 @@ brushInput.addEventListener("input", () => {
 });
 
 const keepInput = document.querySelector<HTMLInputElement>("#keep")!;
+const onlyInput = document.querySelector<HTMLInputElement>("#only")!;
+const toolInput = document.querySelector<HTMLSelectElement>("#tool")!;
 
 /** Ticks de simulation par frame : 0,25 (ralenti) à 4 (accéléré). */
 let speed = 1;
@@ -128,6 +150,9 @@ windInput.addEventListener("input", () => {
   engine.wind = Number(windInput.value) / 10;
   windValue.value = windInput.value;
 });
+
+const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
+heatmapInput.addEventListener("change", () => (renderer.heatmap = heatmapInput.checked));
 
 const gravityButton = document.querySelector<HTMLButtonElement>("#gravity")!;
 function flipGravity(): void {
@@ -226,6 +251,25 @@ document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", a
 document.querySelector<HTMLButtonElement>("#refresh")!.addEventListener("click", () => void listWorlds());
 void listWorlds();
 
+/* -------------------------------------------------------------------- défis */
+
+const goalEl = document.querySelector<HTMLParagraphElement>("#goal")!;
+const challengesEl = document.querySelector<HTMLDivElement>("#challenges")!;
+let challenge: Challenge | null = null;
+
+for (const c of CHALLENGES) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = c.name;
+  button.addEventListener("click", () => {
+    engine.clear();
+    c.build(engine);
+    challenge = c;
+    goalEl.textContent = `${c.name} — ${c.goal}`;
+  });
+  challengesEl.append(button);
+}
+
 /* -------------------------------------------------------------------- scène */
 
 /** Une petite cuvette de pierre avec du sable et de l'eau, pour ne pas démarrer devant du vide. */
@@ -272,6 +316,10 @@ function frame(now: number): void {
     let filled = 0;
     for (let i = 0; i < engine.cells.length; i++) if (engine.cells[i] !== EMPTY) filled++;
     filledEl.textContent = filled.toLocaleString("fr-FR");
+    if (challenge && challenge.won(engine)) {
+      goalEl.textContent = `${challenge.name} — réussi !`;
+      challenge = null;
+    }
     frames = 0;
     lastReport = now;
   }

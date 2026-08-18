@@ -125,7 +125,18 @@ canvas {
 .row > span { color: var(--muted); font-size: 0.82rem; }
 .row input[type="range"] { width: 100%; accent-color: var(--accent); }
 .row output { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
-.row button { grid-column: 2 / -1; }
+.row button, .row select { grid-column: 2 / -1; }
+
+select {
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #1b2030;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
 
 .check {
   display: grid;
@@ -163,4 +174,12 @@ button:hover { border-color: #39405a; }
 @media (max-width: 760px) {
   main { grid-template-columns: 1fr; }
   .panel { border-left: none; border-top: 1px solid var(--line); }
+}
+
+kbd {
+  border: 1px solid #3a3f4c;
+  border-radius: 3px;
+  padding: 0 0.25em;
+  font: inherit;
+  font-size: 0.9em;
 }

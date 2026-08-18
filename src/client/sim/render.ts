@@ -1,5 +1,5 @@
 import { EMPTY, MATERIALS } from "./materials";
-import type { Engine } from "./engine";
+import { AMBIENT, type Engine } from "./engine";
 
 /**
  * Rendu 1 cellule = 1 pixel dans un ImageData, puis mise à l'échelle par le CSS
@@ -12,6 +12,8 @@ export class Renderer {
   private readonly buffer: Uint32Array;
   /** Couleur de base pré-calculée par matériau, au format 0xAABBGGRR. */
   private readonly palette = new Uint32Array(256);
+  /** Affiche `temp` au lieu de la matière. */
+  heatmap = false;
 
   constructor(canvas: HTMLCanvasElement, private readonly engine: Engine) {
     canvas.width = engine.width;
@@ -29,7 +31,8 @@ export class Renderer {
   }
 
   draw(): void {
-    const { cells, noise } = this.engine;
+    if (this.heatmap) { this.drawHeat(); return; }
+    const { cells, noise, frozen, width } = this.engine;
     const { buffer, palette } = this;
     for (let i = 0; i < cells.length; i++) {
       const id = cells[i];
@@ -37,7 +40,10 @@ export class Renderer {
       if (id === EMPTY) { buffer[i] = base; continue; }
       // Le bruit par cellule décale les 3 canaux d'un même delta : la teinte
       // reste identique, seule la luminosité varie.
-      const d = (noise[i] * MATERIALS[id].noise) >> 7;
+      // Une cellule figée est tramée en damier, pour la distinguer au premier coup d'œil.
+      const d = frozen[i]
+        ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
+        : (noise[i] * MATERIALS[id].noise) >> 7;
       const r = clamp((base & 0xff) + d);
       const g = clamp(((base >> 8) & 0xff) + d);
       const b = clamp(((base >> 16) & 0xff) + d);
@@ -45,6 +51,31 @@ export class Renderer {
     }
     this.ctx.putImageData(this.image, 0, 0);
   }
+
+  /** Bleu sous l'ambiante, puis corps noir : rouge → jaune → blanc jusqu'à 1200 °C. */
+  private drawHeat(): void {
+    const { temp } = this.engine;
+    const { buffer } = this;
+    for (let i = 0; i < temp.length; i++) {
+      const t = temp[i];
+      let r: number, g: number, b: number;
+      if (t < AMBIENT) {
+        const cold = clamp01((AMBIENT - t) / 60);
+        r = 20 * (1 - cold); g = 40 + 80 * cold; b = 60 + 195 * cold;
+      } else {
+        const u = clamp01((t - AMBIENT) / 1180);
+        r = 30 + 225 * clamp01(u * 3);
+        g = 255 * clamp01(u * 3 - 1);
+        b = 255 * clamp01(u * 3 - 2);
+      }
+      buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
+    }
+    this.ctx.putImageData(this.image, 0, 0);
+  }
+}
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
 function clamp(v: number): number {

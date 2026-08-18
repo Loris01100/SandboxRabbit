@@ -27,7 +27,7 @@ Un seul Worker Cloudflare sert le site statique **et** l'API (binding `ASSETS`, 
 - [src/worker/index.ts](src/worker/index.ts) — routes Hono `/api/*`, puis fallback `app.get("*")` vers `env.ASSETS`. L'interface `Env` y est définie ; `DB` et `AI` sont optionnels car leurs bindings sont commentés dans [wrangler.jsonc](wrangler.jsonc).
 - [src/worker/store.ts](src/worker/store.ts) — `createStore(env)` renvoie l'implémentation D1 si `env.DB` existe, sinon une `Map` en mémoire (bouchon : vit dans l'isolate, non partagé). Activer D1 = créer la base, décommenter le bloc `d1_databases`, appliquer [migrations/0001_worlds.sql](migrations/0001_worlds.sql) ; aucun code à changer.
 - [src/client/sim/engine.ts](src/client/sim/engine.ts) — l'automate cellulaire. État = tableaux plats (`cells`, `life`, `clock`, `noise`), pas d'objets par cellule : c'est délibéré, pour pouvoir remplacer l'intérieur d'`Engine` par un module Rust/WASM en gardant l'interface (`step`, `paint`, `cells`).
-- [src/client/sim/render.ts](src/client/sim/render.ts) — 1 cellule = 1 pixel dans un `ImageData`, un seul `putImageData` par frame, mise à l'échelle via CSS `image-rendering: pixelated`. Ne pas introduire de dessin par cellule.
+- [src/client/sim/render.ts](src/client/sim/render.ts) — 1 cellule = 1 pixel dans un `ImageData`, un seul `putImageData` par frame, mise à l'échelle via CSS `image-rendering: pixelated`. Ne pas introduire de dessin par cellule. `renderer.heatmap` bascule sur un rendu de `temp` (même boucle, autre palette).
 - [src/client/sim/codec.ts](src/client/sim/codec.ts) — RLE + base64 ; format partagé avec la colonne `data` de D1. Toute modification du codec casse les mondes déjà sauvegardés.
 - [src/client/main.ts](src/client/main.ts) — DOM impératif, aucun framework UI. Les éléments viennent de [index.html](index.html) via `querySelector` non-null (`!`) : ajouter un contrôle = ajouter l'élément dans le HTML **et** son câblage ici. Le panneau est fait de `<details class="group">` repliables (natif, aucun JS) ; un réglage = une `.row` (libellé / contrôle / valeur, colonnes alignées) ou une `.check` pour une case à cocher.
 
@@ -35,10 +35,16 @@ Un seul Worker Cloudflare sert le site statique **et** l'API (binding `ASSETS`, 
 
 - `temp` (°C) est diffusé à chaque tick par `thermal()` ; `heat` tire la cellule vers sa température (feu, lave, glace) sans l'imposer, `boil`/`freeze` déclenchent les changements d'état. Ajouter un changement d'état = deux champs dans `MATERIALS`, aucune règle dans `Engine`.
 - `gravity` (±1) et `wind` (-1..1) sont lus par les règles de mouvement : toute nouvelle règle de déplacement doit passer par `y + this.gravity` et `drift()`.
-- `life` sert de vie pour les gaz **et** de charge utile pour `SOURCE` (la matière émise) : ne pas le réinitialiser à l'aveugle.
+- `life` sert de vie pour les gaz, de charge utile pour `SOURCE` (la matière émise), de mèche allumée pour `CANDLE` et de repos pour `METAL` : ne pas le réinitialiser à l'aveugle. C'est un `Uint8Array`, donc `life` ≤ 250 dans `MATERIALS`.
+- `SPARK` ne se propage que dans `METAL`, et le métal traversé garde `RECOVERY` ticks de repos : sans ça l'étincelle repart en arrière et le circuit ne s'éteint jamais.
 - Le balayage de `step()` part du bas et alterne le sens en x selon `parity` ; `clock` empêche une cellule de bouger deux fois dans le même tick. Toucher à cet ordre introduit des dérives visibles de la matière.
+- `frozen` (1 par cellule) court-circuite tout : `step()` saute la cellule et `tryMove()` refuse de s'y déplacer. `set()` la remet à 0, donc repeindre libère.
 - Hors grille, `get()` renvoie `STONE` (mur implicite) — les règles n'ont pas besoin de tester les bords.
 - `MATERIALS` est indexé par id numérique, et `PALETTE` fixe l'ordre de la barre d'outils *et* les raccourcis clavier 1..9 / 0.
+
+### Ajouter un défi
+
+Une entrée dans `CHALLENGES` ([src/client/challenges.ts](src/client/challenges.ts)) : `build(engine)` construit la scène en code (pas de monde encodé), `won(engine)` lit la grille. Les boutons et la détection de victoire (une fois par demi-seconde, dans la boucle de rendu) sont génériques.
 
 ### Ajouter une matière
 

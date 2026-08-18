@@ -25,6 +25,15 @@ export const SEED = 17;
 export const NANITE = 18;
 export const SOURCE = 19;
 export const GLASS = 20;
+export const MERCURY = 21;
+export const WAX = 22;
+export const MOLTEN_WAX = 23;
+export const CANDLE = 24;
+export const SNOW = 25;
+export const MUD = 26;
+export const EMBER = 27;
+export const METAL = 28;
+export const SPARK = 29;
 
 export type MaterialId = number;
 
@@ -52,7 +61,7 @@ export interface Material {
    * (poudre), 0,02 = une bûche qui met une seconde à s'embraser.
    */
   flammable?: number;
-  /** Durée de vie en ticks (feu, fumée, vapeur). 0 = éternel. */
+  /** Durée de vie en ticks (feu, fumée, vapeur), 250 au maximum (`life` est un octet). 0 = éternel. */
   life?: number;
   /** Étalement horizontal des liquides, en cellules par tick. */
   spread?: number;
@@ -90,10 +99,20 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [NANITE]: { id: NANITE, name: "Nanites", kind: "powder", density: 6, color: [190, 190, 200], noise: 30, life: 200, hint: "Dévore la matière et se répand ; seul le verre l'arrête" },
   [SOURCE]: { id: SOURCE, name: "Source", kind: "static", density: 10, color: [130, 96, 190], noise: 10, hint: "Émet en continu la dernière matière choisie" },
   [GLASS]: { id: GLASS, name: "Verre", kind: "static", density: 9, color: [178, 206, 214], noise: 6, hint: "Sable vitrifié : résiste aux nanites" },
+  [MERCURY]: { id: MERCURY, name: "Mercure", kind: "liquid", density: 13, color: [198, 204, 216], noise: 24, spread: 2, freeze: { at: -39, into: METAL }, boil: { at: 357, into: SMOKE }, hint: "Le plus lourd : passe sous tout, gèle en métal à -39 °C" },
+  [WAX]: { id: WAX, name: "Cire", kind: "static", density: 5, color: [236, 224, 188], noise: 8, flammable: 0.01, boil: { at: 60, into: MOLTEN_WAX }, hint: "Fond dès 60 °C" },
+  [MOLTEN_WAX]: { id: MOLTEN_WAX, name: "Cire fondue", kind: "liquid", density: 5, color: [240, 212, 140], noise: 10, spread: 2, freeze: { at: 55, into: WAX }, hint: "Coule, puis durcit en refroidissant" },
+  [CANDLE]: { id: CANDLE, name: "Bougie", kind: "static", density: 5, color: [206, 176, 120], noise: 8, hint: "S'allume au contact d'une flamme et brûle sans fin ; l'eau la souffle" },
+  [SNOW]: { id: SNOW, name: "Neige", kind: "powder", density: 2, color: [228, 240, 250], noise: 12, heat: -12, boil: { at: 2, into: WATER }, hint: "S'amoncelle, flotte sur l'eau, fond à la moindre chaleur" },
+  [MUD]: { id: MUD, name: "Boue", kind: "liquid", density: 7, color: [92, 68, 46], noise: 18, spread: 1, boil: { at: 60, into: SAND }, hint: "Coule lentement, engloutit, sèche en sable" },
+  [EMBER]: { id: EMBER, name: "Braise", kind: "powder", density: 6, color: [188, 62, 22], noise: 40, life: 250, heat: 350, hint: "Ce que laisse le bois brûlé : chauffe longtemps après la flamme" },
+  [METAL]: { id: METAL, name: "Métal", kind: "static", density: 9, color: [158, 168, 184], noise: 8, hint: "Conduit l'étincelle, et rien d'autre" },
+  [SPARK]: { id: SPARK, name: "Étincelle", kind: "static", density: 1, color: [255, 240, 120], noise: 30, life: 3, hint: "Court dans le métal, enflamme et fait sauter ce qu'elle touche" },
 };
 
 /** Ordre d'affichage dans la barre d'outils (les 9 premiers = raccourcis 1..9). */
 export const PALETTE: MaterialId[] = [
   SAND, WATER, STONE, WOOD, OIL, ACID, LAVA, PLANT, FIRE,
-  ICE, SALT, SALTWATER, GUNPOWDER, TNT, SEED, NANITE, GLASS, SOURCE, SMOKE, EMPTY,
+  ICE, SALT, SALTWATER, GUNPOWDER, TNT, SEED, NANITE, GLASS,
+  MERCURY, WAX, CANDLE, SNOW, MUD, EMBER, METAL, SPARK, SOURCE, SMOKE, EMPTY,
 ];

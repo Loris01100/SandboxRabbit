@@ -1,7 +1,7 @@
 import {
-  ACID, EMPTY, FIRE, GLASS, ICE, LAVA, MATERIALS, NANITE, PLANT, SALT, SALTWATER,
-  SAND, SEED, SMOKE, SOURCE, STEAM, STONE, TNT, WATER, WOOD,
-  type MaterialId,
+  ACID, CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL, NANITE,
+  PLANT, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM, STONE, TNT,
+  WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
 /** Température de l'air au repos, en °C. */
@@ -10,6 +10,8 @@ export const AMBIENT = 20;
 const CONDUCTION = 0.16;
 /** Retour vers l'ambiante par tick (le bac à sable perd sa chaleur). */
 const COOLING = 0.02;
+/** Ticks pendant lesquels un métal qui vient de conduire refuse l'étincelle. */
+const RECOVERY = 8;
 
 /**
  * Automate cellulaire type « falling sand ».
@@ -21,6 +23,7 @@ const COOLING = 0.02;
  *  - `temp`  : température en °C, diffusée à chaque tick
  *  - `clock` : parité de la frame où la cellule a déjà bougé (évite qu'une
  *              cellule descende plusieurs fois dans le même tick)
+ *  - `frozen`: cellules figées à la main, que la simulation saute
  *
  * Le balayage part du bas et alterne le sens en x d'une frame à l'autre, sinon
  * la matière dérive visiblement vers la gauche.
@@ -33,6 +36,8 @@ export class Engine {
   readonly temp: Float32Array;
   private readonly tempNext: Float32Array;
   private readonly clock: Uint8Array;
+  /** 1 = cellule figée : elle ne bouge plus et rien ne peut la pousser. */
+  readonly frozen: Uint8Array;
   private parity = 0;
   /** Bruit fixe par cellule : donne du grain sans scintiller. */
   readonly noise: Int8Array;
@@ -52,6 +57,7 @@ export class Engine {
     this.temp = new Float32Array(n).fill(AMBIENT);
     this.tempNext = new Float32Array(n);
     this.clock = new Uint8Array(n);
+    this.frozen = new Uint8Array(n);
     this.noise = new Int8Array(n);
     for (let i = 0; i < n; i++) this.noise[i] = ((Math.random() * 255) | 0) - 128;
   }
@@ -72,6 +78,7 @@ export class Engine {
     if (!this.inBounds(x, y)) return;
     const i = this.index(x, y);
     this.cells[i] = id;
+    this.frozen[i] = 0; // repeindre par-dessus libère la cellule
     // Une source garde dans `life` la matière qu'elle crache.
     this.life[i] = id === SOURCE ? this.emit : (MATERIALS[id].life ?? 0);
     const spawn = MATERIALS[id].spawn ?? MATERIALS[id].heat;
@@ -81,6 +88,7 @@ export class Engine {
   clear(): void {
     this.cells.fill(EMPTY);
     this.life.fill(0);
+    this.frozen.fill(0);
     this.temp.fill(AMBIENT);
   }
 
@@ -88,8 +96,9 @@ export class Engine {
    * Dépose un disque de matière (pinceau).
    * `overwrite = false` : on ne peint que le vide, la matière déjà là est
    * préservée. La gomme, elle, efface toujours.
+   * `only` : ne touche que les cellules de cette matière (gomme sélective).
    */
-  paint(cx: number, cy: number, radius: number, id: MaterialId, density = 1, overwrite = true): void {
+  paint(cx: number, cy: number, radius: number, id: MaterialId, density = 1, overwrite = true, only?: MaterialId): void {
     const r2 = radius * radius;
     for (let y = cy - radius; y <= cy + radius; y++) {
       for (let x = cx - radius; x <= cx + radius; x++) {
@@ -97,9 +106,47 @@ export class Engine {
         if (dx * dx + dy * dy > r2) continue;
         if (!this.inBounds(x, y)) continue;
         if (density < 1 && Math.random() > density) continue;
-        if (!overwrite && id !== EMPTY && this.cells[this.index(x, y)] !== EMPTY) continue;
+        const at = this.cells[this.index(x, y)];
+        if (only !== undefined && at !== only) continue;
+        if (!overwrite && id !== EMPTY && at !== EMPTY) continue;
         this.set(x, y, id);
       }
+    }
+  }
+
+  /** Fige (ou libère) un disque : la matière garde son identité mais ne bouge plus. */
+  setFrozen(cx: number, cy: number, radius: number, on: boolean): void {
+    const r2 = radius * radius;
+    for (let y = cy - radius; y <= cy + radius; y++) {
+      for (let x = cx - radius; x <= cx + radius; x++) {
+        const dx = x - cx, dy = y - cy;
+        if (dx * dx + dy * dy > r2 || !this.inBounds(x, y)) continue;
+        const i = this.index(x, y);
+        if (this.cells[i] !== EMPTY) this.frozen[i] = on ? 1 : 0;
+      }
+    }
+  }
+
+  /**
+   * Remplit la poche de matière identique sous (x,y) — clic droit.
+   * Parcours en largeur avec une pile de scalaires : pas d'objets, la poche
+   * peut faire toute la grille.
+   */
+  fill(x: number, y: number, id: MaterialId): void {
+    if (!this.inBounds(x, y)) return;
+    const start = this.index(x, y);
+    const from = this.cells[start];
+    if (from === id) return;
+    const stack = [start];
+    while (stack.length > 0) {
+      const i = stack.pop()!;
+      if (this.cells[i] !== from || this.frozen[i]) continue;
+      this.set(i % this.width, (i / this.width) | 0, id);
+      const cx = i % this.width;
+      if (cx > 0) stack.push(i - 1);
+      if (cx < this.width - 1) stack.push(i + 1);
+      if (i >= this.width) stack.push(i - this.width);
+      if (i < this.cells.length - this.width) stack.push(i + this.width);
     }
   }
 
@@ -123,6 +170,7 @@ export class Engine {
   private tryMove(from: number, x: number, y: number, id: MaterialId): boolean {
     if (!this.inBounds(x, y)) return false;
     const to = this.index(x, y);
+    if (this.frozen[to]) return false;
     if (!this.displaces(id, this.cells[to])) return false;
     this.swap(from, to);
     return true;
@@ -145,6 +193,7 @@ export class Engine {
         const i = y * w + x;
         const id = this.cells[i];
         if (id === EMPTY) continue;
+        if (this.frozen[i]) continue; // figée : aucune règle ne s'applique
         if (this.clock[i] === this.parity) continue;
         this.clock[i] = this.parity;
         this.update(i, x, y, id);
@@ -164,6 +213,11 @@ export class Engine {
       case SEED: this.updateSeed(i, x, y); return;
       case NANITE: this.updateNanite(i, x, y); return;
       case SOURCE: this.updateSource(i, x, y); return;
+      case CANDLE: this.updateCandle(i, x, y); return;
+      case EMBER: this.updateEmber(i, x, y); return;
+      case SPARK: this.updateSpark(i, x, y); return;
+      // Le métal ne fait que sortir de sa période de repos.
+      case METAL: if (this.life[i] > 0) this.life[i]--; return;
     }
     switch (MATERIALS[id].kind) {
       case "powder": this.updatePowder(i, x, y, id); return;
@@ -254,8 +308,11 @@ export class Engine {
   /** Met le feu aux voisins inflammables. */
   private ignite(x: number, y: number, boost = 1): void {
     for (const [nx, ny] of this.neighbors(x, y)) {
-      const chance = MATERIALS[this.get(nx, ny)]?.flammable;
-      if (chance && Math.random() < chance * boost) this.set(nx, ny, FIRE);
+      const n = this.get(nx, ny);
+      const chance = MATERIALS[n]?.flammable;
+      if (!chance || Math.random() > chance * boost) continue;
+      // Le bois ne disparaît pas en fumée : il passe par la braise.
+      this.set(nx, ny, n === WOOD && Math.random() < 0.5 ? EMBER : FIRE);
     }
   }
 
@@ -341,6 +398,46 @@ export class Engine {
     const id = this.life[i] || WATER;
     const dy = MATERIALS[id].kind === "gas" ? -this.gravity : this.gravity;
     if (this.get(x, y + dy) === EMPTY) this.set(x, y + dy, id);
+  }
+
+  /** Bougie : `life` sert de mèche allumée. Une fois prise, elle réalimente sa flamme. */
+  private updateCandle(i: number, x: number, y: number): void {
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      const n = this.get(nx, ny);
+      if (n === FIRE || n === LAVA || n === EMBER || n === SPARK) this.life[i] = 1;
+      else if (n === WATER || n === SALTWATER) this.life[i] = 0;
+    }
+    const up = y - this.gravity;
+    if (this.life[i] === 1 && this.get(x, up) === EMPTY) this.set(x, up, FIRE);
+  }
+
+  /** Braise : plus de flamme, mais ça chauffe (via `heat`) et ça peut rallumer. */
+  private updateEmber(i: number, x: number, y: number): void {
+    if (this.decay(i, EMBER, SMOKE)) return;
+    this.ignite(x, y, 0.5);
+    this.updatePowder(i, x, y, EMBER);
+  }
+
+  /**
+   * Étincelle : ne circule que dans le métal, allume et fait sauter le reste.
+   * Le métal traversé se repose `RECOVERY` ticks, sinon l'étincelle repart
+   * aussitôt en arrière et le circuit ne s'éteint jamais.
+   */
+  private updateSpark(i: number, x: number, y: number): void {
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      if (!this.inBounds(nx, ny)) continue;
+      const j = this.index(nx, ny);
+      const n = this.cells[j];
+      if (n === METAL) {
+        if (this.life[j] === 0) { this.cells[j] = SPARK; this.life[j] = MATERIALS[SPARK].life!; }
+      } else if (n === TNT) {
+        this.explode(nx, ny);
+      }
+    }
+    this.ignite(x, y, 3);
+    if (--this.life[i] > 0) return;
+    this.cells[i] = METAL;
+    this.life[i] = RECOVERY;
   }
 
   /**
