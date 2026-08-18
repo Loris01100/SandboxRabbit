@@ -40,6 +40,11 @@ export const MOLTEN_GLASS = 32;
 export const BATTERY = 33;
 export const SWITCH = 34;
 export const NITROGEN = 35;
+export const NITRO = 36;
+export const C4 = 37;
+export const FIREDAMP = 38;
+export const MINE = 39;
+export const THERMITE = 40;
 
 export type MaterialId = number;
 
@@ -86,7 +91,7 @@ export interface Material {
 export const MATERIALS: Record<MaterialId, Material> = {
   [EMPTY]: { id: EMPTY, name: "Gomme", kind: "empty", density: 0, color: [12, 14, 20], noise: 0, hint: "Efface" },
   [SAND]: { id: SAND, name: "Sable", kind: "powder", density: 6, color: [214, 180, 106], noise: 18, boil: { at: 450, into: GLASS }, hint: "Coule en tas, vitrifie au contact de la lave" },
-  [STONE]: { id: STONE, name: "Pierre", kind: "static", density: 9, color: [122, 124, 132], noise: 14, hint: "Immobile, fond dans la lave" },
+  [STONE]: { id: STONE, name: "Pierre", kind: "static", density: 9, color: [122, 124, 132], noise: 14, boil: { at: 1400, into: LAVA }, hint: "Immobile ; il faut passer 1400 °C pour la liquéfier" },
   [WOOD]: { id: WOOD, name: "Bois", kind: "static", density: 8, color: [110, 74, 43], noise: 12, flammable: 0.02, hint: "Immobile, brûle lentement" },
   [WATER]: { id: WATER, name: "Eau", kind: "liquid", density: 4, color: [56, 108, 176], noise: 10, spread: 4, boil: { at: 100, into: STEAM }, freeze: { at: 0, into: ICE }, hint: "S'étale, éteint le feu, gèle à 0 °C" },
   [OIL]: { id: OIL, name: "Huile", kind: "liquid", density: 3, color: [78, 62, 38], noise: 8, spread: 3, flammable: 0.6, boil: { at: 250, into: FIRE }, hint: "Flotte sur l'eau, s'enflamme toute seule si ça chauffe" },
@@ -120,6 +125,11 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [BATTERY]: { id: BATTERY, name: "Pile", kind: "static", density: 9, color: [86, 196, 132], noise: 8, hint: "Envoie une étincelle dans le métal voisin, sans fin" },
   [SWITCH]: { id: SWITCH, name: "Interrupteur", kind: "static", density: 9, color: [176, 132, 60], noise: 8, hint: "Cliquez dessus pour ouvrir ou fermer le circuit" },
   [NITROGEN]: { id: NITROGEN, name: "Azote liquide", kind: "liquid", density: 1, color: [214, 240, 250], noise: 10, spread: 2, heat: -190, boil: { at: -60, into: STEAM }, hint: "À -190 °C : gèle tout ce qu'il touche et s'évapore en buée" },
+  [NITRO]: { id: NITRO, name: "Nitroglycérine", kind: "liquid", density: 4, color: [208, 196, 116], noise: 8, spread: 1, hint: "Huile instable : la poser ne risque rien, la faire tomber tout casser" },
+  [C4]: { id: C4, name: "C4", kind: "static", density: 8, color: [232, 228, 212], noise: 6, hint: "Insensible au feu : ne saute que sous l'étincelle, et entraîne ses voisins" },
+  [FIREDAMP]: { id: FIREDAMP, name: "Grisou", kind: "gas", density: 1, color: [128, 172, 126], noise: 14, life: 250, flammable: 1, hint: "Gaz de mine : s'accumule au plafond et part d'un seul coup" },
+  [MINE]: { id: MINE, name: "Mine", kind: "static", density: 8, color: [104, 116, 96], noise: 8, hint: "Saute sous le poids de ce qui coule ; on peut la murer sans risque" },
+  [THERMITE]: { id: THERMITE, name: "Thermite", kind: "powder", density: 8, color: [124, 112, 102], noise: 20, hint: "Ne souffle rien : brûle à 2800 °C et perce la pierre" },
 };
 
 /**
@@ -129,11 +139,12 @@ export const MATERIALS: Record<MaterialId, Material> = {
 export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
   { name: "Terrain", ids: [SAND, STONE, WOOD, GLASS, MUD, SALT] },
   { name: "Liquides", ids: [WATER, SALTWATER, OIL, TAR, ALCOHOL, ACID, MERCURY, MOLTEN_WAX, MOLTEN_GLASS] },
-  { name: "Inflammable", ids: [FIRE, EMBER, LAVA, GUNPOWDER, TNT, WAX, CANDLE] },
+  { name: "Inflammable", ids: [FIRE, EMBER, LAVA, WAX, CANDLE] },
+  { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, THERMITE] },
   { name: "Froid", ids: [ICE, SNOW, NITROGEN] },
   { name: "Vivant", ids: [SEED, PLANT, NANITE] },
   { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK] },
-  { name: "Gaz", ids: [SMOKE, STEAM] },
+  { name: "Gaz", ids: [SMOKE, STEAM, FIREDAMP] },
   { name: "Outils", ids: [SOURCE, EMPTY] },
 ];
 

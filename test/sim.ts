@@ -7,7 +7,7 @@ import { Engine } from "../src/client/sim/engine.ts";
 import { decode, encode } from "../src/client/sim/codec.ts";
 import { CHALLENGES } from "../src/client/challenges.ts";
 import {
-  ALCOHOL, BATTERY, CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MERCURY, METAL,
+  ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
   SNOW, SOURCE, SPARK, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
@@ -419,6 +419,86 @@ function count(e: Engine, id: MaterialId): number {
   // Quelques cellules peuvent survivre, piégées dans le froid qu'elles ont créé.
   for (let t = 0; t < 400; t++) e.step();
   assert.ok(count(e, NITROGEN) < 8, "puis il s'évapore presque entièrement");
+}
+
+// Nitroglycérine : posée elle dort, lâchée de trois cellules elle détonne.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) e.set(x, 30, STONE);
+  for (let x = 20; x < 26; x++) e.set(x, 29, WOOD);
+  for (let x = 20; x < 26; x++) e.set(x, 28, NITRO); // déposée à même le bois
+  for (let t = 0; t < 60; t++) e.step();
+  assert.equal(count(e, WOOD), 6, "posée, la nitro ne fait rien");
+
+  const drop = engine();
+  for (let x = 0; x < W; x++) drop.set(x, 30, STONE);
+  for (let x = 20; x < 26; x++) drop.set(x, 29, WOOD);
+  for (let x = 21; x < 25; x++) drop.set(x, 10, NITRO); // vingt cellules plus haut
+  for (let t = 0; t < 60; t++) drop.step();
+  assert.equal(count(drop, WOOD), 0, "lâchée, elle emporte tout à l'impact");
+}
+
+// C4 : insensible au feu, il n'obéit qu'à l'étincelle — et le mur part en entier.
+{
+  const e = engine();
+  for (let x = 20; x < 30; x++) e.set(x, 20, C4);
+  for (let x = 20; x < 30; x++) e.set(x, 19, FIRE);
+  for (let t = 0; t < 60; t++) e.step();
+  assert.equal(count(e, C4), 10, "le feu ne déclenche pas le C4");
+
+  e.set(19, 20, METAL);
+  e.set(18, 20, SPARK);
+  for (let t = 0; t < 60; t++) e.step();
+  // Une seule charge reçoit l'étincelle : les autres sont amorcées de proche en proche.
+  assert.equal(count(e, C4), 0, "l'étincelle fait sauter le mur entier");
+}
+
+// Grisou : la nappe entière s'enflamme, pas seulement la cellule touchée.
+{
+  const e = engine();
+  for (let x = 10; x < 50; x++) for (let y = 10; y < 14; y++) e.set(x, y, FIREDAMP);
+  assert.equal(count(e, FIREDAMP), 160, "la nappe est posée");
+  e.set(30, 15, FIRE);
+  for (let t = 0; t < 20; t++) e.step();
+  assert.ok(count(e, FIREDAMP) < 5, "elle part d'un seul coup");
+}
+
+// Mine : seul ce qui coule appuie dessus.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) e.set(x, 30, STONE);
+  e.set(20, 29, MINE);
+  e.set(20, 28, STONE); // murée : la pierre ne pèse pas
+  for (let t = 0; t < 40; t++) e.step();
+  assert.equal(count(e, MINE), 1, "on peut murer une mine");
+
+  for (let y = 5; y < 8; y++) e.set(40, y, SAND);
+  e.set(40, 29, MINE);
+  for (let t = 0; t < 80; t++) e.step();
+  assert.equal(count(e, MINE), 1, "le sable qui tombe la fait sauter");
+}
+
+// Thermite : elle ne souffle pas, elle perce — et elle seule fond la pierre.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) for (let y = 20; y < H; y++) e.set(x, y, STONE);
+  for (let x = 28; x < 33; x++) e.set(x, 19, THERMITE);
+  e.set(30, 18, FIRE);
+  for (let t = 0; t < 400; t++) e.step();
+  let deepest = 0;
+  for (let y = 20; y < H; y++) for (let x = 0; x < W; x++) if (e.get(x, y) !== STONE) deepest = y - 19;
+  assert.ok(deepest > 10, "elle s'enfonce dans ce qu'elle liquéfie");
+  assert.ok(count(e, LAVA) > 20, "et laisse un puits de lave");
+}
+
+// Contrôle : la lave, elle, ne fond pas la pierre (1400 °C est hors de sa portée).
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) for (let y = 20; y < H; y++) e.set(x, y, STONE);
+  const before = count(e, STONE);
+  for (let x = 10; x < 50; x++) for (let y = 14; y < 20; y++) e.set(x, y, LAVA);
+  for (let t = 0; t < 400; t++) e.step();
+  assert.equal(count(e, STONE), before, "une nappe de lave ne creuse pas");
 }
 
 // Le vide reste du vide.

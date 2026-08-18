@@ -3,13 +3,14 @@
 Un bac à sable cellulaire (« falling sand ») qui tourne entièrement dans le
 navigateur, servi par un Worker Cloudflare qui héberge aussi l'API.
 
-Trente-cinq matières, rangées en familles repliables (terrain, liquides,
-inflammable, froid, vivant, électricité, gaz, outils) : `sable / eau / pierre /
-bois / huile / goudron / alcool / acide / lave / plante / feu / glace / neige /
-azote liquide / sel / eau salée / poudre / TNT / graine / nanites / verre /
-verre fondu / mercure / cire / bougie / boue / braise / métal / pile /
-interrupteur / étincelle / source / fumée`, pinceau réglable, vue thermique,
-pause & pas à pas, galerie de mondes partagés.
+Quarante matières, rangées en familles repliables (terrain, liquides,
+inflammable, explosifs, froid, vivant, électricité, gaz, outils) : `sable / eau /
+pierre / bois / huile / goudron / alcool / acide / lave / plante / feu / glace /
+neige / azote liquide / sel / eau salée / poudre / TNT / nitroglycérine / C4 /
+mine / thermite / grisou / graine / nanites / verre / verre fondu / mercure /
+cire / bougie / boue / braise / métal / pile / interrupteur / étincelle /
+source / fumée`, pinceau réglable, vue thermique, pause & pas à pas, galerie de
+mondes partagés.
 
 ### Ce qui se passe quand on mélange
 
@@ -17,6 +18,8 @@ pause & pas à pas, galerie de mondes partagés.
 | --- | --- |
 | Chaleur | Un champ de température est diffusé à chaque tick. L'eau bout à 100 °C et gèle à 0, la glace fond, le sable vitrifie près de la lave, l'huile s'auto-enflamme. Une seule loi, tous les changements d'état en découlent (`boil` / `freeze` dans `materials.ts`). |
 | TNT & poudre | La flamme déclenche l'explosion, l'explosion rallume les charges voisines : ça part en chaîne. |
+| Explosifs | Cinq matières, cinq **déclencheurs** différents — c'est là qu'est la variété, pas dans le rayon de souffle. La nitroglycérine obéit au choc : `life` compte ses cellules de chute et l'atterrissage au-delà de quatre détonne, la poser à la main ne risque rien. Le C4 ignore le feu et n'obéit qu'à l'étincelle : une charge amorcée par la détonation d'une voisine (`life` = 1) fait partir un mur entier, ce qui donne enfin un usage à la pile et à l'interrupteur. Le grisou obéit au volume : gaz `flammable` 1, il s'accumule au plafond puis toute la nappe part d'un coup. La mine obéit au poids, mais seulement de ce qui coule (`kind` poudre ou liquide) : on peut donc la murer. |
+| Thermite | L'anti-explosif : elle ne souffle rien, elle perce. Elle impose 2800 °C sur place pendant 150 ticks, ce qui liquéfie la pierre (`boil` à 1400 °C, hors de portée de la lave qui plafonne à 800 °C dans la roche voisine), et elle continue de tomber en brûlant — densité 8, elle passe sous la lave qu'elle vient de créer. D'où un vrai puits, et pas un cratère. |
 | Sel | Se dissout dans l'eau (eau salée, plus lourde, gèle à -18 °C) et fait fondre la glace. |
 | Graine | Tombe comme une poudre, germe en plante au contact de l'eau. |
 | Nanites | Dévorent la matière et se répliquent, puis meurent de vieillesse. Seul le verre les arrête : on peut construire un bocal. |

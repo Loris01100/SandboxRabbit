@@ -1,7 +1,7 @@
 import {
-  ACID, BATTERY, CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
-  NANITE, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM, STONE,
-  SWITCH, TNT, WATER, WOOD, type MaterialId,
+  ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
+  MINE, NANITE, NITRO, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM,
+  STONE, SWITCH, THERMITE, TNT, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
 /** Température de l'air au repos, en °C. */
@@ -14,6 +14,10 @@ const COOLING = 0.02;
 const RECOVERY = 8;
 /** Ticks entre deux étincelles d'une pile (plus long que `RECOVERY`, sinon le fil sature). */
 const PULSE = 24;
+/** Cellules de chute au-delà desquelles l'atterrissage détonne la nitroglycérine. */
+const SHOCK = 4;
+/** Ticks de combustion de la thermite : assez pour percer, pas pour vider la scène. */
+const BURN = 150;
 
 /**
  * Automate cellulaire type « falling sand ».
@@ -211,6 +215,10 @@ export class Engine {
       case ACID: this.updateAcid(i, x, y); return;
       case PLANT: this.updatePlant(x, y); return;
       case TNT: this.updateTnt(x, y); return;
+      case NITRO: this.updateNitro(i, x, y); return;
+      case C4: this.updateC4(i, x, y); return;
+      case MINE: this.updateMine(x, y); return;
+      case THERMITE: this.updateThermite(i, x, y); return;
       case SALT: this.updateSalt(i, x, y); return;
       case SEED: this.updateSeed(i, x, y); return;
       case NANITE: this.updateNanite(i, x, y); return;
@@ -354,6 +362,70 @@ export class Engine {
     }
   }
 
+  /**
+   * Nitroglycérine : le choc, pas la chaleur. `life` compte les cellules de
+   * chute (le `swap` l'emmène avec elle) ; l'atterrissage au-delà de `SHOCK`
+   * détonne. Posée à la main, elle est inoffensive.
+   */
+  private updateNitro(i: number, x: number, y: number): void {
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      const n = this.get(nx, ny);
+      if (n === FIRE || n === LAVA) { this.explode(x, y, 5); return; }
+    }
+    const down = y + this.gravity;
+    if (this.tryMove(i, x, down, NITRO)) {
+      const j = this.index(x, down);
+      if (this.life[j] < SHOCK) this.life[j]++;
+      return;
+    }
+    if (this.life[i] >= SHOCK) { this.explode(x, y, 5); return; }
+    this.life[i] = 0; // elle s'est arrêtée : le compteur repart de zéro
+    this.updateLiquid(i, x, y, NITRO);
+  }
+
+  /**
+   * C4 : le feu ne lui fait rien, seule l'étincelle le déclenche. `life` = 1
+   * marque une charge amorcée par la détonation d'une voisine, pour qu'un mur
+   * parte en entier sans dépendre des flammes.
+   */
+  private updateC4(i: number, x: number, y: number): void {
+    if (this.life[i] === 1) { this.explode(x, y, 9); return; }
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      if (this.get(nx, ny) === SPARK) { this.explode(x, y, 9); return; }
+    }
+  }
+
+  /** Mine : seul ce qui coule appuie dessus, on peut donc la murer sans la faire sauter. */
+  private updateMine(x: number, y: number): void {
+    const above = y - this.gravity;
+    if (!this.inBounds(x, above)) return;
+    const kind = MATERIALS[this.cells[this.index(x, above)]].kind;
+    if (kind === "powder" || kind === "liquid") this.explode(x, y, 6);
+  }
+
+  /**
+   * Thermite : elle ne souffle rien, elle perce. `life` = ticks de combustion
+   * restants (0 = éteinte), pendant lesquels elle impose 2800 °C sur place —
+   * au-dessus du point de fusion de la pierre, que rien d'autre n'atteint.
+   */
+  private updateThermite(i: number, x: number, y: number): void {
+    if (this.life[i] > 0) {
+      this.temp[i] = 2800;
+      // `convert` plutôt que `set` : la braise garde la chaleur accumulée.
+      if (--this.life[i] === 0) { this.convert(i, EMBER); return; }
+      // Elle continue de tomber en brûlant : elle s'enfonce dans ce qu'elle
+      // liquéfie (densité 8, elle passe sous la lave), et c'est ça qui perce.
+      this.updatePowder(i, x, y, THERMITE);
+      return;
+    }
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      const n = this.get(nx, ny);
+      const lit = n === THERMITE && this.life[this.index(nx, ny)] > 0;
+      if (n === FIRE || n === LAVA || n === SPARK || lit) { this.life[i] = BURN; return; }
+    }
+    this.updatePowder(i, x, y, THERMITE);
+  }
+
   /** Souffle un disque : la moitié part en flammes, le reste est pulvérisé. */
   explode(cx: number, cy: number, radius = 7): void {
     const r2 = radius * radius;
@@ -361,8 +433,13 @@ export class Engine {
       for (let x = cx - radius; x <= cx + radius; x++) {
         const dx = x - cx, dy = y - cy;
         if (dx * dx + dy * dy > r2 || !this.inBounds(x, y)) continue;
-        // Le TNT voisin survit à la déflagration : il explosera au tick suivant.
-        if (this.cells[this.index(x, y)] === TNT && (dx !== 0 || dy !== 0)) continue;
+        // Une charge voisine survit à la déflagration et part au tick suivant :
+        // le TNT par le feu qu'on vient de semer, le C4 amorcé par `life`.
+        const j = this.index(x, y);
+        if ((this.cells[j] === TNT || this.cells[j] === C4) && (dx !== 0 || dy !== 0)) {
+          if (this.cells[j] === C4) this.life[j] = 1;
+          continue;
+        }
         this.set(x, y, Math.random() < 0.5 ? FIRE : EMPTY);
       }
     }
@@ -466,8 +543,9 @@ export class Engine {
   private updateSpark(i: number, x: number, y: number): void {
     for (const [nx, ny] of this.neighbors(x, y)) {
       if (!this.inBounds(nx, ny)) continue;
-      if (this.cells[this.index(nx, ny)] === TNT) this.explode(nx, ny);
-      else this.charge(nx, ny);
+      const n = this.cells[this.index(nx, ny)];
+      if (n === TNT) this.explode(nx, ny);
+      else if (n !== C4) this.charge(nx, ny); // le C4 se déclenche seul en voyant l'étincelle
     }
     this.ignite(x, y, 3);
     if (--this.life[i] > 0) return;

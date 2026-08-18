@@ -1,4 +1,4 @@
-import { EMPTY, MATERIALS, SWITCH } from "./materials";
+import { EMPTY, MATERIALS, SWITCH, THERMITE } from "./materials";
 import { AMBIENT, type Engine } from "./engine";
 
 /**
@@ -41,12 +41,12 @@ export class Renderer {
       // Le bruit par cellule décale les 3 canaux d'un même delta : la teinte
       // reste identique, seule la luminosité varie.
       // Une cellule figée est tramée en damier, pour la distinguer au premier coup d'œil.
-      // Un interrupteur fermé s'éclaire : c'est le seul signe visible de son état.
+      // Deux états n'ont pas de couleur propre et doivent pourtant se voir :
+      // l'interrupteur fermé et la thermite allumée s'éclairent.
+      const glow = id === SWITCH && life[i] === 1 ? 55 : id === THERMITE && life[i] > 0 ? 110 : 0;
       const d = frozen[i]
         ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
-        : id === SWITCH && life[i] === 1
-          ? 55
-          : (noise[i] * MATERIALS[id].noise) >> 7;
+        : glow || (noise[i] * MATERIALS[id].noise) >> 7;
       const r = clamp((base & 0xff) + d);
       const g = clamp(((base >> 8) & 0xff) + d);
       const b = clamp(((base >> 16) & 0xff) + d);
