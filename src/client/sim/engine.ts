@@ -20,6 +20,28 @@ const SHOCK = 4;
 const BURN = 150;
 
 /**
+ * Offsets d'un disque de rayon `radius`, du bord vers le centre — l'ordre dans
+ * lequel le souffle doit traiter ses cellules. Mis en cache : les explosions
+ * n'utilisent qu'une poignée de rayons.
+ */
+const DISCS = new Map<number, [number, number, number][]>();
+
+function disc(radius: number): [number, number, number][] {
+  const known = DISCS.get(radius);
+  if (known) return known;
+  const cells: [number, number, number][] = [];
+  for (let y = -radius; y <= radius; y++) {
+    for (let x = -radius; x <= radius; x++) {
+      const d = Math.hypot(x, y);
+      if (d <= radius) cells.push([x, y, d]);
+    }
+  }
+  cells.sort((a, b) => b[2] - a[2]);
+  DISCS.set(radius, cells);
+  return cells;
+}
+
+/**
  * Automate cellulaire type « falling sand ».
  *
  * Quatre tableaux plats de la taille de la grille :
@@ -426,23 +448,69 @@ export class Engine {
     this.updatePowder(i, x, y, THERMITE);
   }
 
-  /** Souffle un disque : la moitié part en flammes, le reste est pulvérisé. */
+  /**
+   * Souffle. Le cœur est pulvérisé comme avant, mais la couronne est
+   * **projetée vers l'extérieur** au lieu d'être effacée : la matière retombe
+   * en débris. On traite les cellules de la plus lointaine à la plus proche,
+   * pour que chacune parte vers une place déjà libérée.
+   *
+   * Ce qui n'a nulle part où aller (un mur plein) est pulvérisé : sans ce
+   * repli, une explosion ne percerait plus la pierre.
+   */
   explode(cx: number, cy: number, radius = 7): void {
-    const r2 = radius * radius;
-    for (let y = cy - radius; y <= cy + radius; y++) {
-      for (let x = cx - radius; x <= cx + radius; x++) {
-        const dx = x - cx, dy = y - cy;
-        if (dx * dx + dy * dy > r2 || !this.inBounds(x, y)) continue;
-        // Une charge voisine survit à la déflagration et part au tick suivant :
-        // le TNT par le feu qu'on vient de semer, le C4 amorcé par `life`.
-        const j = this.index(x, y);
-        if ((this.cells[j] === TNT || this.cells[j] === C4) && (dx !== 0 || dy !== 0)) {
-          if (this.cells[j] === C4) this.life[j] = 1;
-          continue;
-        }
-        this.set(x, y, Math.random() < 0.5 ? FIRE : EMPTY);
+    for (const [ox, oy, d] of disc(radius)) {
+      const x = cx + ox, y = cy + oy;
+      if (!this.inBounds(x, y)) continue;
+      const i = this.index(x, y);
+      const id = this.cells[i];
+      // Une charge voisine survit à la déflagration et part au tick suivant :
+      // le TNT par le feu qu'on vient de semer, le C4 amorcé par `life`.
+      if ((id === TNT || id === C4) && d > 0) {
+        if (id === C4) this.life[i] = 1;
+        continue;
       }
+      if (this.frozen[i]) continue;
+      // La portée décroît du centre vers le bord, où plus rien ne bouge.
+      const range = Math.round((1 - d / radius) * radius * 1.5);
+      // D'abord le rayon, puis — s'il est bouché — un jet vers le haut : c'est
+      // ce qui fait sortir les débris d'une charge posée à même le sol, que le
+      // seul rayon (dirigé vers le bas) laisserait sur place.
+      const thrown = d > radius * 0.5 && range > 0
+        && (this.hurl(i, x, y, ox / d, oy / d, range)
+          || this.hurl(i, x, y, (ox / d) * 0.6, -this.gravity, range));
+      if (!thrown) this.set(x, y, Math.random() < 0.5 ? FIRE : EMPTY);
+      else if (Math.random() < 0.25) this.set(x, y, FIRE); // le cratère continue de brûler
     }
+  }
+
+  /**
+   * Projette le contenu d'une cellule le long du rayon, jusqu'à `range`
+   * cellules : elle se dépose sur la **dernière place libre** rencontrée. Les
+   * débris d'une charge enterrée ressortent ainsi par le cratère au lieu de
+   * s'écraser dans la matière voisine, et deux projections ne peuvent pas
+   * atterrir au même endroit — la matière est conservée.
+   *
+   * Renvoie false si le rayon est bouché : à l'appelant de pulvériser.
+   */
+  private hurl(from: number, x: number, y: number, dx: number, dy: number, range: number): boolean {
+    const id = this.cells[from];
+    if (id === EMPTY) return true; // rien à projeter, rien à pulvériser non plus
+    let to = -1;
+    for (let s = 1; s <= range; s++) {
+      const tx = x + Math.round(dx * s), ty = y + Math.round(dy * s);
+      if (!this.inBounds(tx, ty)) break;
+      const j = this.index(tx, ty);
+      if (this.frozen[j]) break;
+      if (this.cells[j] === EMPTY) to = j;
+    }
+    if (to < 0) return false;
+    this.cells[to] = id;
+    this.life[to] = this.life[from];
+    this.temp[to] = this.temp[from];
+    this.clock[to] = this.parity; // le débris a déjà bougé ce tick
+    this.cells[from] = EMPTY;
+    this.life[from] = 0;
+    return true;
   }
 
   /** Le sel se dissout dans l'eau et fait fondre la glace. */

@@ -421,6 +421,28 @@ function count(e: Engine, id: MaterialId): number {
   assert.ok(count(e, NITROGEN) < 8, "puis il s'évapore presque entièrement");
 }
 
+// Le souffle projette au lieu d'effacer : quand la matière a où aller, elle est
+// déplacée, pas supprimée. Enterrée au même endroit, elle n'a plus le choix.
+{
+  const loss = (depth: number): number => {
+    const e = engine();
+    for (let x = 0; x < W; x++) for (let y = 20; y < H; y++) e.set(x, y, SAND);
+    const before = count(e, SAND);
+    e.explode(30, 20 + depth, 7);
+    return before - count(e, SAND);
+  };
+  assert.ok(loss(0) < loss(12) * 0.7, "à l'air libre, le souffle déplace plus qu'il ne détruit");
+}
+
+// Mais un mur plein est toujours percé : sans ce repli, une charge ne servirait plus à rien.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) for (let y = 20; y < H; y++) e.set(x, y, STONE);
+  const before = count(e, STONE);
+  e.explode(30, 30, 7);
+  assert.ok(before - count(e, STONE) > 80, "ce qui n'a nulle part où aller est pulvérisé");
+}
+
 // Nitroglycérine : posée elle dort, lâchée de trois cellules elle détonne.
 {
   const e = engine();
@@ -435,7 +457,10 @@ function count(e: Engine, id: MaterialId): number {
   for (let x = 20; x < 26; x++) drop.set(x, 29, WOOD);
   for (let x = 21; x < 25; x++) drop.set(x, 10, NITRO); // vingt cellules plus haut
   for (let t = 0; t < 60; t++) drop.step();
-  assert.equal(count(drop, WOOD), 0, "lâchée, elle emporte tout à l'impact");
+  // Sur la planche, pas dans la grille : le souffle en projette parfois un éclat plus loin.
+  let intact = 0;
+  for (let x = 20; x < 26; x++) if (drop.get(x, 29) === WOOD) intact++;
+  assert.equal(intact, 0, "lâchée, elle emporte la planche à l'impact");
 }
 
 // C4 : insensible au feu, il n'obéit qu'à l'étincelle — et le mur part en entier.
@@ -458,8 +483,8 @@ function count(e: Engine, id: MaterialId): number {
   const e = engine();
   for (let x = 10; x < 50; x++) for (let y = 10; y < 14; y++) e.set(x, y, FIREDAMP);
   assert.equal(count(e, FIREDAMP), 160, "la nappe est posée");
-  e.set(30, 15, FIRE);
-  for (let t = 0; t < 20; t++) e.step();
+  e.set(30, 13, FIRE); // dans la nappe : une flamme posée à côté peut s'éteindre avant
+  for (let t = 0; t < 40; t++) e.step();
   assert.ok(count(e, FIREDAMP) < 5, "elle part d'un seul coup");
 }
 
