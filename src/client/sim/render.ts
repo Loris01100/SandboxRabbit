@@ -1,4 +1,4 @@
-import { EMPTY, MATERIALS } from "./materials";
+import { EMPTY, MATERIALS, SWITCH } from "./materials";
 import { AMBIENT, type Engine } from "./engine";
 
 /**
@@ -32,7 +32,7 @@ export class Renderer {
 
   draw(): void {
     if (this.heatmap) { this.drawHeat(); return; }
-    const { cells, noise, frozen, width } = this.engine;
+    const { cells, noise, frozen, life, width } = this.engine;
     const { buffer, palette } = this;
     for (let i = 0; i < cells.length; i++) {
       const id = cells[i];
@@ -41,9 +41,12 @@ export class Renderer {
       // Le bruit par cellule décale les 3 canaux d'un même delta : la teinte
       // reste identique, seule la luminosité varie.
       // Une cellule figée est tramée en damier, pour la distinguer au premier coup d'œil.
+      // Un interrupteur fermé s'éclaire : c'est le seul signe visible de son état.
       const d = frozen[i]
         ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
-        : (noise[i] * MATERIALS[id].noise) >> 7;
+        : id === SWITCH && life[i] === 1
+          ? 55
+          : (noise[i] * MATERIALS[id].noise) >> 7;
       const r = clamp((base & 0xff) + d);
       const g = clamp(((base >> 8) & 0xff) + d);
       const b = clamp(((base >> 16) & 0xff) + d);

@@ -34,6 +34,11 @@ export const MUD = 26;
 export const EMBER = 27;
 export const METAL = 28;
 export const SPARK = 29;
+export const TAR = 30;
+export const ALCOHOL = 31;
+export const MOLTEN_GLASS = 32;
+export const BATTERY = 33;
+export const SWITCH = 34;
 
 export type MaterialId = number;
 
@@ -98,7 +103,7 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [SEED]: { id: SEED, name: "Graine", kind: "powder", density: 5, color: [150, 120, 60], noise: 16, flammable: 0.05, hint: "Tombe, germe en plante dans l'eau" },
   [NANITE]: { id: NANITE, name: "Nanites", kind: "powder", density: 6, color: [190, 190, 200], noise: 30, life: 200, hint: "Dévore la matière et se répand ; seul le verre l'arrête" },
   [SOURCE]: { id: SOURCE, name: "Source", kind: "static", density: 10, color: [130, 96, 190], noise: 10, hint: "Émet en continu la dernière matière choisie" },
-  [GLASS]: { id: GLASS, name: "Verre", kind: "static", density: 9, color: [178, 206, 214], noise: 6, hint: "Sable vitrifié : résiste aux nanites" },
+  [GLASS]: { id: GLASS, name: "Verre", kind: "static", density: 9, color: [178, 206, 214], noise: 6, boil: { at: 700, into: MOLTEN_GLASS }, hint: "Sable vitrifié : résiste aux nanites, refond à 700 °C" },
   [MERCURY]: { id: MERCURY, name: "Mercure", kind: "liquid", density: 13, color: [198, 204, 216], noise: 24, spread: 2, freeze: { at: -39, into: METAL }, boil: { at: 357, into: SMOKE }, hint: "Le plus lourd : passe sous tout, gèle en métal à -39 °C" },
   [WAX]: { id: WAX, name: "Cire", kind: "static", density: 5, color: [236, 224, 188], noise: 8, flammable: 0.01, boil: { at: 60, into: MOLTEN_WAX }, hint: "Fond dès 60 °C" },
   [MOLTEN_WAX]: { id: MOLTEN_WAX, name: "Cire fondue", kind: "liquid", density: 5, color: [240, 212, 140], noise: 10, spread: 2, freeze: { at: 55, into: WAX }, hint: "Coule, puis durcit en refroidissant" },
@@ -108,11 +113,30 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [EMBER]: { id: EMBER, name: "Braise", kind: "powder", density: 6, color: [188, 62, 22], noise: 40, life: 250, heat: 350, hint: "Ce que laisse le bois brûlé : chauffe longtemps après la flamme" },
   [METAL]: { id: METAL, name: "Métal", kind: "static", density: 9, color: [158, 168, 184], noise: 8, hint: "Conduit l'étincelle, et rien d'autre" },
   [SPARK]: { id: SPARK, name: "Étincelle", kind: "static", density: 1, color: [255, 240, 120], noise: 30, life: 3, hint: "Court dans le métal, enflamme et fait sauter ce qu'elle touche" },
+  [TAR]: { id: TAR, name: "Goudron", kind: "liquid", density: 5, color: [42, 38, 36], noise: 6, spread: 0, flammable: 0.35, hint: "Huile lourde : coule à peine, colle et brûle longtemps" },
+  [ALCOHOL]: { id: ALCOHOL, name: "Alcool", kind: "liquid", density: 2, color: [156, 196, 216], noise: 8, spread: 4, flammable: 0.9, boil: { at: 40, into: SMOKE }, hint: "Flotte sur tout, s'enflamme d'un rien, s'évapore dès 40 °C" },
+  [MOLTEN_GLASS]: { id: MOLTEN_GLASS, name: "Verre fondu", kind: "liquid", density: 8, color: [255, 170, 84], noise: 20, spread: 1, spawn: 900, freeze: { at: 600, into: GLASS }, hint: "Coule brûlant, puis se fige en verre sous 600 °C" },
+  [BATTERY]: { id: BATTERY, name: "Pile", kind: "static", density: 9, color: [86, 196, 132], noise: 8, hint: "Envoie une étincelle dans le métal voisin, sans fin" },
+  [SWITCH]: { id: SWITCH, name: "Interrupteur", kind: "static", density: 9, color: [176, 132, 60], noise: 8, hint: "Cliquez dessus pour ouvrir ou fermer le circuit" },
 };
 
-/** Ordre d'affichage dans la barre d'outils (les 9 premiers = raccourcis 1..9). */
-export const PALETTE: MaterialId[] = [
-  SAND, WATER, STONE, WOOD, OIL, ACID, LAVA, PLANT, FIRE,
-  ICE, SALT, SALTWATER, GUNPOWDER, TNT, SEED, NANITE, GLASS,
-  MERCURY, WAX, CANDLE, SNOW, MUD, EMBER, METAL, SPARK, SOURCE, SMOKE, EMPTY,
+/**
+ * Familles affichées dans la barre d'outils : un `<details>` repliable chacune.
+ * Une matière peut n'y figurer nulle part (elle n'est alors obtenue qu'en jeu).
+ */
+export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
+  { name: "Terrain", ids: [SAND, STONE, WOOD, GLASS, MUD, SALT] },
+  { name: "Liquides", ids: [WATER, SALTWATER, OIL, TAR, ALCOHOL, ACID, MERCURY, MOLTEN_WAX, MOLTEN_GLASS] },
+  { name: "Inflammable", ids: [FIRE, EMBER, LAVA, GUNPOWDER, TNT, WAX, CANDLE] },
+  { name: "Froid", ids: [ICE, SNOW] },
+  { name: "Vivant", ids: [SEED, PLANT, NANITE] },
+  { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK] },
+  { name: "Gaz", ids: [SMOKE, STEAM] },
+  { name: "Outils", ids: [SOURCE, EMPTY] },
 ];
+
+/** Toutes les matières de la barre d'outils, familles mises bout à bout. */
+export const PALETTE: MaterialId[] = CATEGORIES.flatMap((c) => c.ids);
+
+/** Raccourcis clavier 1..9 puis 0 : les classiques, quel que soit l'ordre des familles. */
+export const SHORTCUTS: MaterialId[] = [SAND, WATER, STONE, WOOD, OIL, FIRE, ICE, PLANT, TNT, EMPTY];

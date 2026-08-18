@@ -183,3 +183,19 @@ kbd {
   font: inherit;
   font-size: 0.9em;
 }
+
+/* Familles de matières : un <details> par famille, replié par défaut. */
+.cat + .cat { border-top: 1px dashed var(--line); }
+
+.cat > summary {
+  padding: 0.35rem 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cat[open] > summary,
+.cat > summary:hover { color: var(--text); }
+.cat > .palette { padding-bottom: 0.4rem; }

@@ -7,9 +7,9 @@ import { Engine } from "../src/client/sim/engine.ts";
 import { decode, encode } from "../src/client/sim/codec.ts";
 import { CHALLENGES } from "../src/client/challenges.ts";
 import {
-  CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MERCURY, METAL, MOLTEN_WAX, MUD,
-  NANITE, OIL, PLANT, SALT, SALTWATER, SAND, SEED, SNOW, SOURCE, SPARK, STONE,
-  TNT, WATER, WAX, WOOD, type MaterialId,
+  ALCOHOL, BATTERY, CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MERCURY, METAL,
+  MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
+  SNOW, SOURCE, SPARK, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
 const W = 60, H = 40;
@@ -332,6 +332,77 @@ function count(e: Engine, id: MaterialId): number {
     assert.ok(count(e, EMPTY) < 320 * 180, `« ${c.name} » pose quelque chose`);
     assert.equal(c.won(e), false, `« ${c.name} » n'est pas gagné au départ`);
   }
+}
+
+// Le goudron coule, mais bien moins loin que l'eau.
+{
+  const spread = (id: MaterialId): number => {
+    const e = engine();
+    for (let x = 0; x < W; x++) e.set(x, 30, STONE);
+    e.paint(30, 26, 3, id);
+    for (let t = 0; t < 120; t++) e.step();
+    let min = W, max = 0;
+    for (let x = 0; x < W; x++) {
+      for (let y = 0; y < 30; y++) {
+        if (e.get(x, y) !== id) continue;
+        if (x < min) min = x;
+        if (x > max) max = x;
+      }
+    }
+    return max - min;
+  };
+  assert.ok(spread(TAR) < spread(WATER), "le goudron s'étale moins que l'eau");
+}
+
+// L'alcool s'évapore à la moindre chaleur.
+{
+  // Dans une cuvette : sinon la flaque s'étale hors de la flamme et reste froide.
+  const e = engine();
+  for (let x = 0; x < W; x++) e.set(x, 30, STONE);
+  for (let y = 24; y < 30; y++) { e.set(17, y, STONE); e.set(23, y, STONE); }
+  for (let x = 18; x < 23; x++) { e.set(x, 29, ALCOHOL); e.set(x, 28, ALCOHOL); }
+  assert.ok(count(e, ALCOHOL) > 0, "l'alcool est bien posé");
+  for (let t = 0; t < 300; t++) {
+    for (let x = 18; x < 23; x++) if (e.get(x, 26) === EMPTY) e.set(x, 26, FIRE);
+    e.step();
+  }
+  assert.equal(count(e, ALCOHOL), 0, "l'alcool ne survit pas à la chaleur");
+}
+
+// Verre → verre fondu → verre : la boucle complète, pilotée par la seule température.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) e.set(x, 30, STONE);
+  for (let x = 18; x < 24; x++) e.set(x, 29, GLASS);
+  // On chauffe la grille directement : le refroidissement mange une partie du pic.
+  for (let x = 18; x < 24; x++) e.temp[e.index(x, 29)] = 1400;
+  e.step();
+  assert.ok(count(e, MOLTEN_GLASS) > 0, "le verre refond au-delà de 700 °C");
+  for (let t = 0; t < 400; t++) e.step();
+  assert.equal(count(e, MOLTEN_GLASS), 0, "en refroidissant il se fige");
+  assert.ok(count(e, GLASS) > 0, "et redevient du verre");
+}
+
+// Pile + interrupteur : le circuit ne passe que fermé, et l'interrupteur survit.
+{
+  const circuit = (closed: boolean): Engine => {
+    const e = engine();
+    e.set(9, 20, BATTERY);
+    for (let x = 10; x <= 30; x++) e.set(x, 20, METAL);
+    e.set(20, 20, SWITCH);
+    e.set(31, 20, TNT);
+    if (closed) e.toggleSwitch(20, 20);
+    for (let t = 0; t < 200; t++) e.step();
+    return e;
+  };
+
+  const open = circuit(false);
+  assert.equal(count(open, TNT), 1, "interrupteur ouvert : le courant n'arrive pas");
+  assert.ok(open.cells.includes(SPARK) || count(open, METAL) > 0, "la pile alimente quand même son côté");
+
+  const on = circuit(true);
+  assert.equal(count(on, TNT), 0, "interrupteur fermé : la pile fait sauter la charge");
+  assert.equal(count(on, SWITCH), 1, "l'interrupteur relaie sans se transformer en métal");
 }
 
 // Le vide reste du vide.

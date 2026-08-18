@@ -2,7 +2,7 @@ import "./style.css";
 import { AMBIENT, Engine } from "./sim/engine.ts";
 import { Renderer } from "./sim/render";
 import { decode, encode } from "./sim/codec";
-import { EMPTY, MATERIALS, PALETTE, SAND, SOURCE, STONE, WATER, type MaterialId } from "./sim/materials.ts";
+import { CATEGORIES, EMPTY, MATERIALS, SAND, SHORTCUTS, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, type Challenge } from "./challenges.ts";
 
 const WIDTH = 320;
@@ -21,7 +21,21 @@ let running = true;
 const paletteEl = document.querySelector<HTMLDivElement>("#palette")!;
 const hintEl = document.querySelector<HTMLParagraphElement>("#hint")!;
 
-for (const id of PALETTE) {
+// Une famille = un <details> repliable (natif) contenant sa grille de boutons.
+for (const [n, cat] of CATEGORIES.entries()) {
+  const box = document.createElement("details");
+  box.className = "cat";
+  box.open = n === 0; // seule la première famille est déployée au départ
+  const title = document.createElement("summary");
+  title.textContent = cat.name;
+  const grid = document.createElement("div");
+  grid.className = "palette";
+  for (const id of cat.ids) grid.append(swatch(id));
+  box.append(title, grid);
+  paletteEl.append(box);
+}
+
+function swatch(id: MaterialId): HTMLButtonElement {
   const m = MATERIALS[id];
   const button = document.createElement("button");
   button.type = "button";
@@ -30,7 +44,7 @@ for (const id of PALETTE) {
   button.innerHTML = `<span class="swatch" style="background:rgb(${m.color.join(",")})"></span>${m.name}`;
   button.addEventListener("click", () => select(id));
   button.addEventListener("pointerenter", () => (hintEl.textContent = m.hint));
-  paletteEl.append(button);
+  return button;
 }
 paletteEl.addEventListener("pointerleave", () => (hintEl.textContent = MATERIALS[current].hint));
 
@@ -49,7 +63,7 @@ select(current);
 addEventListener("keydown", (e) => {
   if (e.key === " ") { toggleRun(); e.preventDefault(); return; }
   const n = Number(e.key);
-  if (!Number.isNaN(n) && PALETTE[n - 1] !== undefined) select(PALETTE[n - 1]);
+  if (!Number.isNaN(n) && SHORTCUTS[n - 1] !== undefined) select(SHORTCUTS[n - 1]);
   if (e.key === "0") select(EMPTY);
   if (e.key === "g") flipGravity();
   if (e.key === "f") toolInput.value = toolInput.value === "paint" ? "freeze" : "paint";
@@ -100,6 +114,8 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 canvas.addEventListener("pointerdown", (e) => {
   const p = toCell(e);
   if (e.button === 2) { engine.fill(p.x, p.y, current); return; }
+  // Cliquer un interrupteur déjà posé le bascule au lieu d'en reposer un.
+  if (current === SWITCH && engine.get(p.x, p.y) === SWITCH) { engine.toggleSwitch(p.x, p.y); return; }
   canvas.setPointerCapture(e.pointerId);
   painting = true;
   // Maj : on relie le dernier point posé, même si le pinceau a été relâché entre-temps.

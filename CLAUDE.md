@@ -36,11 +36,12 @@ Un seul Worker Cloudflare sert le site statique **et** l'API (binding `ASSETS`, 
 - `temp` (°C) est diffusé à chaque tick par `thermal()` ; `heat` tire la cellule vers sa température (feu, lave, glace) sans l'imposer, `boil`/`freeze` déclenchent les changements d'état. Ajouter un changement d'état = deux champs dans `MATERIALS`, aucune règle dans `Engine`.
 - `gravity` (±1) et `wind` (-1..1) sont lus par les règles de mouvement : toute nouvelle règle de déplacement doit passer par `y + this.gravity` et `drift()`.
 - `life` sert de vie pour les gaz, de charge utile pour `SOURCE` (la matière émise), de mèche allumée pour `CANDLE` et de repos pour `METAL` : ne pas le réinitialiser à l'aveugle. C'est un `Uint8Array`, donc `life` ≤ 250 dans `MATERIALS`.
-- `SPARK` ne se propage que dans `METAL`, et le métal traversé garde `RECOVERY` ticks de repos : sans ça l'étincelle repart en arrière et le circuit ne s'éteint jamais.
+- `SPARK` ne se propage que dans `METAL`, et le métal traversé garde `RECOVERY` ticks de repos : sans ça l'étincelle repart en arrière et le circuit ne s'éteint jamais. Tout ce qui met un fil sous tension passe par `charge()` (étincelle, `BATTERY`, `SWITCH` fermé).
+- `SWITCH` ne devient **jamais** une étincelle : il la relaie à ses voisins (`life` = 1 quand il est fermé). S'il se changeait en `SPARK`, il redeviendrait du `METAL` à l'extinction et l'interrupteur disparaîtrait de la grille.
 - Le balayage de `step()` part du bas et alterne le sens en x selon `parity` ; `clock` empêche une cellule de bouger deux fois dans le même tick. Toucher à cet ordre introduit des dérives visibles de la matière.
 - `frozen` (1 par cellule) court-circuite tout : `step()` saute la cellule et `tryMove()` refuse de s'y déplacer. `set()` la remet à 0, donc repeindre libère.
 - Hors grille, `get()` renvoie `STONE` (mur implicite) — les règles n'ont pas besoin de tester les bords.
-- `MATERIALS` est indexé par id numérique, et `PALETTE` fixe l'ordre de la barre d'outils *et* les raccourcis clavier 1..9 / 0.
+- `MATERIALS` est indexé par id numérique. `CATEGORIES` fixe les familles repliables de la barre d'outils et `PALETTE` en découle (`flatMap`) ; les raccourcis clavier 1..9 / 0 vivent à part dans `SHORTCUTS`, pour que réordonner une famille ne les déplace pas.
 
 ### Ajouter un défi
 
@@ -48,4 +49,4 @@ Une entrée dans `CHALLENGES` ([src/client/challenges.ts](src/client/challenges.
 
 ### Ajouter une matière
 
-Une entrée dans `MATERIALS` + son id dans `PALETTE` ([materials.ts](src/client/sim/materials.ts)). Si son `kind` (`powder` / `liquid` / `gas` / `static`) ne suffit pas, ajouter un `case` dans `Engine.update`.
+Une entrée dans `MATERIALS` + son id dans une famille de `CATEGORIES` ([materials.ts](src/client/sim/materials.ts)) — l'omettre partout est valide : la matière n'est alors obtenue qu'en jeu. Si son `kind` (`powder` / `liquid` / `gas` / `static`) ne suffit pas, ajouter un `case` dans `Engine.update`.

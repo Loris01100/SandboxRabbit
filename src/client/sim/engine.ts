@@ -1,7 +1,7 @@
 import {
-  ACID, CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL, NANITE,
-  PLANT, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM, STONE, TNT,
-  WATER, WOOD, type MaterialId,
+  ACID, BATTERY, CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
+  NANITE, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM, STONE,
+  SWITCH, TNT, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
 /** Température de l'air au repos, en °C. */
@@ -12,6 +12,8 @@ const CONDUCTION = 0.16;
 const COOLING = 0.02;
 /** Ticks pendant lesquels un métal qui vient de conduire refuse l'étincelle. */
 const RECOVERY = 8;
+/** Ticks entre deux étincelles d'une pile (plus long que `RECOVERY`, sinon le fil sature). */
+const PULSE = 24;
 
 /**
  * Automate cellulaire type « falling sand ».
@@ -214,6 +216,8 @@ export class Engine {
       case NANITE: this.updateNanite(i, x, y); return;
       case SOURCE: this.updateSource(i, x, y); return;
       case CANDLE: this.updateCandle(i, x, y); return;
+      case BATTERY: this.updateBattery(i, x, y); return;
+      case SWITCH: this.updateSwitch(i, x, y); return;
       case EMBER: this.updateEmber(i, x, y); return;
       case SPARK: this.updateSpark(i, x, y); return;
       // Le métal ne fait que sortir de sa période de repos.
@@ -418,6 +422,42 @@ export class Engine {
     this.updatePowder(i, x, y, EMBER);
   }
 
+  /** Met le métal voisin sous tension, s'il est sorti de sa période de repos. */
+  private charge(x: number, y: number): void {
+    if (!this.inBounds(x, y)) return;
+    const j = this.index(x, y);
+    if (this.cells[j] !== METAL || this.life[j] !== 0) return;
+    this.cells[j] = SPARK;
+    this.life[j] = MATERIALS[SPARK].life!;
+  }
+
+  /** Pile : une étincelle dans le métal voisin toutes les `PULSE` frames. */
+  private updateBattery(i: number, x: number, y: number): void {
+    if (this.life[i] > 0) { this.life[i]--; return; }
+    this.life[i] = PULSE;
+    for (const [nx, ny] of this.neighbors(x, y)) this.charge(nx, ny);
+  }
+
+  /**
+   * Interrupteur : `life` = 1 quand il est fermé. Il ne devient jamais étincelle
+   * lui-même — il la relaie de l'autre côté — sinon il perdrait son identité en
+   * redevenant du métal.
+   */
+  private updateSwitch(i: number, x: number, y: number): void {
+    if (this.life[i] !== 1) return;
+    let live = false;
+    for (const [nx, ny] of this.neighbors(x, y)) if (this.get(nx, ny) === SPARK) live = true;
+    if (!live) return;
+    for (const [nx, ny] of this.neighbors(x, y)) this.charge(nx, ny);
+  }
+
+  /** Ouvre / ferme l'interrupteur sous le curseur (clic sur un interrupteur déjà posé). */
+  toggleSwitch(x: number, y: number): void {
+    if (!this.inBounds(x, y)) return;
+    const i = this.index(x, y);
+    if (this.cells[i] === SWITCH) this.life[i] ^= 1;
+  }
+
   /**
    * Étincelle : ne circule que dans le métal, allume et fait sauter le reste.
    * Le métal traversé se repose `RECOVERY` ticks, sinon l'étincelle repart
@@ -426,13 +466,8 @@ export class Engine {
   private updateSpark(i: number, x: number, y: number): void {
     for (const [nx, ny] of this.neighbors(x, y)) {
       if (!this.inBounds(nx, ny)) continue;
-      const j = this.index(nx, ny);
-      const n = this.cells[j];
-      if (n === METAL) {
-        if (this.life[j] === 0) { this.cells[j] = SPARK; this.life[j] = MATERIALS[SPARK].life!; }
-      } else if (n === TNT) {
-        this.explode(nx, ny);
-      }
+      if (this.cells[this.index(nx, ny)] === TNT) this.explode(nx, ny);
+      else this.charge(nx, ny);
     }
     this.ignite(x, y, 3);
     if (--this.life[i] > 0) return;
