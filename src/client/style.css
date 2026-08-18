@@ -167,10 +167,6 @@ button {
 
 button:hover { border-color: #39405a; }
 
-.worlds { list-style: none; margin: 0.5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
-.worlds li { display: flex; gap: 0.4rem; align-items: center; }
-.worlds button { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
 @media (max-width: 760px) {
   main { grid-template-columns: 1fr; }
   .panel { border-left: none; border-top: 1px solid var(--line); }
@@ -199,3 +195,37 @@ kbd {
 .cat[open] > summary,
 .cat > summary:hover { color: var(--text); }
 .cat > .palette { padding-bottom: 0.4rem; }
+
+/* Galerie : <dialog> natif, ouvert par showModal(). */
+#gallery {
+  width: min(920px, 92vw);
+  max-height: 86vh;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+#gallery::backdrop { background: #000a; }
+
+.gallery-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.gallery-bar h2 { margin: 0; font-size: 0.95rem; }
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 0.6rem;
+}
+
+.card { display: grid; gap: 0.15rem; padding: 0.4rem; text-align: left; }
+.card canvas { width: 100%; cursor: inherit; }
+.card .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .date { color: var(--muted); font-size: 0.74rem; }

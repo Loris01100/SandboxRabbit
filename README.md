@@ -3,13 +3,13 @@
 Un bac à sable cellulaire (« falling sand ») qui tourne entièrement dans le
 navigateur, servi par un Worker Cloudflare qui héberge aussi l'API.
 
-Trente-quatre matières, rangées en familles repliables (terrain, liquides,
+Trente-cinq matières, rangées en familles repliables (terrain, liquides,
 inflammable, froid, vivant, électricité, gaz, outils) : `sable / eau / pierre /
 bois / huile / goudron / alcool / acide / lave / plante / feu / glace / neige /
-sel / eau salée / poudre / TNT / graine / nanites / verre / verre fondu /
-mercure / cire / bougie / boue / braise / métal / pile / interrupteur /
-étincelle / source / fumée`, pinceau réglable, vue thermique, pause & pas à
-pas, sauvegarde de mondes.
+azote liquide / sel / eau salée / poudre / TNT / graine / nanites / verre /
+verre fondu / mercure / cire / bougie / boue / braise / métal / pile /
+interrupteur / étincelle / source / fumée`, pinceau réglable, vue thermique,
+pause & pas à pas, galerie de mondes partagés.
 
 ### Ce qui se passe quand on mélange
 
@@ -24,6 +24,7 @@ pas, sauvegarde de mondes.
 | Feu | `flammable` est une probabilité **par tick et par flamme voisine** : la poudre part instantanément (1), l'huile s'embrase (0,6), la graine crépite (0,05), le bois met une seconde à prendre (0,02). C'est le seul réglage de vitesse de propagation. |
 | Mercure | Densité 13 : passe sous tout, même sous la pierre en train de couler. Gèle en métal à -39 °C, s'évapore à 357. |
 | Cire & bougie | La cire fond à 60 °C, coule, puis redurcit sous 55 : on peut faire couler une bougie. La bougie, elle, s'allume au contact d'une flamme (`life` = mèche allumée), réalimente sa flamme indéfiniment, et l'eau la souffle. |
+| Azote liquide | `heat` -190 : il gèle l'eau en glace au contact, fige tout ce qu'il touche, et s'évapore en buée dès qu'il retrouve plus chaud que -60 °C. Le pendant froid de la lave, sauf qu'il ne dure pas. |
 | Neige | Poudre froide (`heat` -12) plus légère que l'eau : elle s'amoncelle, flotte, et fond dès 2 °C. |
 | Boue | Liquide lent et lourd qui engloutit, et sèche en sable au-dessus de 60 °C. |
 | Braise | Le bois brûlé passe une fois sur deux par la braise au lieu de disparaître : le foyer continue de chauffer (350 °C) et de rallumer bien après la flamme. |
@@ -41,6 +42,7 @@ pas, sauvegarde de mondes.
 | Familles | La barre d'outils est découpée en `<details>` repliables (`CATEGORIES` dans `materials.ts`) : une famille ouverte à la fois suffit à tenir dans le panneau. Les raccourcis 1..9 / 0 restent sur les dix classiques, indépendamment de l'ordre d'affichage. |
 | Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours), case « Gomme sélective » : la gomme ne retire que la dernière matière choisie. Clic maintenu = dépôt continu, même sans bouger la souris. |
 | Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. Ouvrir le lien recharge la scène. |
+| Galerie | « Sauvegarder » envoie le monde au Worker, « Galerie » ouvre une modale (`<dialog>` natif) qui liste tous les mondes sauvegardés avec leur vignette : la grille décodée est redessinée dans un canvas hors écran, mêmes couleurs que le bac. Un clic charge la scène. |
 
 ## Stack
 
@@ -122,6 +124,6 @@ Deux pistes distinctes, à ne pas confondre :
   carte à partir d'une description, commenter ce que fait le joueur, etc.
   Le binding est déjà déclaré (optionnel) dans `Env`.
 
-**Nouvelle matière** : une entrée dans `MATERIALS` + son id dans `PALETTE`. Si
-son comportement n'est pas couvert par `kind` (`powder` / `liquid` / `gas` /
-`static`), lui ajouter un `case` dans `Engine.update`.
+**Nouvelle matière** : une entrée dans `MATERIALS` + son id dans une famille de
+`CATEGORIES`. Si son comportement n'est pas couvert par `kind` (`powder` /
+`liquid` / `gas` / `static`), lui ajouter un `case` dans `Engine.update`.

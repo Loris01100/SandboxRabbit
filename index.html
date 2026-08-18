@@ -98,12 +98,20 @@
           <div class="buttons">
             <button id="save" type="button">Sauvegarder</button>
             <button id="share" type="button">Copier le lien</button>
-            <button id="refresh" type="button">Rafraîchir</button>
+            <button id="gallery-open" type="button">Galerie</button>
           </div>
-          <ul id="worlds" class="worlds"></ul>
           <p id="status" class="hint"></p>
         </details>
       </aside>
     </main>
+
+    <!-- Galerie : <dialog> natif. `method="dialog"` ferme sans une ligne de JS. -->
+    <dialog id="gallery">
+      <form method="dialog" class="gallery-bar">
+        <h2>Galerie</h2>
+        <button type="submit">Fermer</button>
+      </form>
+      <div id="gallery-grid" class="gallery"></div>
+    </dialog>
   </body>
 </html>

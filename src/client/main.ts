@@ -1,6 +1,6 @@
 import "./style.css";
 import { AMBIENT, Engine } from "./sim/engine.ts";
-import { Renderer } from "./sim/render";
+import { Renderer, thumbnail } from "./sim/render";
 import { decode, encode } from "./sim/codec";
 import { CATEGORIES, EMPTY, MATERIALS, SAND, SHORTCUTS, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, type Challenge } from "./challenges.ts";
@@ -195,43 +195,73 @@ document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", (
 /* -------------------------------------------------------------- mondes/API */
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
-const worldsEl = document.querySelector<HTMLUListElement>("#worlds")!;
+const galleryEl = document.querySelector<HTMLDialogElement>("#gallery")!;
+const galleryGrid = document.querySelector<HTMLDivElement>("#gallery-grid")!;
 
 interface WorldSummary { id: string; name: string; createdAt: string }
 
-async function listWorlds(): Promise<void> {
+/**
+ * Galerie : la liste donne les noms, une requête par monde donne sa grille, qui
+ * devient la vignette. Ouverte en modale (`<dialog>`), le panneau est trop
+ * étroit pour montrer des images.
+ */
+// ponytail: une requête par vignette (l'API en liste 50 max, ~1 ko chacune). Si
+// la galerie grossit, mettre la vignette dans /api/worlds plutôt que boucler.
+async function openGallery(): Promise<void> {
+  galleryEl.showModal();
+  galleryGrid.replaceChildren(note("Chargement…"));
+  let worlds: WorldSummary[];
   try {
-    const res = await fetch("/api/worlds");
-    const worlds: WorldSummary[] = await res.json();
-    worldsEl.replaceChildren(
-      ...worlds.map((w) => {
-        const li = document.createElement("li");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = w.name;
-        button.title = new Date(w.createdAt).toLocaleString("fr-FR");
-        button.addEventListener("click", () => loadWorld(w.id));
-        li.append(button);
-        return li;
-      }),
-    );
-    if (worlds.length === 0) statusEl.textContent = "Aucun monde sauvegardé.";
+    worlds = await (await fetch("/api/worlds")).json();
   } catch {
-    statusEl.textContent = "API injoignable.";
-  }
-}
-
-async function loadWorld(id: string): Promise<void> {
-  const res = await fetch(`/api/worlds/${id}`);
-  if (!res.ok) { statusEl.textContent = "Monde introuvable."; return; }
-  const world = await res.json() as { name: string; width: number; height: number; data: string };
-  if (world.width !== WIDTH || world.height !== HEIGHT) {
-    statusEl.textContent = "Taille de grille incompatible.";
+    galleryGrid.replaceChildren(note("API injoignable."));
     return;
   }
-  load(world.data);
-  statusEl.textContent = `« ${world.name} » chargé.`;
+  galleryGrid.replaceChildren(
+    ...(worlds.length ? worlds.map(card) : [note("Aucun monde. « Sauvegarder » en dépose un.")]),
+  );
 }
+
+function note(text: string): HTMLParagraphElement {
+  const p = document.createElement("p");
+  p.className = "hint";
+  p.textContent = text;
+  return p;
+}
+
+function card(w: WorldSummary): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "card";
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = w.name; // textContent : le nom vient d'un autre visiteur
+  const date = document.createElement("span");
+  date.className = "date";
+  date.textContent = new Date(w.createdAt).toLocaleDateString("fr-FR");
+  button.append(name, date);
+
+  // La grille sert deux fois : à dessiner la vignette, puis à charger le monde.
+  let data: string | null = null;
+  button.addEventListener("click", () => {
+    if (!data) return;
+    load(data);
+    galleryEl.close();
+    statusEl.textContent = `« ${w.name} » chargé.`;
+  });
+
+  void fetch(`/api/worlds/${w.id}`)
+    .then((r) => r.json() as Promise<{ width: number; height: number; data: string }>)
+    .then((world) => {
+      button.prepend(thumbnail(decode(world.data, world.width * world.height), world.width, world.height));
+      if (world.width === WIDTH && world.height === HEIGHT) data = world.data;
+      else button.title = "Taille de grille incompatible";
+    })
+    .catch(() => (button.title = "Monde illisible"));
+  return button;
+}
+
+document.querySelector<HTMLButtonElement>("#gallery-open")!.addEventListener("click", () => void openGallery());
 
 document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", async () => {
   const name = prompt("Nom du monde ?", `bac-${new Date().toLocaleTimeString("fr-FR")}`);
@@ -242,8 +272,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name, width: WIDTH, height: HEIGHT, data: encode(engine.cells) }),
   });
-  statusEl.textContent = res.ok ? "Sauvegardé." : "Échec de la sauvegarde.";
-  if (res.ok) void listWorlds();
+  statusEl.textContent = res.ok ? "Sauvegardé — visible dans la galerie." : "Échec de la sauvegarde.";
 });
 
 /** Charge une grille encodée (API ou lien partagé). */
@@ -264,8 +293,6 @@ document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", a
   }
 });
 
-document.querySelector<HTMLButtonElement>("#refresh")!.addEventListener("click", () => void listWorlds());
-void listWorlds();
 
 /* -------------------------------------------------------------------- défis */
 

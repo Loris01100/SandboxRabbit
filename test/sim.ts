@@ -8,7 +8,7 @@ import { decode, encode } from "../src/client/sim/codec.ts";
 import { CHALLENGES } from "../src/client/challenges.ts";
 import {
   ALCOHOL, BATTERY, CANDLE, EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MERCURY, METAL,
-  MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
+  MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
   SNOW, SOURCE, SPARK, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
@@ -403,6 +403,22 @@ function count(e: Engine, id: MaterialId): number {
   const on = circuit(true);
   assert.equal(count(on, TNT), 0, "interrupteur fermé : la pile fait sauter la charge");
   assert.equal(count(on, SWITCH), 1, "l'interrupteur relaie sans se transformer en métal");
+}
+
+// L'azote liquide gèle l'eau qu'il touche, puis s'évapore.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) e.set(x, 30, STONE);
+  for (let x = 10; x < 30; x++) for (let y = 27; y < 30; y++) e.set(x, y, WATER);
+  for (let x = 12; x < 28; x++) e.set(x, 26, NITROGEN);
+
+  for (let t = 0; t < 40; t++) e.step();
+  assert.ok(count(e, ICE) > 20, "l'azote gèle la flaque");
+
+  // Il ne tient pas : dès qu'il touche plus chaud que -60 °C il part en buée.
+  // Quelques cellules peuvent survivre, piégées dans le froid qu'elles ont créé.
+  for (let t = 0; t < 400; t++) e.step();
+  assert.ok(count(e, NITROGEN) < 8, "puis il s'évapore presque entièrement");
 }
 
 // Le vide reste du vide.

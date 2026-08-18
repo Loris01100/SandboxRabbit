@@ -84,3 +84,25 @@ function clamp01(v: number): number {
 function clamp(v: number): number {
   return v < 0 ? 0 : v > 255 ? 255 : v;
 }
+
+/**
+ * Vignette d'un monde décodé : mêmes couleurs, sans le bruit ni l'état (`life`,
+ * `frozen`) qui ne sont pas sauvegardés. Le canvas est rendu à la taille de la
+ * grille et mis à l'échelle par le CSS, comme le bac lui-même.
+ */
+export function thumbnail(cells: Uint8Array, width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) return canvas;
+  const image = ctx.createImageData(width, height);
+  const buffer = new Uint32Array(image.data.buffer);
+  for (let i = 0; i < cells.length; i++) {
+    // Un monde sauvegardé peut contenir un id disparu depuis : on retombe sur le vide.
+    const [r, g, b] = (MATERIALS[cells[i]] ?? MATERIALS[EMPTY]).color;
+    buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
+  }
+  ctx.putImageData(image, 0, 0);
+  return canvas;
+}

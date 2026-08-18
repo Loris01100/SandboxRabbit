@@ -39,6 +39,7 @@ export const ALCOHOL = 31;
 export const MOLTEN_GLASS = 32;
 export const BATTERY = 33;
 export const SWITCH = 34;
+export const NITROGEN = 35;
 
 export type MaterialId = number;
 
@@ -118,6 +119,7 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [MOLTEN_GLASS]: { id: MOLTEN_GLASS, name: "Verre fondu", kind: "liquid", density: 8, color: [255, 170, 84], noise: 20, spread: 1, spawn: 900, freeze: { at: 600, into: GLASS }, hint: "Coule brûlant, puis se fige en verre sous 600 °C" },
   [BATTERY]: { id: BATTERY, name: "Pile", kind: "static", density: 9, color: [86, 196, 132], noise: 8, hint: "Envoie une étincelle dans le métal voisin, sans fin" },
   [SWITCH]: { id: SWITCH, name: "Interrupteur", kind: "static", density: 9, color: [176, 132, 60], noise: 8, hint: "Cliquez dessus pour ouvrir ou fermer le circuit" },
+  [NITROGEN]: { id: NITROGEN, name: "Azote liquide", kind: "liquid", density: 1, color: [214, 240, 250], noise: 10, spread: 2, heat: -190, boil: { at: -60, into: STEAM }, hint: "À -190 °C : gèle tout ce qu'il touche et s'évapore en buée" },
 };
 
 /**
@@ -128,7 +130,7 @@ export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
   { name: "Terrain", ids: [SAND, STONE, WOOD, GLASS, MUD, SALT] },
   { name: "Liquides", ids: [WATER, SALTWATER, OIL, TAR, ALCOHOL, ACID, MERCURY, MOLTEN_WAX, MOLTEN_GLASS] },
   { name: "Inflammable", ids: [FIRE, EMBER, LAVA, GUNPOWDER, TNT, WAX, CANDLE] },
-  { name: "Froid", ids: [ICE, SNOW] },
+  { name: "Froid", ids: [ICE, SNOW, NITROGEN] },
   { name: "Vivant", ids: [SEED, PLANT, NANITE] },
   { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK] },
   { name: "Gaz", ids: [SMOKE, STEAM] },
