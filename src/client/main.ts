@@ -132,7 +132,7 @@ windInput.addEventListener("input", () => {
 const gravityButton = document.querySelector<HTMLButtonElement>("#gravity")!;
 function flipGravity(): void {
   engine.gravity = engine.gravity === 1 ? -1 : 1;
-  gravityButton.textContent = engine.gravity === 1 ? "Gravité ↓" : "Gravité ↑";
+  gravityButton.textContent = engine.gravity === 1 ? "Vers le bas ↓" : "Vers le haut ↑";
 }
 gravityButton.addEventListener("click", flipGravity);
 

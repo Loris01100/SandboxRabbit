@@ -29,7 +29,7 @@ Un seul Worker Cloudflare sert le site statique **et** l'API (binding `ASSETS`, 
 - [src/client/sim/engine.ts](src/client/sim/engine.ts) — l'automate cellulaire. État = tableaux plats (`cells`, `life`, `clock`, `noise`), pas d'objets par cellule : c'est délibéré, pour pouvoir remplacer l'intérieur d'`Engine` par un module Rust/WASM en gardant l'interface (`step`, `paint`, `cells`).
 - [src/client/sim/render.ts](src/client/sim/render.ts) — 1 cellule = 1 pixel dans un `ImageData`, un seul `putImageData` par frame, mise à l'échelle via CSS `image-rendering: pixelated`. Ne pas introduire de dessin par cellule.
 - [src/client/sim/codec.ts](src/client/sim/codec.ts) — RLE + base64 ; format partagé avec la colonne `data` de D1. Toute modification du codec casse les mondes déjà sauvegardés.
-- [src/client/main.ts](src/client/main.ts) — DOM impératif, aucun framework UI. Les éléments viennent de [index.html](index.html) via `querySelector` non-null (`!`) : ajouter un contrôle = ajouter l'élément dans le HTML **et** son câblage ici.
+- [src/client/main.ts](src/client/main.ts) — DOM impératif, aucun framework UI. Les éléments viennent de [index.html](index.html) via `querySelector` non-null (`!`) : ajouter un contrôle = ajouter l'élément dans le HTML **et** son câblage ici. Le panneau est fait de `<details class="group">` repliables (natif, aucun JS) ; un réglage = une `.row` (libellé / contrôle / valeur, colonnes alignées) ou une `.check` pour une case à cocher.
 
 ### Invariants de la simulation
 

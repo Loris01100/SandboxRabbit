@@ -20,57 +20,62 @@
       </div>
 
       <aside class="panel">
-        <section>
-          <h2>Matière</h2>
+        <details class="group" open>
+          <summary>Matière</summary>
           <div id="palette" class="palette"></div>
           <p id="hint" class="hint"></p>
-        </section>
+        </details>
 
-        <section>
-          <h2>Pinceau</h2>
+        <details class="group" open>
+          <summary>Pinceau</summary>
           <label class="row">
             <span>Taille</span>
             <input id="brush" type="range" min="1" max="24" value="5" />
             <output id="brush-value">5</output>
           </label>
-          <label class="row">
+          <label class="check">
             <input id="keep" type="checkbox" />
-            <span>Ne pas remplacer la matière existante</span>
+            <span>Ne pas remplacer la matière déjà posée</span>
           </label>
-        </section>
+        </details>
 
-        <section>
-          <h2>Simulation</h2>
-          <div class="row buttons">
-            <button id="play" type="button">Pause</button>
-            <button id="step" type="button">Pas à pas</button>
-            <button id="clear" type="button">Vider</button>
-          </div>
+        <details class="group" open>
+          <summary>Simulation</summary>
           <label class="row">
             <span>Vitesse</span>
             <input id="speed" type="range" min="1" max="16" value="4" />
             <output id="speed-value">×1</output>
           </label>
+          <div class="buttons">
+            <button id="play" type="button">Pause</button>
+            <button id="step" type="button">Pas à pas</button>
+            <button id="clear" type="button">Vider</button>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>Physique du monde</summary>
           <label class="row">
             <span>Vent</span>
             <input id="wind" type="range" min="-10" max="10" value="0" />
             <output id="wind-value">0</output>
           </label>
-          <div class="row buttons">
-            <button id="gravity" type="button">Gravité ↓</button>
+          <div class="row">
+            <span>Gravité</span>
+            <button id="gravity" type="button">Vers le bas ↓</button>
           </div>
-        </section>
+        </details>
 
-        <section>
-          <h2>Mondes</h2>
-          <div class="row buttons">
+        <details class="group" open>
+          <summary>Mondes</summary>
+          <div class="buttons">
             <button id="save" type="button">Sauvegarder</button>
+            <button id="share" type="button">Copier le lien</button>
             <button id="refresh" type="button">Rafraîchir</button>
-            <button id="share" type="button">Lien</button>
           </div>
           <ul id="worlds" class="worlds"></ul>
           <p id="status" class="hint"></p>
-        </section>
+        </details>
       </aside>
     </main>
   </body>
