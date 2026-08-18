@@ -1,14 +1,24 @@
 import {
-  ACID, EMPTY, FIRE, LAVA, MATERIALS, PLANT, SAND, SMOKE, STEAM, STONE, WATER, WOOD,
+  ACID, EMPTY, FIRE, GLASS, ICE, LAVA, MATERIALS, NANITE, PLANT, SALT, SALTWATER,
+  SAND, SEED, SMOKE, SOURCE, STEAM, STONE, TNT, WATER, WOOD,
   type MaterialId,
-} from "./materials";
+} from "./materials.ts";
+
+/** Température de l'air au repos, en °C. */
+export const AMBIENT = 20;
+/** Part de la différence avec les voisins échangée par tick. */
+const CONDUCTION = 0.16;
+/** Retour vers l'ambiante par tick (le bac à sable perd sa chaleur). */
+const COOLING = 0.02;
 
 /**
  * Automate cellulaire type « falling sand ».
  *
- * Trois tableaux plats de la taille de la grille :
+ * Quatre tableaux plats de la taille de la grille :
  *  - `cells` : l'identifiant du matériau
- *  - `life`  : compteur de vie (feu, fumée, vapeur)
+ *  - `life`  : compteur de vie (feu, fumée, vapeur) ; pour une `SOURCE`, la
+ *              matière qu'elle émet
+ *  - `temp`  : température en °C, diffusée à chaque tick
  *  - `clock` : parité de la frame où la cellule a déjà bougé (évite qu'une
  *              cellule descende plusieurs fois dans le même tick)
  *
@@ -20,10 +30,18 @@ export class Engine {
   readonly height: number;
   readonly cells: Uint8Array;
   readonly life: Uint8Array;
+  readonly temp: Float32Array;
+  private readonly tempNext: Float32Array;
   private readonly clock: Uint8Array;
   private parity = 0;
   /** Bruit fixe par cellule : donne du grain sans scintiller. */
   readonly noise: Int8Array;
+  /** Sens de la gravité : 1 vers le bas, -1 vers le haut. */
+  gravity: 1 | -1 = 1;
+  /** Vent horizontal, de -1 (plein ouest) à 1 (plein est). */
+  wind = 0;
+  /** Matière émise par les cellules `SOURCE` déposées ensuite. */
+  emit: MaterialId = WATER;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -31,6 +49,8 @@ export class Engine {
     const n = width * height;
     this.cells = new Uint8Array(n);
     this.life = new Uint8Array(n);
+    this.temp = new Float32Array(n).fill(AMBIENT);
+    this.tempNext = new Float32Array(n);
     this.clock = new Uint8Array(n);
     this.noise = new Int8Array(n);
     for (let i = 0; i < n; i++) this.noise[i] = ((Math.random() * 255) | 0) - 128;
@@ -52,16 +72,24 @@ export class Engine {
     if (!this.inBounds(x, y)) return;
     const i = this.index(x, y);
     this.cells[i] = id;
-    this.life[i] = MATERIALS[id].life ?? 0;
+    // Une source garde dans `life` la matière qu'elle crache.
+    this.life[i] = id === SOURCE ? this.emit : (MATERIALS[id].life ?? 0);
+    const spawn = MATERIALS[id].spawn ?? MATERIALS[id].heat;
+    if (spawn !== undefined) this.temp[i] = spawn;
   }
 
   clear(): void {
     this.cells.fill(EMPTY);
     this.life.fill(0);
+    this.temp.fill(AMBIENT);
   }
 
-  /** Dépose un disque de matière (pinceau). */
-  paint(cx: number, cy: number, radius: number, id: MaterialId, density = 1): void {
+  /**
+   * Dépose un disque de matière (pinceau).
+   * `overwrite = false` : on ne peint que le vide, la matière déjà là est
+   * préservée. La gomme, elle, efface toujours.
+   */
+  paint(cx: number, cy: number, radius: number, id: MaterialId, density = 1, overwrite = true): void {
     const r2 = radius * radius;
     for (let y = cy - radius; y <= cy + radius; y++) {
       for (let x = cx - radius; x <= cx + radius; x++) {
@@ -69,6 +97,7 @@ export class Engine {
         if (dx * dx + dy * dy > r2) continue;
         if (!this.inBounds(x, y)) continue;
         if (density < 1 && Math.random() > density) continue;
+        if (!overwrite && id !== EMPTY && this.cells[this.index(x, y)] !== EMPTY) continue;
         this.set(x, y, id);
       }
     }
@@ -85,6 +114,7 @@ export class Engine {
   private swap(a: number, b: number): void {
     const c = this.cells[a]; this.cells[a] = this.cells[b]; this.cells[b] = c;
     const l = this.life[a]; this.life[a] = this.life[b]; this.life[b] = l;
+    const t = this.temp[a]; this.temp[a] = this.temp[b]; this.temp[b] = t;
     this.clock[a] = this.parity;
     this.clock[b] = this.parity;
   }
@@ -98,13 +128,20 @@ export class Engine {
     return true;
   }
 
+  /** Sens horizontal tiré au sort, biaisé par le vent. */
+  private drift(): number {
+    return Math.random() < 0.5 + this.wind / 2 ? 1 : -1;
+  }
+
   step(): void {
     this.parity ^= 1;
     const { width: w, height: h } = this;
     const leftToRight = this.parity === 0;
-    for (let y = h - 1; y >= 0; y--) {
-      for (let k = 0; k < w; k++) {
-        const x = leftToRight ? k : w - 1 - k;
+    // On balaie dans le sens de la gravité : la matière tombe d'abord.
+    for (let k = 0; k < h; k++) {
+      const y = this.gravity === 1 ? h - 1 - k : k;
+      for (let j = 0; j < w; j++) {
+        const x = leftToRight ? j : w - 1 - j;
         const i = y * w + x;
         const id = this.cells[i];
         if (id === EMPTY) continue;
@@ -113,6 +150,7 @@ export class Engine {
         this.update(i, x, y, id);
       }
     }
+    this.thermal();
   }
 
   private update(i: number, x: number, y: number, id: MaterialId): void {
@@ -121,6 +159,11 @@ export class Engine {
       case LAVA: this.updateLava(i, x, y); return;
       case ACID: this.updateAcid(i, x, y); return;
       case PLANT: this.updatePlant(x, y); return;
+      case TNT: this.updateTnt(x, y); return;
+      case SALT: this.updateSalt(i, x, y); return;
+      case SEED: this.updateSeed(i, x, y); return;
+      case NANITE: this.updateNanite(i, x, y); return;
+      case SOURCE: this.updateSource(i, x, y); return;
     }
     switch (MATERIALS[id].kind) {
       case "powder": this.updatePowder(i, x, y, id); return;
@@ -131,17 +174,19 @@ export class Engine {
   }
 
   private updatePowder(i: number, x: number, y: number, id: MaterialId): void {
-    if (this.tryMove(i, x, y + 1, id)) return;
-    const dir = Math.random() < 0.5 ? 1 : -1;
-    if (this.tryMove(i, x + dir, y + 1, id)) return;
-    this.tryMove(i, x - dir, y + 1, id);
+    const down = y + this.gravity;
+    if (this.tryMove(i, x, down, id)) return;
+    const dir = this.drift();
+    if (this.tryMove(i, x + dir, down, id)) return;
+    this.tryMove(i, x - dir, down, id);
   }
 
   private updateLiquid(i: number, x: number, y: number, id: MaterialId): void {
-    if (this.tryMove(i, x, y + 1, id)) return;
-    const dir = Math.random() < 0.5 ? 1 : -1;
-    if (this.tryMove(i, x + dir, y + 1, id)) return;
-    if (this.tryMove(i, x - dir, y + 1, id)) return;
+    const down = y + this.gravity;
+    if (this.tryMove(i, x, down, id)) return;
+    const dir = this.drift();
+    if (this.tryMove(i, x + dir, down, id)) return;
+    if (this.tryMove(i, x - dir, down, id)) return;
     // Étalement : on glisse aussi loin que possible du même côté.
     const spread = MATERIALS[id].spread ?? 1;
     let cur = i, cx = x;
@@ -159,9 +204,10 @@ export class Engine {
 
   /** Montée d'un gaz, sans le vieillissement (le feu gère sa propre fin de vie). */
   private moveGas(i: number, x: number, y: number, id: MaterialId): void {
-    const dir = Math.random() < 0.5 ? 1 : -1;
-    if (Math.random() < 0.7 && this.tryMove(i, x, y - 1, id)) return;
-    if (this.tryMove(i, x + dir, y - 1, id)) return;
+    const up = y - this.gravity;
+    const dir = this.drift();
+    if (Math.random() < 0.7 && this.tryMove(i, x, up, id)) return;
+    if (this.tryMove(i, x + dir, up, id)) return;
     this.tryMove(i, x + dir, y, id);
   }
 
@@ -179,7 +225,8 @@ export class Engine {
   private updateFire(i: number, x: number, y: number): void {
     // L'eau tue la flamme, et se change en vapeur.
     for (const [nx, ny] of this.neighbors(x, y)) {
-      if (this.get(nx, ny) === WATER) {
+      const n = this.get(nx, ny);
+      if (n === WATER || n === SALTWATER) {
         this.set(nx, ny, STEAM);
         this.set(x, y, STEAM);
         return;
@@ -193,7 +240,7 @@ export class Engine {
   private updateLava(i: number, x: number, y: number): void {
     for (const [nx, ny] of this.neighbors(x, y)) {
       const n = this.get(nx, ny);
-      if (n === WATER) {
+      if (n === WATER || n === SALTWATER) {
         this.set(nx, ny, STEAM);
         this.set(x, y, STONE);
         return;
@@ -215,7 +262,8 @@ export class Engine {
   private updateAcid(i: number, x: number, y: number): void {
     for (const [nx, ny] of this.neighbors(x, y)) {
       const n = this.get(nx, ny);
-      const dissolvable = n === STONE || n === WOOD || n === SAND || n === PLANT;
+      const dissolvable = n === STONE || n === WOOD || n === SAND || n === PLANT
+        || n === GLASS || n === ICE || n === SEED;
       if (dissolvable && Math.random() < 0.06) {
         this.set(nx, ny, EMPTY);
         if (Math.random() < 0.5) { this.set(x, y, SMOKE); return; } // l'acide s'use
@@ -233,7 +281,105 @@ export class Engine {
     if (!drank) return;
     // Une pousse peut partir vers le haut ou en biais.
     const dx = (Math.random() * 3 | 0) - 1;
-    if (this.get(x + dx, y - 1) === EMPTY && Math.random() < 0.5) this.set(x + dx, y - 1, PLANT);
+    const up = y - this.gravity;
+    if (this.get(x + dx, up) === EMPTY && Math.random() < 0.5) this.set(x + dx, up, PLANT);
+  }
+
+  /** Le TNT n'attend que la flamme ; la chaîne se propage par le feu de l'explosion. */
+  private updateTnt(x: number, y: number): void {
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      const n = this.get(nx, ny);
+      if (n === FIRE || n === LAVA) { this.explode(x, y); return; }
+    }
+  }
+
+  /** Souffle un disque : la moitié part en flammes, le reste est pulvérisé. */
+  explode(cx: number, cy: number, radius = 7): void {
+    const r2 = radius * radius;
+    for (let y = cy - radius; y <= cy + radius; y++) {
+      for (let x = cx - radius; x <= cx + radius; x++) {
+        const dx = x - cx, dy = y - cy;
+        if (dx * dx + dy * dy > r2 || !this.inBounds(x, y)) continue;
+        // Le TNT voisin survit à la déflagration : il explosera au tick suivant.
+        if (this.cells[this.index(x, y)] === TNT && (dx !== 0 || dy !== 0)) continue;
+        this.set(x, y, Math.random() < 0.5 ? FIRE : EMPTY);
+      }
+    }
+  }
+
+  /** Le sel se dissout dans l'eau et fait fondre la glace. */
+  private updateSalt(i: number, x: number, y: number): void {
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      const n = this.get(nx, ny);
+      if (n === WATER) { this.set(nx, ny, SALTWATER); this.set(x, y, EMPTY); return; }
+      if (n === ICE && Math.random() < 0.25) { this.set(nx, ny, WATER); this.set(x, y, EMPTY); return; }
+    }
+    this.updatePowder(i, x, y, SALT);
+  }
+
+  private updateSeed(i: number, x: number, y: number): void {
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      if (this.get(nx, ny) === WATER) { this.set(x, y, PLANT); return; }
+    }
+    this.updatePowder(i, x, y, SEED);
+  }
+
+  /** Gelée grise : dévore un voisin, se réplique, puis meurt de vieillesse. */
+  private updateNanite(i: number, x: number, y: number): void {
+    if (this.decay(i, NANITE, EMPTY)) return;
+    for (const [nx, ny] of this.neighbors(x, y)) {
+      const n = this.get(nx, ny);
+      if (n === EMPTY || n === NANITE || n === GLASS || n === SOURCE) continue;
+      if (Math.random() < 0.2) { this.set(nx, ny, NANITE); break; }
+    }
+    this.updatePowder(i, x, y, NANITE);
+  }
+
+  /** Générateur : crache sa matière (stockée dans `life`) dans la case libre voisine. */
+  private updateSource(i: number, x: number, y: number): void {
+    if (Math.random() > 0.5) return;
+    const id = this.life[i] || WATER;
+    const dy = MATERIALS[id].kind === "gas" ? -this.gravity : this.gravity;
+    if (this.get(x, y + dy) === EMPTY) this.set(x, y + dy, id);
+  }
+
+  /**
+   * Diffusion de la chaleur, puis changements d'état.
+   * Une seule loi remplace autant de cas particuliers : l'eau bout ou gèle, la
+   * glace fond, le sable vitrifie, l'huile s'auto-enflamme.
+   */
+  // ponytail: trois balayages pleins par tick (~1,3 ms en 320×180) ; si ça
+  // devient le budget limitant, fusionner les passes ou n'en faire qu'une sur deux.
+  private thermal(): void {
+    const { width: w, height: h, cells, temp, tempNext } = this;
+    for (let i = 0; i < cells.length; i++) {
+      const heat = MATERIALS[cells[i]].heat;
+      // Une source tire vers sa température sans l'imposer : une flamme peut
+      // encore faire fondre la glace qu'elle touche.
+      if (heat !== undefined) temp[i] += (heat - temp[i]) * 0.5;
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const t = temp[i];
+        const sum =
+          (y > 0 ? temp[i - w] : t) + (y < h - 1 ? temp[i + w] : t) +
+          (x > 0 ? temp[i - 1] : t) + (x < w - 1 ? temp[i + 1] : t);
+        tempNext[i] = t + CONDUCTION * (sum - 4 * t) + COOLING * (AMBIENT - t);
+      }
+    }
+    temp.set(tempNext);
+    for (let i = 0; i < cells.length; i++) {
+      const m = MATERIALS[cells[i]];
+      if (m.boil && temp[i] > m.boil.at) this.convert(i, m.boil.into);
+      else if (m.freeze && temp[i] < m.freeze.at) this.convert(i, m.freeze.into);
+    }
+  }
+
+  /** Changement d'état sur place ; la température, elle, ne se réinitialise pas. */
+  private convert(i: number, into: MaterialId): void {
+    this.cells[i] = into;
+    this.life[i] = MATERIALS[into].life ?? 0;
   }
 
   private *neighbors(x: number, y: number): Generator<[number, number]> {

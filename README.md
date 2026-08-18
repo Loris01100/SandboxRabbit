@@ -3,8 +3,23 @@
 Un bac à sable cellulaire (« falling sand ») qui tourne entièrement dans le
 navigateur, servi par un Worker Cloudflare qui héberge aussi l'API.
 
-Premier bac à sable : `sable / eau / pierre / bois / huile / acide / lave /
-plante / feu / fumée`, pinceau réglable, pause & pas à pas, sauvegarde de mondes.
+Vingt matières : `sable / eau / pierre / bois / huile / acide / lave / plante /
+feu / glace / sel / eau salée / poudre / TNT / graine / nanites / verre /
+source / fumée`, pinceau réglable, pause & pas à pas, sauvegarde de mondes.
+
+### Ce qui se passe quand on mélange
+
+| Règle | Effet |
+| --- | --- |
+| Chaleur | Un champ de température est diffusé à chaque tick. L'eau bout à 100 °C et gèle à 0, la glace fond, le sable vitrifie près de la lave, l'huile s'auto-enflamme. Une seule loi, tous les changements d'état en découlent (`boil` / `freeze` dans `materials.ts`). |
+| TNT & poudre | La flamme déclenche l'explosion, l'explosion rallume les charges voisines : ça part en chaîne. |
+| Sel | Se dissout dans l'eau (eau salée, plus lourde, gèle à -18 °C) et fait fondre la glace. |
+| Graine | Tombe comme une poudre, germe en plante au contact de l'eau. |
+| Nanites | Dévorent la matière et se répliquent, puis meurent de vieillesse. Seul le verre les arrête : on peut construire un bocal. |
+| Source | Émet en continu la dernière matière sélectionnée avant elle (stockée dans `life`). |
+| Vent & gravité | Un curseur biaise la dérive horizontale, la touche `g` retourne la gravité. |
+| Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours). Clic maintenu = dépôt continu, même sans bouger la souris. |
+| Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. Ouvrir le lien recharge la scène. |
 
 ## Stack
 
@@ -41,6 +56,7 @@ Rust sur Cloudflare passe par WebAssembly. Deux usages possibles :
 npm install
 npm run dev        # http://localhost:5173 — front + Worker dans workerd, avec HMR
 npm run typecheck  # client et worker ont chacun leur tsconfig (DOM vs runtime Workers)
+npm run check      # auto-vérification de la simulation (Node exécute test/sim.ts tel quel)
 npm run build
 npm run preview    # build puis exécution du Worker en local
 npm run deploy     # déploiement (npx wrangler login la première fois)

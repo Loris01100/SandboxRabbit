@@ -33,6 +33,10 @@
             <input id="brush" type="range" min="1" max="24" value="5" />
             <output id="brush-value">5</output>
           </label>
+          <label class="row">
+            <input id="keep" type="checkbox" />
+            <span>Ne pas remplacer la matière existante</span>
+          </label>
         </section>
 
         <section>
@@ -42,6 +46,14 @@
             <button id="step" type="button">Pas à pas</button>
             <button id="clear" type="button">Vider</button>
           </div>
+          <label class="row">
+            <span>Vent</span>
+            <input id="wind" type="range" min="-10" max="10" value="0" />
+            <output id="wind-value">0</output>
+          </label>
+          <div class="row buttons">
+            <button id="gravity" type="button">Gravité ↓</button>
+          </div>
         </section>
 
         <section>
@@ -49,6 +61,7 @@
           <div class="row buttons">
             <button id="save" type="button">Sauvegarder</button>
             <button id="refresh" type="button">Rafraîchir</button>
+            <button id="share" type="button">Lien</button>
           </div>
           <ul id="worlds" class="worlds"></ul>
           <p id="status" class="hint"></p>

@@ -1,8 +1,8 @@
 import "./style.css";
-import { Engine } from "./sim/engine";
+import { AMBIENT, Engine } from "./sim/engine.ts";
 import { Renderer } from "./sim/render";
 import { decode, encode } from "./sim/codec";
-import { EMPTY, MATERIALS, PALETTE, SAND, STONE, WATER, type MaterialId } from "./sim/materials";
+import { EMPTY, MATERIALS, PALETTE, SAND, SOURCE, STONE, WATER, type MaterialId } from "./sim/materials.ts";
 
 const WIDTH = 320;
 const HEIGHT = 180;
@@ -35,6 +35,8 @@ paletteEl.addEventListener("pointerleave", () => (hintEl.textContent = MATERIALS
 
 function select(id: MaterialId): void {
   current = id;
+  // Une source crache la dernière matière choisie avant elle.
+  if (id !== SOURCE && id !== EMPTY) engine.emit = id;
   hintEl.textContent = MATERIALS[id].hint;
   for (const b of paletteEl.querySelectorAll("button")) {
     b.setAttribute("aria-pressed", String(Number(b.dataset.id) === id));
@@ -48,6 +50,7 @@ addEventListener("keydown", (e) => {
   const n = Number(e.key);
   if (!Number.isNaN(n) && PALETTE[n - 1] !== undefined) select(PALETTE[n - 1]);
   if (e.key === "0") select(EMPTY);
+  if (e.key === "g") flipGravity();
 });
 
 /* ------------------------------------------------------------------ souris */
@@ -67,7 +70,7 @@ function toCell(e: PointerEvent): { x: number; y: number } {
 function paintAt(x: number, y: number): void {
   const kind = MATERIALS[current].kind;
   const density = kind === "liquid" || kind === "gas" ? 0.35 : 1;
-  engine.paint(x, y, brush, current, density);
+  engine.paint(x, y, brush, current, density, !keepInput.checked);
 }
 
 canvas.addEventListener("pointerdown", (e) => {
@@ -107,6 +110,22 @@ brushInput.addEventListener("input", () => {
   brush = Number(brushInput.value);
   brushValue.value = brushInput.value;
 });
+
+const keepInput = document.querySelector<HTMLInputElement>("#keep")!;
+
+const windInput = document.querySelector<HTMLInputElement>("#wind")!;
+const windValue = document.querySelector<HTMLOutputElement>("#wind-value")!;
+windInput.addEventListener("input", () => {
+  engine.wind = Number(windInput.value) / 10;
+  windValue.value = windInput.value;
+});
+
+const gravityButton = document.querySelector<HTMLButtonElement>("#gravity")!;
+function flipGravity(): void {
+  engine.gravity = engine.gravity === 1 ? -1 : 1;
+  gravityButton.textContent = engine.gravity === 1 ? "Gravité ↓" : "Gravité ↑";
+}
+gravityButton.addEventListener("click", flipGravity);
 
 const playButton = document.querySelector<HTMLButtonElement>("#play")!;
 function toggleRun(): void {
@@ -160,8 +179,7 @@ async function loadWorld(id: string): Promise<void> {
     statusEl.textContent = "Taille de grille incompatible.";
     return;
   }
-  engine.cells.set(decode(world.data, WIDTH * HEIGHT));
-  engine.life.fill(0);
+  load(world.data);
   statusEl.textContent = `« ${world.name} » chargé.`;
 }
 
@@ -176,6 +194,24 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
   });
   statusEl.textContent = res.ok ? "Sauvegardé." : "Échec de la sauvegarde.";
   if (res.ok) void listWorlds();
+});
+
+/** Charge une grille encodée (API ou lien partagé). */
+function load(data: string): void {
+  engine.cells.set(decode(data, WIDTH * HEIGHT));
+  engine.life.fill(0);
+  engine.temp.fill(AMBIENT);
+}
+
+// Partage : le monde entier tient dans l'URL (RLE + base64, ~1 ko).
+document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", async () => {
+  location.hash = encodeURIComponent(encode(engine.cells));
+  try {
+    await navigator.clipboard.writeText(location.href);
+    statusEl.textContent = "Lien copié.";
+  } catch {
+    statusEl.textContent = "Lien dans la barre d'adresse.";
+  }
 });
 
 document.querySelector<HTMLButtonElement>("#refresh")!.addEventListener("click", () => void listWorlds());
@@ -196,7 +232,9 @@ function seed(): void {
     for (let y = 50; y < 80; y++) engine.set(x, y, WATER);
   }
 }
-seed();
+
+if (location.hash.length > 1) load(decodeURIComponent(location.hash.slice(1)));
+else seed();
 
 /* ------------------------------------------------------------ boucle rendu */
 
@@ -206,6 +244,8 @@ let frames = 0;
 let lastReport = performance.now();
 
 function frame(now: number): void {
+  // Clic maintenu sans bouger : on continue de déposer sous le curseur.
+  if (painting && last) paintAt(last.x, last.y);
   if (running) engine.step();
   renderer.draw();
 
