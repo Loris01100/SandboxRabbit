@@ -157,7 +157,15 @@ function zoomAt(clientX: number, clientY: number, next: number): void {
 
 const clampZoom = (z: number): number => Math.min(12, Math.max(1, z));
 
+// Le zoom se coupe : sans lui la molette rend la main à la page, et un bac
+// laissé agrandi ne piège personne — on le remet d'aplomb en décochant.
+const zoomInput = document.querySelector<HTMLInputElement>("#zoom")!;
+zoomInput.addEventListener("change", () => {
+  if (!zoomInput.checked) zoomAt(0, 0, 1);
+});
+
 canvas.addEventListener("wheel", (e) => {
+  if (!zoomInput.checked) return; // pas de preventDefault : la page défile
   e.preventDefault();
   zoomAt(e.clientX, e.clientY, clampZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
 }, { passive: false });
@@ -212,13 +220,13 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 canvas.addEventListener("pointerdown", (e) => {
   if (e.pointerType === "touch") {
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (touches.size === 2) {
+    if (touches.size === 2 && zoomInput.checked) {
       painting = false; // le second doigt annule le trait en cours
       pinch = span();
       return;
     }
   }
-  if (e.button === 1) {
+  if (e.button === 1 && zoomInput.checked) {
     panning = true;
     canvas.setPointerCapture(e.pointerId);
     e.preventDefault();
