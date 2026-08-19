@@ -5,12 +5,14 @@ import { decode, decodeFrozen, encode } from "./sim/codec";
 import { CATEGORIES, EMPTY, MATERIALS, SAND, SHORTCUTS, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, type Challenge } from "./challenges.ts";
 
-const WIDTH = 320;
-const HEIGHT = 180;
+// La taille de la grille est un réglage : `Engine` et `Renderer` sont recréés
+// à chaque changement (le rendu écrit dans un ImageData de la taille exacte).
+let WIDTH = 320;
+let HEIGHT = 180;
 
-const engine = new Engine(WIDTH, HEIGHT);
 const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
-const renderer = new Renderer(canvas, engine);
+let engine = new Engine(WIDTH, HEIGHT);
+let renderer = new Renderer(canvas, engine);
 
 let current: MaterialId = SAND;
 let brush = 5;
@@ -91,6 +93,41 @@ function paintAt(x: number, y: number): void {
   if (mirrorInput.checked) dab(WIDTH - 1 - x, y);
 }
 
+/* ------------------------------------------------------------- vue (zoom) */
+
+// Le canvas est transformé en CSS : `toCell()` passe par `getBoundingClientRect()`,
+// qui tient déjà compte du zoom et du décalage — rien à corriger ailleurs.
+// ponytail: pas de bornes sur le décalage, on peut pousser le bac hors du cadre
+// (la molette à fond inverse remet tout d'aplomb).
+let zoom = 1;
+let panX = 0;
+let panY = 0;
+let panning = false;
+
+function applyView(): void {
+  canvas.style.transformOrigin = "0 0";
+  canvas.style.transform = zoom === 1 ? "" : `translate(${panX}px, ${panY}px) scale(${zoom})`;
+}
+
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  const next = Math.min(12, Math.max(1, zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+  // Le point sous le curseur ne doit pas bouger. La boîte non transformée se
+  // déduit de la boîte affichée : origine `r.left - panX`, largeur `r.width / zoom`.
+  const fx = (e.clientX - r.left) / r.width;
+  const fy = (e.clientY - r.top) / r.height;
+  panX = e.clientX - (r.left - panX) - fx * (r.width / zoom) * next;
+  panY = e.clientY - (r.top - panY) - fy * (r.height / zoom) * next;
+  zoom = next;
+  if (zoom === 1) { panX = 0; panY = 0; }
+  applyView();
+}, { passive: false });
+
+// Clic du milieu : déplacer la vue. `translate` précède `scale`, donc un pixel
+// de souris vaut un pixel d'écran, quel que soit le zoom.
+canvas.addEventListener("auxclick", (e) => e.preventDefault());
+
 /** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */
 function dab(x: number, y: number): void {
   if (toolInput.value !== "paint") {
@@ -102,6 +139,10 @@ function dab(x: number, y: number): void {
   // Gomme sélective : on n'efface que la dernière matière choisie avant la gomme.
   const only = current === EMPTY && onlyInput.checked ? engine.emit : undefined;
   engine.paint(x, y, brush, current, density, !keepInput.checked, only);
+  // Invité d'un salon : c'est l'hôte qui fait foi, il faut lui repasser le geste.
+  if (socket?.readyState === WebSocket.OPEN && !host) {
+    socket.send(JSON.stringify({ type: "paint", x, y, r: brush, id: current, density }));
+  }
 }
 
 /** Trace un segment de cellules (geste rapide, ou ligne droite au Maj). */
@@ -120,6 +161,12 @@ function strokeTo(from: { x: number; y: number }, to: { x: number; y: number }):
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("pointerdown", (e) => {
+  if (e.button === 1) {
+    panning = true;
+    canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
   const p = toCell(e);
   // Pipette : Alt+clic reprend la matière sous le curseur, sans rien modifier.
   if (e.altKey) { select(engine.get(p.x, p.y) as MaterialId); return; }
@@ -145,6 +192,12 @@ function probe(p: { x: number; y: number }): void {
 }
 
 canvas.addEventListener("pointermove", (e) => {
+  if (panning) {
+    panX += e.movementX;
+    panY += e.movementY;
+    applyView();
+    return;
+  }
   const at = toCell(e);
   probe(at);
   if (!painting) return;
@@ -157,7 +210,7 @@ canvas.addEventListener("pointermove", (e) => {
 
 for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
   // `last` est conservé : c'est l'ancre de la ligne droite au Maj.
-  canvas.addEventListener(type, () => (painting = false));
+  canvas.addEventListener(type, () => { painting = false; panning = false; });
 }
 canvas.addEventListener("pointerleave", () => (probeEl.textContent = "–"));
 
@@ -246,6 +299,35 @@ ambientInput.addEventListener("input", () => {
   ambientValue.value = `${ambientInput.value} °C`;
 });
 
+/**
+ * Change la taille de la grille. Tout est refait — `Engine`, `Renderer`, le
+ * canvas — en reportant les réglages du monde ; les piles d'annulation partent,
+ * leurs tableaux n'ont plus la bonne longueur. `keep` évite de regraîner quand
+ * la grille reçue d'un hôte impose sa taille.
+ */
+function resize(width: number, height: number, keep = false): void {
+  const { wind, ambient, gravity, emit } = engine;
+  WIDTH = width;
+  HEIGHT = height;
+  engine = new Engine(width, height);
+  Object.assign(engine, { wind, ambient, gravity, emit });
+  renderer = new Renderer(canvas, engine);
+  renderer.heatmap = heatmapInput.checked;
+  undoStack.length = 0;
+  redoStack.length = 0;
+  zoom = 1;
+  panX = 0;
+  panY = 0;
+  applyView();
+  if (!keep) seed();
+}
+
+const sizeInput = document.querySelector<HTMLSelectElement>("#size")!;
+sizeInput.addEventListener("input", () => {
+  const w = Number(sizeInput.value);
+  resize(w, (w * 9) / 16);
+});
+
 const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
 heatmapInput.addEventListener("change", () => (renderer.heatmap = heatmapInput.checked));
 
@@ -256,16 +338,16 @@ const SETTINGS = "sandbox-rabbit:reglages";
 function remember(): void {
   localStorage.setItem(SETTINGS, JSON.stringify({
     current, brush: brushInput.value, speed: speedInput.value, wind: windInput.value,
-    ambient: ambientInput.value,
+    ambient: ambientInput.value, size: sizeInput.value,
   }));
 }
-for (const el of [brushInput, speedInput, windInput, ambientInput]) el.addEventListener("input", remember);
+for (const el of [brushInput, speedInput, windInput, ambientInput, sizeInput]) el.addEventListener("input", remember);
 paletteEl.addEventListener("click", remember);
 
 const saved = JSON.parse(localStorage.getItem(SETTINGS) ?? "null");
 if (saved) {
   if (MATERIALS[saved.current as MaterialId]) select(saved.current as MaterialId);
-  for (const [el, value] of [[brushInput, saved.brush], [speedInput, saved.speed], [windInput, saved.wind], [ambientInput, saved.ambient]] as const) {
+  for (const [el, value] of [[brushInput, saved.brush], [speedInput, saved.speed], [windInput, saved.wind], [ambientInput, saved.ambient], [sizeInput, saved.size]] as const) {
     if (value === undefined) continue; // réglage absent d'une version précédente
     el.value = value;
     el.dispatchEvent(new Event("input"));
@@ -434,25 +516,134 @@ document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", a
 });
 
 
-// Image : le canvas fait 320x180, on le repasse ×4 sans lissage pour sortir un
-// PNG regardable plutôt qu'une vignette.
-document.querySelector<HTMLButtonElement>("#png")!.addEventListener("click", () => {
+/** Télécharge un blob sous un nom horodaté. */
+function download(blob: Blob, extension: string): void {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `bac-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${extension}`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/** Le bac agrandi ×4 sans lissage : un rendu à la taille de la grille est illisible. */
+function upscale(): HTMLCanvasElement {
   const big = document.createElement("canvas");
   big.width = WIDTH * 4;
   big.height = HEIGHT * 4;
+  return big;
+}
+
+document.querySelector<HTMLButtonElement>("#png")!.addEventListener("click", () => {
+  const big = upscale();
   const ctx = big.getContext("2d")!;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(canvas, 0, 0, big.width, big.height);
-  big.toBlob((blob) => {
-    if (!blob) return;
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `bac-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  });
+  big.toBlob((blob) => blob && download(blob, "png"));
 });
 
+// Vidéo : `MediaRecorder` sur le flux d'un canvas, tout est natif. On filme la
+// copie agrandie, pas le bac : un .webm de 320×180 ne se regarde pas.
+// La boucle de rendu y recopie chaque frame tant que `recCtx` existe.
+let recorder: MediaRecorder | null = null;
+let recCtx: CanvasRenderingContext2D | null = null;
+const recordButton = document.querySelector<HTMLButtonElement>("#record")!;
+
+recordButton.addEventListener("click", () => {
+  if (recorder) { recorder.stop(); return; }
+  const big = upscale();
+  const chunks: Blob[] = [];
+  try {
+    recorder = new MediaRecorder(big.captureStream(30), { mimeType: "video/webm" });
+  } catch {
+    statusEl.textContent = "Ce navigateur ne sait pas enregistrer de vidéo.";
+    return;
+  }
+  recCtx = big.getContext("2d");
+  if (recCtx) recCtx.imageSmoothingEnabled = false;
+  recorder.addEventListener("dataavailable", (e) => chunks.push(e.data));
+  recorder.addEventListener("stop", () => {
+    recorder = null;
+    recCtx = null;
+    recordButton.textContent = "Vidéo";
+    statusEl.textContent = "Vidéo téléchargée.";
+    download(new Blob(chunks, { type: "video/webm" }), "webm");
+  });
+  recorder.start();
+  recordButton.textContent = "■ Arrêter";
+  statusEl.textContent = "Enregistrement…";
+});
+
+
+/* ------------------------------------------------------------- bac partagé */
+
+/*
+ * Un salon = un Durable Object qui ne fait que relayer (src/worker/room.ts).
+ * L'hôte est le seul à simuler : il diffuse sa grille quatre fois par seconde,
+ * les invités lui envoient leurs coups de pinceau et affichent ce qu'ils
+ * reçoivent — un seul simulateur, donc rien à réconcilier.
+ * ponytail: pas d'identité ni de verrou, qui entre peint. Et seul le pinceau
+ * est relayé : figer, gommer sélectivement ou vider restent locaux.
+ */
+const roomButton = document.querySelector<HTMLButtonElement>("#room")!;
+let socket: WebSocket | null = null;
+let host = false;
+let beat = 0;
+
+/** Grille reçue de l'hôte : posée sans passer par la pile d'annulation (4 par seconde). */
+function applyGrid(data: string, w: number, h: number): void {
+  if (w !== WIDTH || h !== HEIGHT) {
+    resize(w, h, true);
+    sizeInput.value = String(w);
+  }
+  engine.cells.set(decode(data, w * h));
+  engine.frozen.set(decodeFrozen(data, w * h));
+}
+
+function leaveRoom(): void {
+  clearInterval(beat);
+  socket = null;
+  host = false;
+  roomButton.textContent = "Bac partagé";
+}
+
+roomButton.addEventListener("click", () => {
+  if (socket) { socket.close(); return; }
+  const name = prompt("Nom du salon ?", "public");
+  if (!name) return;
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/room/${encodeURIComponent(name)}`);
+  socket = ws;
+  roomButton.textContent = "Quitter le salon";
+  statusEl.textContent = `Connexion au salon « ${name} »…`;
+
+  ws.addEventListener("message", (e) => {
+    const msg = JSON.parse(e.data as string);
+    if (msg.type === "role") {
+      host = msg.host;
+      // Un invité ne simule pas : sa grille est écrasée quatre fois par seconde.
+      running = host;
+      playButton.textContent = running ? "Pause" : "Reprendre";
+      statusEl.textContent = host
+        ? `Salon « ${name} » — vous simulez pour tout le monde.`
+        : `Salon « ${name} » — vous suivez l'hôte.`;
+    }
+    if (msg.type === "grid" && !host) applyGrid(msg.data, msg.width, msg.height);
+    if (msg.type === "paint" && host) engine.paint(msg.x, msg.y, msg.r, msg.id, msg.density);
+  });
+  ws.addEventListener("close", () => {
+    leaveRoom();
+    statusEl.textContent = "Salon quitté.";
+  });
+  ws.addEventListener("error", () => {
+    leaveRoom();
+    statusEl.textContent = "Salon injoignable.";
+  });
+
+  beat = setInterval(() => {
+    if (host && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "grid", width: WIDTH, height: HEIGHT, data: encode(engine.cells, engine.frozen) }));
+    }
+  }, 250);
+});
 
 /* -------------------------------------------------------------------- défis */
 
@@ -472,6 +663,8 @@ for (const c of CHALLENGES) {
   button.type = "button";
   button.textContent = c.name;
   button.addEventListener("click", () => {
+    // Les scènes sont écrites en dur pour 320×180 : on y revient si besoin.
+    if (WIDTH !== 320) { resize(320, 180, true); sizeInput.value = "320"; }
     snapshot();
     engine.clear();
     c.build(engine);
@@ -534,6 +727,8 @@ function frame(now: number): void {
     pending %= 1;
   }
   renderer.draw();
+  // Enregistrement en cours : la frame part aussi dans le canvas filmé.
+  if (recCtx) recCtx.drawImage(canvas, 0, 0, recCtx.canvas.width, recCtx.canvas.height);
 
   frames++;
   if (now - lastReport >= 500) {

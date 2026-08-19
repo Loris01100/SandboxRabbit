@@ -24,7 +24,9 @@ Pas de framework de test : [test/sim.ts](test/sim.ts) et [test/api.ts](test/api.
 
 Un seul Worker Cloudflare sert le site statique **et** l'API (binding `ASSETS`, `not_found_handling: single-page-application`). Pas de projet Pages séparé.
 
-- [src/worker/index.ts](src/worker/index.ts) — routes Hono `/api/*`, puis fallback `app.get("*")` vers `env.ASSETS`. L'interface `Env` y est définie ; `DB` et `AI` sont optionnels car leurs bindings sont commentés dans [wrangler.jsonc](wrangler.jsonc).
+- [src/worker/app.ts](src/worker/app.ts) — routes Hono `/api/*`, puis fallback `app.get("*")` vers `env.ASSETS`. L'interface `Env` y est définie. **Aucun import de `cloudflare:workers` ici** : c'est ce qui permet à [test/api.ts](test/api.ts) de charger l'API dans Node.
+- [src/worker/index.ts](src/worker/index.ts) — l'entrée du Worker : `fetch` délégué à `app`, le `scheduled` du ménage nocturne, et le réexport de la classe `Room`.
+- [src/worker/room.ts](src/worker/room.ts) — le Durable Object du bac partagé. Il **relaie, il ne simule pas** : le premier connecté est l'hôte et sa grille fait foi. Faire simuler chaque client ferait diverger les scènes (le moteur tire au sort à chaque tick).
 - [src/worker/store.ts](src/worker/store.ts) — `createStore(env)` renvoie l'implémentation D1 si `env.DB` existe, sinon une `Map` en mémoire (bouchon : vit dans l'isolate, non partagé). Activer D1 = créer la base, décommenter le bloc `d1_databases`, appliquer [migrations/0001_worlds.sql](migrations/0001_worlds.sql) ; aucun code à changer.
 - [src/client/sim/engine.ts](src/client/sim/engine.ts) — l'automate cellulaire. État = tableaux plats (`cells`, `life`, `clock`, `noise`), pas d'objets par cellule : c'est délibéré, pour pouvoir remplacer l'intérieur d'`Engine` par un module Rust/WASM en gardant l'interface (`step`, `paint`, `cells`).
 - [src/client/sim/render.ts](src/client/sim/render.ts) — 1 cellule = 1 pixel dans un `ImageData`, un seul `putImageData` par frame, mise à l'échelle via CSS `image-rendering: pixelated`. Ne pas introduire de dessin par cellule. `renderer.heatmap` bascule sur un rendu de `temp` (même boucle, autre palette).

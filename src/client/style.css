@@ -45,6 +45,8 @@ main {
   place-items: center;
   padding: 1rem;
   min-width: 0;
+  /* Le bac zoomé déborde de sa case : on le coupe là plutôt que sur le panneau. */
+  overflow: hidden;
 }
 
 canvas {

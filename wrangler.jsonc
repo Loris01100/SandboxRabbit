@@ -20,6 +20,29 @@
 			"database_id": "53b73e19-0d85-4d81-8357-241913ff60d5"
 		}
 	],
+	// Un salon = un Durable Object, qui ne fait que relayer les websockets.
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "ROOM",
+				"class_name": "Room"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"Room"
+			]
+		}
+	],
+	// Ménage nocturne : la galerie ne montre que 50 mondes, on ne garde que ceux-là.
+	"triggers": {
+		"crons": [
+			"0 4 * * *"
+		]
+	},
 	// Limite de débit sur l'écriture : 20 requêtes par IP et par minute.
 	// Compteur géré par Cloudflare, rien à stocker.
 	"unsafe": {

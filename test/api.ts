@@ -4,7 +4,7 @@
  * Sans binding `DB` ni `RL`, on tape le store mémoire et rien n'est limité.
  */
 import assert from "node:assert/strict";
-import app from "../src/worker/index.ts";
+import app from "../src/worker/app.ts";
 
 const env = {} as never;
 const json = (body: unknown) => ({
@@ -49,6 +49,9 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   assert.equal(after.find((w: { id: string }) => w.id === id), undefined, "supprimé de la liste");
   assert.equal((await app.request(`/api/worlds/${id}`, {}, env)).status, 404);
 }
+
+// Sans binding Durable Object (tests, `vite dev`), le bac partagé se dit indisponible.
+assert.equal((await app.request("/api/room/public", {}, env)).status, 503);
 
 assert.equal((await app.request("/api/inconnu", {}, env)).status, 404);
 

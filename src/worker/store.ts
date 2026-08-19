@@ -1,4 +1,4 @@
-import type { Env } from "./index.ts";
+import type { Env } from "./app.ts";
 
 export interface World {
   id: string;
@@ -18,6 +18,8 @@ export interface Store {
   get(id: string): Promise<World | null>;
   save(world: World): Promise<void>;
   remove(id: string): Promise<void>;
+  /** Ne garde que les `keep` mondes les plus récents (ménage nocturne). */
+  purge(keep: number): Promise<void>;
   /** Compte un chargement. Appelé par `GET /api/worlds/:id`, seul chemin de chargement. */
   see(id: string): Promise<void>;
 }
@@ -55,6 +57,10 @@ function memoryStore(): Store {
       const world = memory.get(id);
       if (world) world.views++;
     },
+    async purge(keep) {
+      const old = [...memory.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(keep);
+      for (const world of old) memory.delete(world.id);
+    },
   };
 }
 
@@ -83,6 +89,12 @@ function d1Store(db: D1Database): Store {
     },
     async see(id) {
       await db.prepare("UPDATE worlds SET views = views + 1 WHERE id = ?").bind(id).run();
+    },
+    async purge(keep) {
+      await db
+        .prepare("DELETE FROM worlds WHERE id NOT IN (SELECT id FROM worlds ORDER BY created_at DESC LIMIT ?)")
+        .bind(keep)
+        .run();
     },
   };
 }

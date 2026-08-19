@@ -67,7 +67,8 @@
           <p class="hint">
             <kbd>Maj</kbd> + clic trace une ligne droite depuis le dernier point ·
             clic droit remplit la poche sous le curseur · <kbd>f</kbd> bascule Peindre / Figer ·
-            un clic sur un interrupteur déjà posé l'ouvre ou le ferme
+            un clic sur un interrupteur déjà posé l'ouvre ou le ferme ·
+            molette pour zoomer, clic du milieu pour déplacer la vue
           </p>
         </details>
 
@@ -90,6 +91,14 @@
 
         <details class="group" open>
           <summary>Physique du monde</summary>
+          <label class="row">
+            <span>Grille</span>
+            <select id="size">
+              <option value="320">320 × 180</option>
+              <option value="480">480 × 270</option>
+              <option value="640">640 × 360</option>
+            </select>
+          </label>
           <label class="row">
             <span>Vent</span>
             <input id="wind" type="range" min="-10" max="10" value="0" />
@@ -122,6 +131,8 @@
             <button id="save" type="button">Sauvegarder</button>
             <button id="share" type="button">Copier le lien</button>
             <button id="png" type="button" title="Télécharger l'image du bac">Image PNG</button>
+            <button id="record" type="button" title="Filmer le bac (.webm)">Vidéo</button>
+            <button id="room" type="button" title="Simuler à plusieurs dans le même bac">Bac partagé</button>
             <button id="gallery-open" type="button">Galerie</button>
           </div>
           <p id="status" class="hint"></p>
