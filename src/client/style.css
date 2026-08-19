@@ -174,8 +174,21 @@ button {
 button:hover { border-color: #39405a; }
 
 @media (max-width: 760px) {
-  main { grid-template-columns: 1fr; }
-  .panel { border-left: none; border-top: 1px solid var(--line); }
+  /* En bloc et non en grille : la zone d'un élément de grille fait sa propre
+     hauteur, donc `sticky` n'y a aucune marge de manœuvre. */
+  main { display: block; }
+  /* Le bac reste en haut pendant qu'on fait défiler les réglages sous lui. */
+  .stage {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 0.5rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  /* Un bac plein écran ne laisserait rien voir du panneau. */
+  .stage canvas { max-height: 40vh; width: auto; }
+  .panel { border-left: none; border-top: none; overflow: visible; }
 }
 
 kbd {
