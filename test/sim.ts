@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { Engine } from "../src/client/sim/engine.ts";
 import { decode, decodeFrozen, encode } from "../src/client/sim/codec.ts";
-import { CHALLENGES } from "../src/client/challenges.ts";
+import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import {
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
@@ -353,6 +353,19 @@ function count(e: Engine, id: MaterialId): number {
   }
 }
 
+// Les décors surprises se posent et tiennent quelques secondes sans exploser
+// la grille (une scène qui se vide toute seule n'est pas une scène).
+{
+  for (const scene of SCENES) {
+    const e = new Engine(320, 180);
+    scene.build(e);
+    const posed = 320 * 180 - count(e, EMPTY);
+    assert.ok(posed > 2000, `« ${scene.name} » pose quelque chose (${posed})`);
+    for (let t = 0; t < 120; t++) e.step();
+    assert.ok(320 * 180 - count(e, EMPTY) > posed / 3, `« ${scene.name} » tient la route`);
+  }
+}
+
 // Le goudron coule, mais bien moins loin que l'eau.
 {
   const spread = (id: MaterialId): number => {
@@ -664,6 +677,26 @@ function top(e: Engine, id: MaterialId): number {
   for (let x = 28; x < 32; x++) free.set(x, 37, FILINGS);
   for (let t = 0; t < 60; t++) free.step();
   assert.equal(top(free, FILINGS), 37, "sans aimant, elle reste au sol");
+}
+
+// Copier / coller : un morceau de grille se repose à l'identique, état compris.
+{
+  const e = engine();
+  for (let x = 10; x < 16; x++) e.set(x, 20, METAL);
+  e.set(13, 20, SWITCH);
+  e.toggleSwitch(13, 20); // fermé : son état vit dans `life`
+  e.setFrozen(10, 20, 0, true);
+
+  const clip = e.copy(15, 20, 10, 20); // bornes à l'envers : remises dans l'ordre
+  assert.equal(clip.width, 6, "le morceau fait six cellules de large");
+  e.paste(clip, 30, 35);
+  assert.equal(e.get(33, 35), SWITCH, "l'interrupteur est bien tombé au bon endroit");
+  assert.equal(e.life[e.index(33, 35)], 1, "et il est toujours fermé");
+  assert.equal(e.frozen[e.index(30, 35)], 1, "le figé voyage aussi");
+
+  // Ce qui dépasse est ignoré, sans exception ni repli.
+  e.paste(clip, W - 2, 0);
+  assert.equal(e.get(W - 1, 0), METAL, "le bord est servi");
 }
 
 // Le vide reste du vide.

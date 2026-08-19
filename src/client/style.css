@@ -72,6 +72,25 @@ canvas {
   cursor: crosshair;
 }
 
+/* Repères posés au-dessus du bac : jamais cliquables, jamais dans le rendu. */
+.stage { position: relative; }
+
+.overlay {
+  position: fixed;
+  pointer-events: none;
+  z-index: 3;
+  border: 1px solid var(--accent);
+  mix-blend-mode: difference;
+}
+
+#ring { border-radius: 50%; transform: translate(-50%, -50%); }
+#marquee { border-style: dashed; }
+
+/* Les dernières matières choisies : la palette est un accordéon, on évite
+   d'avoir à rouvrir une famille pour revenir à l'eau. */
+.recent { margin-bottom: 0.5rem; }
+.recent:empty { display: none; }
+
 .panel {
   border-left: 1px solid var(--line);
   background: var(--panel);
@@ -198,7 +217,26 @@ button:hover { border-color: var(--edge); }
   }
   /* Un bac plein écran ne laisserait rien voir du panneau. */
   .stage canvas { max-height: 40vh; width: auto; }
-  .panel { border-left: none; border-top: none; overflow: visible; }
+  /* Repères posés au-dessus du bac : jamais cliquables, jamais dans le rendu. */
+.stage { position: relative; }
+
+.overlay {
+  position: fixed;
+  pointer-events: none;
+  z-index: 3;
+  border: 1px solid var(--accent);
+  mix-blend-mode: difference;
+}
+
+#ring { border-radius: 50%; transform: translate(-50%, -50%); }
+#marquee { border-style: dashed; }
+
+/* Les dernières matières choisies : la palette est un accordéon, on évite
+   d'avoir à rouvrir une famille pour revenir à l'eau. */
+.recent { margin-bottom: 0.5rem; }
+.recent:empty { display: none; }
+
+.panel { border-left: none; border-top: none; overflow: visible; }
   /* Le bac est déjà collé en haut : une seconde barre collante passerait
      dessous. Elle reste donc juste sous le bac, à un coup de pouce. */
   .quick { position: static; }

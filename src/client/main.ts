@@ -1,9 +1,9 @@
 import "./style.css";
-import { Engine } from "./sim/engine.ts";
+import { Engine, type Clip } from "./sim/engine.ts";
 import { Renderer, thumbnail } from "./sim/render";
 import { decode, decodeFrozen, encode } from "./sim/codec";
-import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PALETTE, SAND, SHORTCUTS, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
-import { CHALLENGES, count, type Challenge } from "./challenges.ts";
+import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PALETTE, SAND, SHORTCUTS, SNOW, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
+import { CHALLENGES, SCENES, count, type Challenge } from "./challenges.ts";
 
 // La taille de la grille est un réglage : `Engine` et `Renderer` sont recréés
 // à chaque changement (le rendu écrit dans un ImageData de la taille exacte).
@@ -53,8 +53,22 @@ function swatch(id: MaterialId): HTMLButtonElement {
 }
 paletteEl.addEventListener("pointerleave", () => (hintEl.textContent = MATERIALS[current].hint));
 
+// Les six dernières matières choisies, épinglées au-dessus des familles :
+// depuis que la palette est un accordéon exclusif, y revenir coûtait deux clics.
+const recentEl = document.querySelector<HTMLDivElement>("#recent")!;
+const recent: MaterialId[] = [];
+
+function pushRecent(id: MaterialId): void {
+  const known = recent.indexOf(id);
+  if (known >= 0) recent.splice(known, 1);
+  recent.unshift(id);
+  recent.length = Math.min(recent.length, 6);
+  recentEl.replaceChildren(...recent.map(swatch));
+}
+
 function select(id: MaterialId): void {
   current = id;
+  pushRecent(id);
   // Une source crache la dernière matière choisie avant elle.
   if (id !== SOURCE && id !== EMPTY) engine.emit = id;
   hintEl.textContent = MATERIALS[id].hint;
@@ -69,6 +83,13 @@ addEventListener("keydown", (e) => {
   if (e.key === " ") { toggleRun(); e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "Z" && e.shiftKey))) { redo(); e.preventDefault(); return; }
   if (e.key === "z" && (e.ctrlKey || e.metaKey)) { undo(); e.preventDefault(); return; }
+  if (e.key === "v" && (e.ctrlKey || e.metaKey) && clip && last) {
+    snapshot();
+    // Centré sur le curseur : c'est là qu'on regarde en collant.
+    engine.paste(clip, last.x - (clip.width >> 1), last.y - (clip.height >> 1));
+    e.preventDefault();
+    return;
+  }
   const n = Number(e.key);
   if (!Number.isNaN(n) && SHORTCUTS[n - 1] !== undefined) select(SHORTCUTS[n - 1]);
   if (e.key === "0") select(EMPTY);
@@ -108,6 +129,9 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
 
 let painting = false;
 let last: { x: number; y: number } | null = null;
+/** Morceau découpé par l'outil « Copier », reposé par Ctrl+V. */
+let clip: Clip | null = null;
+let selection: { x: number; y: number } | null = null;
 
 function toCell(e: PointerEvent): { x: number; y: number } {
   const r = canvas.getBoundingClientRect();
@@ -121,6 +145,36 @@ function toCell(e: PointerEvent): { x: number; y: number } {
 function paintAt(x: number, y: number): void {
   dab(x, y);
   if (mirrorInput.checked) dab(WIDTH - 1 - x, y);
+}
+
+/* ------------------------------------------------------- repères à l'écran */
+
+const ringEl = document.querySelector<HTMLDivElement>("#ring")!;
+const marqueeEl = document.querySelector<HTMLDivElement>("#marquee")!;
+
+/** Côté d'une cellule à l'écran, zoom compris. */
+const cellSize = (): number => canvas.getBoundingClientRect().width / WIDTH;
+
+/** Cercle de la taille réelle du pinceau, sous le curseur. */
+function showRing(e: PointerEvent): void {
+  if (e.pointerType === "touch") return; // sous le doigt, personne ne le verrait
+  const d = (brush * 2 + 1) * cellSize();
+  ringEl.hidden = false;
+  ringEl.style.width = `${d}px`;
+  ringEl.style.height = `${d}px`;
+  ringEl.style.left = `${e.clientX}px`;
+  ringEl.style.top = `${e.clientY}px`;
+}
+
+/** Rectangle de sélection, en cellules, converti en pixels d'écran. */
+function showMarquee(a: { x: number; y: number }, b: { x: number; y: number }): void {
+  const r = canvas.getBoundingClientRect();
+  const s = cellSize();
+  marqueeEl.hidden = false;
+  marqueeEl.style.left = `${r.left + Math.min(a.x, b.x) * s}px`;
+  marqueeEl.style.top = `${r.top + Math.min(a.y, b.y) * s}px`;
+  marqueeEl.style.width = `${(Math.abs(a.x - b.x) + 1) * s}px`;
+  marqueeEl.style.height = `${(Math.abs(a.y - b.y) + 1) * s}px`;
 }
 
 /* ------------------------------------------------------------- vue (zoom) */
@@ -188,6 +242,8 @@ canvas.addEventListener("auxclick", (e) => e.preventDefault());
 /** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */
 function dab(x: number, y: number): void {
   if (toolInput.value !== "paint") {
+    // « Copier » ne touche à rien : il se contente de découper au relâchement.
+    if (toolInput.value === "copy") return;
     engine.setFrozen(x, y, brush, toolInput.value === "freeze");
     return;
   }
@@ -241,6 +297,13 @@ canvas.addEventListener("pointerdown", (e) => {
   if (current === SWITCH && engine.get(p.x, p.y) === SWITCH) { engine.toggleSwitch(p.x, p.y); return; }
   if (current === MAGNET && engine.get(p.x, p.y) === MAGNET) { engine.toggleMagnet(p.x, p.y); return; }
   canvas.setPointerCapture(e.pointerId);
+  // Outil « Copier » : le glissé trace un rectangle, il ne peint rien.
+  if (toolInput.value === "copy") {
+    selection = p;
+    showMarquee(p, p);
+    last = p;
+    return;
+  }
   painting = true;
   // Maj : on relie le dernier point posé, même si le pinceau a été relâché entre-temps.
   if (e.shiftKey && last) strokeTo(last, p);
@@ -280,6 +343,8 @@ canvas.addEventListener("pointermove", (e) => {
   }
   const at = toCell(e);
   probe(at);
+  showRing(e);
+  if (selection) { showMarquee(selection, at); last = at; return; }
   if (!painting) return;
   const p = at;
   // Interpolation : à 60 fps un geste rapide saute des dizaines de cellules.
@@ -291,13 +356,22 @@ canvas.addEventListener("pointermove", (e) => {
 for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
   // `last` est conservé : c'est l'ancre de la ligne droite au Maj.
   canvas.addEventListener(type, (e) => {
+    if (selection && last) {
+      clip = engine.copy(selection.x, selection.y, last.x, last.y);
+      statusEl.textContent = `Morceau de ${clip.width} × ${clip.height} découpé — Ctrl+V pour le reposer.`;
+      selection = null;
+      marqueeEl.hidden = true;
+    }
     painting = false;
     panning = false;
     touches.delete((e as PointerEvent).pointerId);
     if (touches.size < 2) pinch = null;
   });
 }
-canvas.addEventListener("pointerleave", () => (probeEl.textContent = "–"));
+canvas.addEventListener("pointerleave", () => {
+  probeEl.textContent = "–";
+  ringEl.hidden = true;
+});
 
 /* ----------------------------------------------------------------- annuler */
 
@@ -413,6 +487,19 @@ sizeInput.addEventListener("input", () => {
   resize(w, (w * 9) / 16);
 });
 
+// Météo : quelques gouttes par tick sur la ligne d'où vient la matière (donc
+// en bas si la gravité est inversée). L'ambiante décide de leur nature — c'est
+// ce qui donne enfin à voir le curseur de température.
+const weatherInput = document.querySelector<HTMLInputElement>("#weather")!;
+
+function weather(): void {
+  const id = engine.ambient <= 0 ? SNOW : WATER;
+  const y = engine.gravity === 1 ? 0 : HEIGHT - 1;
+  for (let n = Math.max(2, (WIDTH / 160) | 0); n > 0; n--) {
+    engine.set(Math.floor(Math.random() * WIDTH), y, id);
+  }
+}
+
 const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
 heatmapInput.addEventListener("change", () => (renderer.heatmap = heatmapInput.checked));
 
@@ -464,6 +551,16 @@ document.querySelector<HTMLButtonElement>("#step")!.addEventListener("click", ()
 document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", () => {
   if (document.fullscreenElement) void document.exitFullscreen();
   else void canvas.requestFullscreen();
+});
+
+// Surprise : un décor tiré au sort, sans objectif — juste pour regarder.
+document.querySelector<HTMLButtonElement>("#surprise")!.addEventListener("click", () => {
+  const scene = SCENES[Math.floor(Math.random() * SCENES.length)];
+  if (WIDTH !== 320) { resize(320, 180, true); sizeInput.value = "320"; }
+  snapshot();
+  engine.clear();
+  scene.build(engine);
+  statusEl.textContent = `« ${scene.name} » — servez-vous.`;
 });
 
 document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => { snapshot(); engine.clear(); });
@@ -851,7 +948,10 @@ function frame(now: number): void {
   if (running) {
     pending += speed;
     // Plafonné : si une frame traîne, on saute des ticks plutôt que de s'enliser.
-    for (let n = Math.min(Math.floor(pending), 8); n > 0; n--) engine.step();
+    for (let n = Math.min(Math.floor(pending), 8); n > 0; n--) {
+      if (weatherInput.checked) weather();
+      engine.step();
+    }
     pending %= 1;
   }
   renderer.draw();

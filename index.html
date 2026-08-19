@@ -31,6 +31,10 @@
     <main>
       <div class="stage">
         <canvas id="world" aria-label="Bac à sable"></canvas>
+        <!-- Deux repères posés par-dessus le bac, en pixels d'écran : ils ne
+             touchent pas au rendu et suivent le zoom sans le savoir. -->
+        <div id="ring" class="overlay" hidden></div>
+        <div id="marquee" class="overlay" hidden></div>
       </div>
 
       <aside class="panel">
@@ -44,6 +48,7 @@
 
         <details class="group" name="panneau" open>
           <summary>Matière</summary>
+          <div id="recent" class="palette recent"></div>
           <div id="palette"></div>
           <p id="hint" class="hint"></p>
         </details>
@@ -61,6 +66,7 @@
               <option value="paint">Peindre</option>
               <option value="freeze">Figer</option>
               <option value="melt">Libérer</option>
+              <option value="copy">Copier</option>
             </select>
           </label>
           <label class="check">
@@ -83,6 +89,7 @@
             <kbd>Maj</kbd> + clic trace une ligne droite depuis le dernier point ·
             clic droit remplit la poche sous le curseur · <kbd>f</kbd> bascule Peindre / Figer ·
             un clic sur un interrupteur déjà posé l'ouvre ou le ferme ·
+            outil <em>Copier</em> : glisser pour découper un rectangle, <kbd>Ctrl</kbd>+<kbd>V</kbd> pour le reposer sous le curseur ·
             molette (ou pincement) pour zoomer, clic du milieu pour déplacer la vue
           </p>
         </details>
@@ -95,6 +102,7 @@
             <output id="speed-value">×1</output>
           </label>
           <div class="buttons">
+            <button id="surprise" type="button" title="Un décor tiré au sort">Surprise 🎲</button>
             <button id="full" type="button" title="Le bac en plein écran">Plein écran</button>
             <button id="clear" type="button">Vider</button>
           </div>
@@ -124,6 +132,10 @@
             <span>Gravité</span>
             <button id="gravity" type="button">Vers le bas ↓</button>
           </div>
+          <label class="check">
+            <input id="weather" type="checkbox" />
+            <span>Météo : il pleut du haut du bac — de la neige si l'ambiante est sous zéro</span>
+          </label>
           <label class="check">
             <input id="heatmap" type="checkbox" />
             <span>Vue thermique <kbd>h</kbd> : bleu = froid, blanc = 1200 °C</span>

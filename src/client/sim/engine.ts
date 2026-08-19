@@ -49,6 +49,15 @@ function disc(radius: number): [number, number, number][] {
   return cells;
 }
 
+/** Morceau de grille découpé puis reposé ailleurs (copier / coller). */
+export interface Clip {
+  width: number;
+  height: number;
+  cells: Uint8Array;
+  life: Uint8Array;
+  frozen: Uint8Array;
+}
+
 /**
  * Automate cellulaire type « falling sand ».
  *
@@ -148,6 +157,48 @@ export class Engine {
         if (only !== undefined && at !== only) continue;
         if (!overwrite && id !== EMPTY && at !== EMPTY) continue;
         this.set(x, y, id);
+      }
+    }
+  }
+
+  /**
+   * Découpe un rectangle de la grille (bornes comprises, remises dans l'ordre).
+   * `life` part avec : sans lui un interrupteur collé perdrait son état et une
+   * source la matière qu'elle crache. La température, elle, reste au bac.
+   */
+  copy(x0: number, y0: number, x1: number, y1: number): Clip {
+    const left = Math.max(0, Math.min(x0, x1));
+    const top = Math.max(0, Math.min(y0, y1));
+    const width = Math.min(this.width - 1, Math.max(x0, x1)) - left + 1;
+    const height = Math.min(this.height - 1, Math.max(y0, y1)) - top + 1;
+    const clip: Clip = {
+      width, height,
+      cells: new Uint8Array(width * height),
+      life: new Uint8Array(width * height),
+      frozen: new Uint8Array(width * height),
+    };
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const from = this.index(left + x, top + y);
+        const to = y * width + x;
+        clip.cells[to] = this.cells[from];
+        clip.life[to] = this.life[from];
+        clip.frozen[to] = this.frozen[from];
+      }
+    }
+    return clip;
+  }
+
+  /** Repose un morceau, coin haut-gauche en (cx, cy). Ce qui dépasse est ignoré. */
+  paste(clip: Clip, cx: number, cy: number): void {
+    for (let y = 0; y < clip.height; y++) {
+      for (let x = 0; x < clip.width; x++) {
+        if (!this.inBounds(cx + x, cy + y)) continue;
+        const to = this.index(cx + x, cy + y);
+        const from = y * clip.width + x;
+        this.cells[to] = clip.cells[from];
+        this.life[to] = clip.life[from];
+        this.frozen[to] = clip.frozen[from];
       }
     }
   }

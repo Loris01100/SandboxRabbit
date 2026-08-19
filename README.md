@@ -52,6 +52,11 @@ mondes partagés.
 | Chrono des défis | Le temps de la réussite s'affiche et le meilleur reste dans `localStorage`, par défi. Horloge murale : la pause compte, c'est un chrono de joueur, pas de simulation. |
 | Figé sauvegardé | La sérialisation porte deux blocs séparés par un point : la matière, puis le figé quand il y en a. Un monde partagé garde donc ses structures suspendues, et un monde d'avant (sans point) reste lisible. |
 | Lien court | Le RLE est en base64 **url** (`-`, `_`, sans `=`) : les trois seuls caractères qu'`encodeURIComponent` échappe à trois caractères pièce. Et une longueur de 0 sert d'échappe vers un compte sur 16 bits, sinon un ciel vide coûtait une paire tous les 255 pixels. La scène de départ passe de 1388 à 646 caractères d'URL. |
+| Aperçu du pinceau | Un cercle à la taille réelle suit le curseur — un `<div>` posé au-dessus du bac, en pixels d'écran : rien dans le rendu, et il suit le zoom sans le savoir. |
+| Matières récentes | Les six dernières choisies, épinglées au-dessus des familles. La palette étant un accordéon exclusif, y revenir coûtait sinon deux clics. |
+| Météo | Une case : il pleut du haut du bac, et c'est de la neige si l'ambiante est sous zéro. La gravité inversée fait tomber la pluie du bas. |
+| Surprise | Un décor tiré au sort parmi quatre (volcan, banquise, chantier, atelier) : même mécanique que les défis, sans objectif. |
+| Copier / coller | Outil « Copier » : le glissé découpe un rectangle, `Ctrl+V` le repose centré sous le curseur. `life` part avec le morceau — sans lui un interrupteur collé perdrait son état et une source la matière qu'elle crache. |
 | Pipette | `Alt` + clic sur le bac reprend la matière sous le curseur : plus court que de rouvrir la famille dans la palette. |
 | Vidéo | `canvas.captureStream()` + `MediaRecorder`, deux API natives : le bac se filme en `.webm`. C'est la copie agrandie ×4 qui est filmée (celle du PNG), pas le canvas de 320 pixels de large. |
 | Zoom & déplacement | Molette (ou pincement à deux doigts) pour zoomer autour du curseur, clic du milieu pour déplacer. Une transformation CSS sur le canvas : `toCell()` passe par `getBoundingClientRect()`, qui en tient déjà compte — le pinceau suit sans une ligne de correction. |

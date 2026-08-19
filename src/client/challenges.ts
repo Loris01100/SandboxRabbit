@@ -5,8 +5,8 @@
  */
 import type { Engine } from "./sim/engine.ts";
 import {
-  CANDLE, FILINGS, FIREDAMP, GLASS, ICE, METAL, OIL, PETROLEUM, PLANT, SEED, SNOW, STEAM, STONE, TNT,
-  URANIUM, WATER, WOOD, type MaterialId,
+  BATTERY, CANDLE, CEMENT, EMBER, FILINGS, FIREDAMP, GLASS, ICE, LAVA, MAGNET, METAL, OIL, PETROLEUM,
+  PLANT, SAND, SEED, SNOW, STEAM, STONE, SWITCH, TNT, URANIUM, WATER, WOOD, type MaterialId,
 } from "./sim/materials.ts";
 
 export interface Challenge {
@@ -60,6 +60,68 @@ function countIn(e: Engine, x0: number, y0: number, x1: number, y1: number, id: 
 function full(e: Engine, x0: number, y0: number, x1: number, y1: number, id: MaterialId): boolean {
   return countIn(e, x0, y0, x1, y1, id) === (x1 - x0) * (y1 - y0);
 }
+
+/**
+ * Décors tirés au sort par le bouton « Surprise ». Même mécanique que les
+ * défis — une scène construite en code — mais sans objectif : c'est du bac à
+ * sable, on regarde ce qui se passe.
+ */
+export const SCENES: { name: string; build(e: Engine): void }[] = [
+  {
+    name: "Volcan",
+    build(e) {
+      floor(e, 160);
+      // Un cône de pierre, une cheminée creusée dedans, la poche de lave au fond.
+      for (let x = 0; x < e.width; x++) {
+        const flank = Math.round(160 - Math.max(0, 70 - Math.abs(x - 160) * 0.9));
+        for (let y = flank; y < 160; y++) e.set(x, y, STONE);
+      }
+      block(e, 154, 96, 166, 160, LAVA);
+      block(e, 40, 150, 110, 160, WATER);
+      block(e, 210, 140, 260, 150, WOOD);
+    },
+  },
+  {
+    name: "Banquise",
+    build(e) {
+      floor(e, 170);
+      block(e, 0, 130, e.width, 170, WATER);
+      for (let x = 20; x < 300; x += 60) block(e, x, 124, x + 40, 130, ICE);
+      for (let x = 0; x < e.width; x += 3) e.set(x, 10, SNOW);
+      block(e, 140, 100, 180, 110, PETROLEUM);
+    },
+  },
+  {
+    name: "Chantier",
+    build(e) {
+      floor(e, 160);
+      // Deux moules de pierre à remplir de ciment, des braises pour le faire prendre.
+      for (const x of [70, 190]) {
+        block(e, x, 140, x + 4, 160, STONE);
+        block(e, x + 60, 140, x + 64, 160, STONE);
+      }
+      block(e, 74, 130, 130, 140, CEMENT);
+      block(e, 194, 130, 250, 140, CEMENT);
+      for (let x = 80; x < 250; x += 20) e.set(x, 110, EMBER);
+      block(e, 0, 150, 40, 160, SAND);
+    },
+  },
+  {
+    name: "Atelier",
+    build(e) {
+      floor(e, 160);
+      // Un circuit qui attend son interrupteur, et un aimant au-dessus d'un tas de limaille.
+      for (let x = 40; x < 200; x++) e.set(x, 120, METAL);
+      e.set(39, 120, BATTERY);
+      e.set(120, 120, SWITCH);
+      for (let y = 120; y < 156; y++) e.set(199, y, METAL);
+      e.set(200, 156, CANDLE);
+      e.set(260, 120, MAGNET);
+      block(e, 240, 150, 280, 160, FILINGS);
+      block(e, 60, 140, 100, 150, TNT);
+    },
+  },
+];
 
 export const CHALLENGES: Challenge[] = [
   {
