@@ -226,6 +226,17 @@ kbd {
 }
 
 .card { display: grid; gap: 0.15rem; padding: 0.4rem; text-align: left; }
+.slot { position: relative; }
+.slot .del {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  padding: 0 0.35rem;
+  line-height: 1.3;
+  opacity: 0;
+}
+.slot:hover .del, .slot .del:focus-visible { opacity: 1; }
+
 .card canvas { width: 100%; cursor: inherit; }
 .card .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .date { color: var(--muted); font-size: 0.74rem; }

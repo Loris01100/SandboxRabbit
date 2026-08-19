@@ -51,6 +51,12 @@ app.post("/api/worlds", async (c) => {
   return c.json({ id }, 201);
 });
 
+// Suppression ouverte à tous, comme la sauvegarde : pas de compte dans ce bac.
+app.delete("/api/worlds/:id", async (c) => {
+  await createStore(c.env).remove(c.req.param("id"));
+  return c.body(null, 204);
+});
+
 app.all("/api/*", (c) => c.json({ error: "route inconnue" }, 404));
 
 // Tout le reste est servi par les assets statiques (build Vite).

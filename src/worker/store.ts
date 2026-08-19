@@ -16,6 +16,7 @@ export interface Store {
   list(): Promise<WorldSummary[]>;
   get(id: string): Promise<World | null>;
   save(world: World): Promise<void>;
+  remove(id: string): Promise<void>;
 }
 
 /**
@@ -46,6 +47,9 @@ function memoryStore(): Store {
     async save(world) {
       memory.set(world.id, world);
     },
+    async remove(id) {
+      memory.delete(id);
+    },
   };
 }
 
@@ -68,6 +72,9 @@ function d1Store(db: D1Database): Store {
         .prepare("INSERT INTO worlds (id, name, width, height, data, created_at) VALUES (?, ?, ?, ?, ?, ?)")
         .bind(world.id, world.name, world.width, world.height, world.data, world.createdAt)
         .run();
+    },
+    async remove(id) {
+      await db.prepare("DELETE FROM worlds WHERE id = ?").bind(id).run();
     },
   };
 }

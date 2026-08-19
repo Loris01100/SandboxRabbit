@@ -114,6 +114,8 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("pointerdown", (e) => {
   const p = toCell(e);
+  // Pipette : Alt+clic reprend la matière sous le curseur, sans rien modifier.
+  if (e.altKey) { select(engine.get(p.x, p.y) as MaterialId); return; }
   snapshot();
   if (e.button === 2) { engine.fill(p.x, p.y, current); return; }
   // Cliquer un interrupteur déjà posé le bascule au lieu d'en reposer un.
@@ -200,6 +202,27 @@ windInput.addEventListener("input", () => {
 const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
 heatmapInput.addEventListener("change", () => (renderer.heatmap = heatmapInput.checked));
 
+// Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
+// que de dupliquer les handlers ci-dessus.
+// ponytail: un blob JSON sans version — un réglage renommé repart au défaut.
+const SETTINGS = "sandbox-rabbit:reglages";
+function remember(): void {
+  localStorage.setItem(SETTINGS, JSON.stringify({
+    current, brush: brushInput.value, speed: speedInput.value, wind: windInput.value,
+  }));
+}
+for (const el of [brushInput, speedInput, windInput]) el.addEventListener("input", remember);
+paletteEl.addEventListener("click", remember);
+
+const saved = JSON.parse(localStorage.getItem(SETTINGS) ?? "null");
+if (saved) {
+  if (MATERIALS[saved.current as MaterialId]) select(saved.current as MaterialId);
+  for (const [el, value] of [[brushInput, saved.brush], [speedInput, saved.speed], [windInput, saved.wind]] as const) {
+    el.value = value;
+    el.dispatchEvent(new Event("input"));
+  }
+}
+
 const gravityButton = document.querySelector<HTMLButtonElement>("#gravity")!;
 function flipGravity(): void {
   engine.gravity = engine.gravity === 1 ? -1 : 1;
@@ -259,7 +282,9 @@ function note(text: string): HTMLParagraphElement {
   return p;
 }
 
-function card(w: WorldSummary): HTMLButtonElement {
+function card(w: WorldSummary): HTMLDivElement {
+  const slot = document.createElement("div");
+  slot.className = "slot";
   const button = document.createElement("button");
   button.type = "button";
   button.className = "card";
@@ -288,7 +313,23 @@ function card(w: WorldSummary): HTMLButtonElement {
       else button.title = "Taille de grille incompatible";
     })
     .catch(() => (button.title = "Monde illisible"));
-  return button;
+
+  // Suppression : rien ne protège les mondes des autres, comme la sauvegarde
+  // n'identifie personne. ponytail: ajouter un jeton le jour où ça compte.
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "del";
+  del.title = "Supprimer";
+  del.textContent = "×";
+  del.addEventListener("click", async () => {
+    if (!confirm(`Supprimer « ${w.name} » ?`)) return;
+    const res = await fetch(`/api/worlds/${w.id}`, { method: "DELETE" });
+    if (res.ok) slot.remove();
+    else statusEl.textContent = "Échec de la suppression.";
+  });
+
+  slot.append(button, del);
+  return slot;
 }
 
 document.querySelector<HTMLButtonElement>("#gallery-open")!.addEventListener("click", () => void openGallery());
