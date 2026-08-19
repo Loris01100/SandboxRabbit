@@ -189,7 +189,26 @@ button:hover { border-color: #39405a; }
   /* Un bac plein écran ne laisserait rien voir du panneau. */
   .stage canvas { max-height: 40vh; width: auto; }
   .panel { border-left: none; border-top: none; overflow: visible; }
+  /* Le bac est déjà collé en haut : une seconde barre collante passerait
+     dessous. Elle reste donc juste sous le bac, à un coup de pouce. */
+  .quick { position: static; }
 }
+
+/* Barre toujours accessible, en tête du panneau qui défile. */
+.quick {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 0.3rem;
+  padding-bottom: 0.6rem;
+  margin-bottom: -0.25rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.quick button { flex: 1; padding: 0.35rem 0.2rem; }
+.quick button:nth-child(n + 3) { flex: 0 0 2.2rem; font-size: 1rem; }
 
 kbd {
   border: 1px solid #3a3f4c;

@@ -31,13 +31,21 @@
       </div>
 
       <aside class="panel">
-        <details class="group" open>
+        <!-- Hors accordéon : ce qu'on veut atteindre sans rien déplier. -->
+        <div class="quick">
+          <button id="play" type="button">Pause</button>
+          <button id="step" type="button">Pas à pas</button>
+          <button id="undo" type="button" title="Annuler le dernier geste (Ctrl+Z)">↶</button>
+          <button id="redo" type="button" title="Rétablir le geste annulé (Ctrl+Y)">↷</button>
+        </div>
+
+        <details class="group" name="panneau" open>
           <summary>Matière</summary>
           <div id="palette"></div>
           <p id="hint" class="hint"></p>
         </details>
 
-        <details class="group" open>
+        <details class="group" name="panneau">
           <summary>Pinceau</summary>
           <label class="row">
             <span>Taille</span>
@@ -72,7 +80,7 @@
           </p>
         </details>
 
-        <details class="group" open>
+        <details class="group" name="panneau">
           <summary>Simulation</summary>
           <label class="row">
             <span>Vitesse</span>
@@ -80,16 +88,12 @@
             <output id="speed-value">×1</output>
           </label>
           <div class="buttons">
-            <button id="play" type="button">Pause</button>
-            <button id="step" type="button">Pas à pas</button>
             <button id="full" type="button" title="Le bac en plein écran">Plein écran</button>
-            <button id="undo" type="button" title="Annuler le dernier geste (Ctrl+Z)">Annuler</button>
-            <button id="redo" type="button" title="Rétablir le geste annulé (Ctrl+Y)">Rétablir</button>
             <button id="clear" type="button">Vider</button>
           </div>
         </details>
 
-        <details class="group" open>
+        <details class="group" name="panneau">
           <summary>Physique du monde</summary>
           <label class="row">
             <span>Grille</span>
@@ -119,13 +123,13 @@
           </label>
         </details>
 
-        <details class="group" open>
+        <details class="group" name="panneau">
           <summary>Défis</summary>
           <div id="challenges" class="buttons"></div>
           <p id="goal" class="hint"></p>
         </details>
 
-        <details class="group" open>
+        <details class="group" name="panneau">
           <summary>Mondes</summary>
           <label class="row">
             <span>Objectif</span>

@@ -27,6 +27,9 @@ const hintEl = document.querySelector<HTMLParagraphElement>("#hint")!;
 for (const [n, cat] of CATEGORIES.entries()) {
   const box = document.createElement("details");
   box.className = "cat";
+  // Même accordéon exclusif que les groupes : une famille ouverte à la fois,
+  // sinon la palette fait à elle seule la hauteur de deux écrans.
+  box.setAttribute("name", "famille");
   box.open = n === 0; // seule la première famille est déployée au départ
   const title = document.createElement("summary");
   title.textContent = cat.name;
