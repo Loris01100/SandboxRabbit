@@ -646,6 +646,18 @@ function top(e: Engine, id: MaterialId): number {
   for (let t = 0; t < 60; t++) e.step();
   assert.ok(top(e, FILINGS) <= 35, `la limaille a grimpé vers l'aimant (jusqu'en ${top(e, FILINGS)})`);
 
+  // Pôle inversé : le même aimant repousse. Le champ est radial, donc on le
+  // met au sol, à côté du tas — sous l'aimant, les grains seraient poussés
+  // dans le plancher et ne bougeraient pas.
+  const push = engine();
+  for (let x = 0; x < W; x++) push.set(x, 38, STONE);
+  push.set(30, 37, MAGNET);
+  push.toggleMagnet(30, 37);
+  for (let x = 32; x < 35; x++) push.set(x, 37, FILINGS);
+  for (let t = 0; t < 60; t++) push.step();
+  assert.equal(push.get(32, 37), EMPTY, "le grain le plus proche a été chassé");
+  assert.ok(push.get(35, 37) === FILINGS, "et le tas est parti vers l'écart");
+
   // Sans aimant, elle reste au sol.
   const free = engine();
   for (let x = 0; x < W; x++) free.set(x, 38, STONE);

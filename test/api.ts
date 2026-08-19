@@ -50,6 +50,15 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   assert.equal((await app.request(`/api/worlds/${id}`, {}, env)).status, 404);
 }
 
+// Un objectif mal formé est refusé ; bien formé, il revient avec le monde.
+{
+  assert.equal((await app.request("/api/worlds", json({ ...monde, goal: "gagne !" }), env)).status, 400);
+  const { id } = await (await app.request("/api/worlds", json({ ...monde, name: "défi", goal: "ge:12:600" }), env)).json();
+  const world = await (await app.request(`/api/worlds/${id}`, {}, env)).json();
+  assert.equal(world.goal, "ge:12:600", "l'objectif voyage avec le monde");
+  await app.request(`/api/worlds/${id}`, { method: "DELETE" }, env);
+}
+
 // Sans binding Durable Object (tests, `vite dev`), le bac partagé se dit indisponible.
 assert.equal((await app.request("/api/room/public", {}, env)).status, 503);
 

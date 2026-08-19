@@ -140,7 +140,7 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [FALLOUT]: { id: FALLOUT, name: "Retombées", kind: "gas", density: 1, color: [176, 208, 96], noise: 22, life: 250, hint: "Nuage radioactif : rien ne pousse dedans, et il traîne longtemps" },
   [CEMENT]: { id: CEMENT, name: "Ciment", kind: "liquid", density: 8, color: [148, 148, 140], noise: 10, spread: 1, boil: { at: 60, into: STONE }, hint: "Se coule dans un moule et prend en pierre dès 60 °C" },
   [FILINGS]: { id: FILINGS, name: "Limaille", kind: "powder", density: 8, color: [96, 98, 104], noise: 26, hint: "Poudre de fer : un aimant la fait venir, même vers le haut" },
-  [MAGNET]: { id: MAGNET, name: "Aimant", kind: "static", density: 9, color: [204, 84, 96], noise: 8, hint: "Attire la limaille alentour, gravité ou pas" },
+  [MAGNET]: { id: MAGNET, name: "Aimant", kind: "static", density: 9, color: [204, 84, 96], noise: 8, hint: "Attire la limaille alentour, gravité ou pas ; un clic dessus inverse son pôle et la repousse" },
   [THERMITE]: { id: THERMITE, name: "Thermite", kind: "powder", density: 8, color: [124, 112, 102], noise: 20, hint: "Ne souffle rien : brûle à 2800 °C et perce la pierre" },
 };
 

@@ -16,7 +16,7 @@ export interface Challenge {
   won(e: Engine): boolean;
 }
 
-function count(e: Engine, id: MaterialId): number {
+export function count(e: Engine, id: MaterialId): number {
   let n = 0;
   for (const c of e.cells) if (c === id) n++;
   return n;

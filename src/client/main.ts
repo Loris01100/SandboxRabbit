@@ -2,8 +2,8 @@ import "./style.css";
 import { Engine } from "./sim/engine.ts";
 import { Renderer, thumbnail } from "./sim/render";
 import { decode, decodeFrozen, encode } from "./sim/codec";
-import { CATEGORIES, EMPTY, MATERIALS, SAND, SHORTCUTS, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
-import { CHALLENGES, type Challenge } from "./challenges.ts";
+import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PALETTE, SAND, SHORTCUTS, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
+import { CHALLENGES, count, type Challenge } from "./challenges.ts";
 
 // La taille de la grille est un réglage : `Engine` et `Renderer` sont recréés
 // à chaque changement (le rendu écrit dans un ImageData de la taille exacte).
@@ -109,20 +109,39 @@ function applyView(): void {
   canvas.style.transform = zoom === 1 ? "" : `translate(${panX}px, ${panY}px) scale(${zoom})`;
 }
 
-canvas.addEventListener("wheel", (e) => {
-  e.preventDefault();
+/**
+ * Zoome autour d'un point de l'écran, qui ne bouge pas. La boîte non
+ * transformée se déduit de la boîte affichée : origine `r.left - panX`,
+ * largeur `r.width / zoom`.
+ */
+function zoomAt(clientX: number, clientY: number, next: number): void {
   const r = canvas.getBoundingClientRect();
-  const next = Math.min(12, Math.max(1, zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
-  // Le point sous le curseur ne doit pas bouger. La boîte non transformée se
-  // déduit de la boîte affichée : origine `r.left - panX`, largeur `r.width / zoom`.
-  const fx = (e.clientX - r.left) / r.width;
-  const fy = (e.clientY - r.top) / r.height;
-  panX = e.clientX - (r.left - panX) - fx * (r.width / zoom) * next;
-  panY = e.clientY - (r.top - panY) - fy * (r.height / zoom) * next;
+  const fx = (clientX - r.left) / r.width;
+  const fy = (clientY - r.top) / r.height;
+  panX = clientX - (r.left - panX) - fx * (r.width / zoom) * next;
+  panY = clientY - (r.top - panY) - fy * (r.height / zoom) * next;
   zoom = next;
   if (zoom === 1) { panX = 0; panY = 0; }
   applyView();
+}
+
+const clampZoom = (z: number): number => Math.min(12, Math.max(1, z));
+
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, clampZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
 }, { passive: false });
+
+// Pincement : la molette n'existe pas sur mobile, tout le reste y marche déjà.
+// Deux doigts posés = on ne peint plus, on manipule la vue (zoom + déplacement).
+const touches = new Map<number, { x: number; y: number }>();
+let pinch: { gap: number; x: number; y: number } | null = null;
+
+/** Écart et milieu des deux doigts posés. */
+function span(): { gap: number; x: number; y: number } {
+  const [a, b] = [...touches.values()];
+  return { gap: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
 
 // Clic du milieu : déplacer la vue. `translate` précède `scale`, donc un pixel
 // de souris vaut un pixel d'écran, quel que soit le zoom.
@@ -161,6 +180,14 @@ function strokeTo(from: { x: number; y: number }, to: { x: number; y: number }):
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("pointerdown", (e) => {
+  if (e.pointerType === "touch") {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) {
+      painting = false; // le second doigt annule le trait en cours
+      pinch = span();
+      return;
+    }
+  }
   if (e.button === 1) {
     panning = true;
     canvas.setPointerCapture(e.pointerId);
@@ -172,8 +199,9 @@ canvas.addEventListener("pointerdown", (e) => {
   if (e.altKey) { select(engine.get(p.x, p.y) as MaterialId); return; }
   snapshot();
   if (e.button === 2) { engine.fill(p.x, p.y, current); return; }
-  // Cliquer un interrupteur déjà posé le bascule au lieu d'en reposer un.
+  // Cliquer un interrupteur (ou un aimant) déjà posé le bascule au lieu d'en reposer un.
   if (current === SWITCH && engine.get(p.x, p.y) === SWITCH) { engine.toggleSwitch(p.x, p.y); return; }
+  if (current === MAGNET && engine.get(p.x, p.y) === MAGNET) { engine.toggleMagnet(p.x, p.y); return; }
   canvas.setPointerCapture(e.pointerId);
   painting = true;
   // Maj : on relie le dernier point posé, même si le pinceau a été relâché entre-temps.
@@ -192,6 +220,20 @@ function probe(p: { x: number; y: number }): void {
 }
 
 canvas.addEventListener("pointermove", (e) => {
+  if (e.pointerType === "touch" && touches.has(e.pointerId)) {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2 && pinch) {
+      const now = span();
+      // Le milieu des doigts déplace la vue, leur écartement la zoome autour de
+      // ce même milieu : un seul geste pour les deux.
+      panX += now.x - pinch.x;
+      panY += now.y - pinch.y;
+      applyView();
+      zoomAt(now.x, now.y, clampZoom(zoom * (now.gap / pinch.gap)));
+      pinch = now;
+      return;
+    }
+  }
   if (panning) {
     panX += e.movementX;
     panY += e.movementY;
@@ -210,7 +252,12 @@ canvas.addEventListener("pointermove", (e) => {
 
 for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
   // `last` est conservé : c'est l'ancre de la ligne droite au Maj.
-  canvas.addEventListener(type, () => { painting = false; panning = false; });
+  canvas.addEventListener(type, (e) => {
+    painting = false;
+    panning = false;
+    touches.delete((e as PointerEvent).pointerId);
+    if (touches.size < 2) pinch = null;
+  });
 }
 canvas.addEventListener("pointerleave", () => (probeEl.textContent = "–"));
 
@@ -389,7 +436,7 @@ const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const galleryEl = document.querySelector<HTMLDialogElement>("#gallery")!;
 const galleryGrid = document.querySelector<HTMLDivElement>("#gallery-grid")!;
 
-interface World { id: string; name: string; createdAt: string; width: number; height: number; data: string; views: number }
+interface World { id: string; name: string; createdAt: string; width: number; height: number; data: string; views: number; goal?: string | null }
 
 /**
  * Galerie : une seule requête ramène les mondes avec leur grille, qui devient la
@@ -439,7 +486,9 @@ function card(w: World): HTMLDivElement {
   button.className = "card";
   const name = document.createElement("span");
   name.className = "name";
-  name.textContent = w.name; // textContent : le nom vient d'un autre visiteur
+  const objective = goalText(w.goal);
+  name.textContent = objective ? `🎯 ${w.name}` : w.name; // textContent : le nom vient d'un autre visiteur
+  if (objective) button.title = objective;
   const date = document.createElement("span");
   date.className = "date";
   date.textContent = `${new Date(w.createdAt).toLocaleDateString("fr-FR")} · ${w.views ?? 0} vue${(w.views ?? 0) > 1 ? "s" : ""}`;
@@ -461,6 +510,9 @@ function card(w: World): HTMLDivElement {
     load(fresh.data ?? w.data);
     galleryEl.close();
     statusEl.textContent = `« ${w.name} » chargé.`;
+    // Un monde porteur d'un objectif se joue comme un défi : la scène est déjà
+    // en place, il ne reste que la condition à surveiller.
+    if (objective) startChallenge(challengeOf(w, objective));
   });
 
   // Suppression : rien ne protège les mondes des autres, comme la sauvegarde
@@ -483,6 +535,23 @@ function card(w: World): HTMLDivElement {
 
 document.querySelector<HTMLButtonElement>("#gallery-open")!.addEventListener("click", () => void openGallery());
 
+// Objectif facultatif : « au moins / moins de N cellules de X ». Deux
+// comparaisons suffisent — « plus aucun X » s'écrit « moins de 1 ».
+const goalOp = document.querySelector<HTMLSelectElement>("#goal-op")!;
+const goalN = document.querySelector<HTMLInputElement>("#goal-n")!;
+const goalId = document.querySelector<HTMLSelectElement>("#goal-id")!;
+for (const id of PALETTE) {
+  if (id === EMPTY) continue;
+  goalId.append(new Option(MATERIALS[id].name, String(id)));
+}
+
+/** Texte lisible d'un objectif encodé, ou null s'il n'en est pas un. */
+function goalText(goal: string | null | undefined): string | null {
+  const m = /^(ge|lt):(\d+):(\d+)$/.exec(goal ?? "");
+  if (!m || !MATERIALS[Number(m[2])]) return null;
+  return `${m[1] === "ge" ? "Au moins" : "Moins de"} ${m[3]} cellules de ${MATERIALS[Number(m[2])].name}`;
+}
+
 document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", async () => {
   const name = prompt("Nom du monde ?", `bac-${new Date().toLocaleTimeString("fr-FR")}`);
   if (!name) return;
@@ -490,7 +559,10 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
   const res = await fetch("/api/worlds", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, width: WIDTH, height: HEIGHT, data: encode(engine.cells, engine.frozen) }),
+    body: JSON.stringify({
+      name, width: WIDTH, height: HEIGHT, data: encode(engine.cells, engine.frozen),
+      goal: goalOp.value ? `${goalOp.value}:${goalId.value}:${goalN.value}` : null,
+    }),
   });
   statusEl.textContent = res.ok ? "Sauvegardé — visible dans la galerie." : "Échec de la sauvegarde.";
 });
@@ -658,6 +730,26 @@ const RECORDS = "sandbox-rabbit:records";
 const records: Record<string, number> = JSON.parse(localStorage.getItem(RECORDS) ?? "{}");
 const best = (name: string): string => (records[name] === undefined ? "" : ` (record : ${records[name]} s)`);
 
+/** Défi bâti sur un monde partagé : la grille est déjà chargée, `build` n'a rien à faire. */
+function challengeOf(w: World, objective: string): Challenge {
+  const [op, id, n] = w.goal!.split(":");
+  const material = Number(id);
+  const target = Number(n);
+  return {
+    name: w.name,
+    goal: objective,
+    build: () => {},
+    won: (e) => (op === "ge" ? count(e, material) >= target : count(e, material) < target),
+  };
+}
+
+/** Lance le chrono et affiche le but. Commun aux défis livrés et aux mondes-défis. */
+function startChallenge(c: Challenge): void {
+  challenge = c;
+  startedAt = performance.now();
+  goalEl.textContent = `${c.name} — ${c.goal}${best(c.name)}`;
+}
+
 for (const c of CHALLENGES) {
   const button = document.createElement("button");
   button.type = "button";
@@ -668,9 +760,7 @@ for (const c of CHALLENGES) {
     snapshot();
     engine.clear();
     c.build(engine);
-    challenge = c;
-    startedAt = performance.now();
-    goalEl.textContent = `${c.name} — ${c.goal}${best(c.name)}`;
+    startChallenge(c);
   });
   challengesEl.append(button);
 }

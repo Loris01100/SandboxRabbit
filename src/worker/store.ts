@@ -10,6 +10,8 @@ export interface World {
   createdAt: string;
   /** Nombre de chargements depuis la galerie. */
   views: number;
+  /** Objectif si le monde est un défi : « ge:12:600 » ou « lt:5:1 ». Absent sinon. */
+  goal?: string | null;
 }
 
 export interface Store {
@@ -68,20 +70,20 @@ function d1Store(db: D1Database): Store {
   return {
     async list() {
       const { results } = await db
-        .prepare("SELECT id, name, width, height, data, created_at AS createdAt, views FROM worlds ORDER BY created_at DESC LIMIT 50")
+        .prepare("SELECT id, name, width, height, data, created_at AS createdAt, views, goal FROM worlds ORDER BY created_at DESC LIMIT 50")
         .all<World>();
       return results;
     },
     async get(id) {
       return db
-        .prepare("SELECT id, name, width, height, data, created_at AS createdAt, views FROM worlds WHERE id = ?")
+        .prepare("SELECT id, name, width, height, data, created_at AS createdAt, views, goal FROM worlds WHERE id = ?")
         .bind(id)
         .first<World>();
     },
     async save(world) {
       await db
-        .prepare("INSERT INTO worlds (id, name, width, height, data, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(world.id, world.name, world.width, world.height, world.data, world.createdAt)
+        .prepare("INSERT INTO worlds (id, name, width, height, data, created_at, goal) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(world.id, world.name, world.width, world.height, world.data, world.createdAt, world.goal ?? null)
         .run();
     },
     async remove(id) {

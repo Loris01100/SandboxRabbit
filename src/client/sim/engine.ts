@@ -262,7 +262,7 @@ export class Engine {
       case SWITCH: this.updateSwitch(i, x, y); return;
       case EMBER: this.updateEmber(i, x, y); return;
       case SPARK: this.updateSpark(i, x, y); return;
-      case MAGNET: this.updateMagnet(x, y); return;
+      case MAGNET: this.updateMagnet(i, x, y); return;
       // Le métal ne fait que sortir de sa période de repos.
       case METAL: if (this.life[i] > 0) this.life[i]--; return;
     }
@@ -702,21 +702,31 @@ export class Engine {
     }
   }
 
+  /** Retourne le pôle de l'aimant sous le curseur : attirer ↔ repousser. */
+  toggleMagnet(x: number, y: number): void {
+    if (!this.inBounds(x, y)) return;
+    const i = this.index(x, y);
+    if (this.cells[i] === MAGNET) this.life[i] ^= 1;
+  }
+
   /**
-   * Attire la limaille d'un cran vers l'aimant — le seul mouvement qui ignore
-   * la gravité. On traite le disque **du centre vers le bord** (l'inverse du
-   * souffle) : les grains proches se collent d'abord et libèrent la place aux
-   * suivants.
+   * Déplace la limaille d'un cran vers l'aimant (ou à l'opposé si son pôle est
+   * inversé, `life` = 1) — le seul mouvement qui ignore la gravité.
+   *
+   * L'ordre de parcours du disque suit le sens du champ : les grains qui
+   * arrivent les premiers doivent trouver la place libre. En attirant on part
+   * donc du centre, en repoussant du bord — exactement comme le souffle.
    */
-  private updateMagnet(x: number, y: number): void {
+  private updateMagnet(i: number, x: number, y: number): void {
     const cells = disc(PULL);
-    for (let k = cells.length - 1; k >= 0; k--) {
-      const [dx, dy] = cells[k];
+    const push = this.life[i] === 1 ? 1 : -1;
+    for (let k = 0; k < cells.length; k++) {
+      const [dx, dy] = cells[push === 1 ? k : cells.length - 1 - k];
       if (dx === 0 && dy === 0) continue;
       if (!this.inBounds(x + dx, y + dy)) continue;
-      const i = this.index(x + dx, y + dy);
-      if (this.cells[i] !== FILINGS || this.frozen[i]) continue;
-      this.tryMove(i, x + dx - Math.sign(dx), y + dy - Math.sign(dy), FILINGS);
+      const at = this.index(x + dx, y + dy);
+      if (this.cells[at] !== FILINGS || this.frozen[at]) continue;
+      this.tryMove(at, x + dx + push * Math.sign(dx), y + dy + push * Math.sign(dy), FILINGS);
     }
   }
 

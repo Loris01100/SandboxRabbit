@@ -9,7 +9,8 @@
     "check": "node test/sim.ts && node test/api.ts",
     "preview": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "bench": "node test/bench.ts"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.0.0",

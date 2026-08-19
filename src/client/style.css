@@ -128,6 +128,10 @@ canvas {
 .row input[type="range"] { width: 100%; accent-color: var(--accent); }
 .row output { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .row button, .row select { grid-column: 2 / -1; }
+/* Trois contrôles pour une seule ligne de réglage : l'objectif d'un défi. */
+.row .goal { grid-column: 2 / -1; display: flex; gap: 0.3rem; min-width: 0; }
+.row .goal select { grid-column: auto; min-width: 0; flex: 1; }
+.row .goal input { width: 4.5rem; }
 
 select {
   padding: 0.35rem 0.4rem;

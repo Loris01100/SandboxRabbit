@@ -9,6 +9,7 @@ Le README, les commentaires du code et l'UI sont en français. Écrire les nouve
 ## Commandes
 
 ```bash
+npm run bench      # chronomètre le moteur (300 ticks) sur les trois tailles de grille
 npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR
 npm run typecheck  # DEUX projets tsc : tsconfig.json (client/DOM) + tsconfig.worker.json (Worker)
 npm run build      # typecheck puis vite build
@@ -53,6 +54,8 @@ Un seul Worker Cloudflare sert le site statique **et** l'API (binding `ASSETS`, 
 - `MATERIALS` est indexé par id numérique. `CATEGORIES` fixe les familles repliables de la barre d'outils et `PALETTE` en découle (`flatMap`) ; les raccourcis clavier 1..9 / 0 vivent à part dans `SHORTCUTS`, pour que réordonner une famille ne les déplace pas.
 
 ### Ajouter un défi
+
+Deux voies. Sans code : sauvegarder un monde avec un objectif (`goal`, du type `ge:12:600`) — il devient un défi jouable dans la galerie, `challengeOf()` dans main.ts en fabrique le `Challenge`. En code, pour une scène ou une condition qu'un simple compte de cellules n'exprime pas :
 
 Une entrée dans `CHALLENGES` ([src/client/challenges.ts](src/client/challenges.ts)) : `build(engine)` construit la scène en code (pas de monde encodé), `won(engine)` lit la grille. Les boutons et la détection de victoire (une fois par demi-seconde, dans la boucle de rendu) sont génériques.
 

@@ -59,6 +59,11 @@ app.post("/api/worlds", async (c) => {
     return c.json({ error: "corps invalide" }, 400);
   }
   if (body.data.length > 200_000) return c.json({ error: "monde trop lourd" }, 413);
+  // Objectif facultatif : « au moins / moins de N cellules de la matière X ».
+  // Validé ici, sinon la galerie afficherait n'importe quelle chaîne.
+  if (body.goal != null && !/^(ge|lt):\d{1,3}:\d{1,6}$/.test(body.goal)) {
+    return c.json({ error: "objectif invalide" }, 400);
+  }
 
   const id = crypto.randomUUID();
   await createStore(c.env).save({
@@ -69,6 +74,7 @@ app.post("/api/worlds", async (c) => {
     data: body.data,
     createdAt: new Date().toISOString(),
     views: 0,
+    goal: body.goal ?? null,
   });
   return c.json({ id }, 201);
 });
@@ -80,8 +86,9 @@ app.delete("/api/worlds/:id", async (c) => {
 });
 
 /** Bac partagé : une websocket par joueur, un Durable Object par salon. */
-app.get("/api/room/:id", (c) => {
+app.get("/api/room/:id", async (c) => {
   if (!c.env.ROOM) return c.json({ error: "bac partagé indisponible" }, 503);
+  if (await flooding(c)) return c.json({ error: "trop de requêtes" }, 429);
   if (c.req.header("upgrade") !== "websocket") return c.json({ error: "websocket attendue" }, 426);
   const room = c.env.ROOM.get(c.env.ROOM.idFromName(c.req.param("id").slice(0, 60)));
   return room.fetch(c.req.raw);

@@ -127,6 +127,19 @@
 
         <details class="group" open>
           <summary>Mondes</summary>
+          <label class="row">
+            <span>Objectif</span>
+            <div class="goal">
+              <select id="goal-op">
+                <option value="">Aucun</option>
+                <option value="ge">Au moins</option>
+                <option value="lt">Moins de</option>
+              </select>
+              <input id="goal-n" type="number" min="1" max="999999" value="500" />
+              <select id="goal-id"></select>
+            </div>
+          </label>
+          <p class="hint">Un monde sauvegardé avec un objectif devient un défi jouable depuis la galerie.</p>
           <div class="buttons">
             <button id="save" type="button">Sauvegarder</button>
             <button id="share" type="button">Copier le lien</button>
