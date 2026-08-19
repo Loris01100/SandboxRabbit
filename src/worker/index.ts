@@ -21,9 +21,13 @@ app.get("/api/health", (c) =>
 
 app.get("/api/worlds", async (c) => c.json(await createStore(c.env).list()));
 
+// Charger un monde compte une vue : c'est par ici que passe la galerie.
 app.get("/api/worlds/:id", async (c) => {
-  const world = await createStore(c.env).get(c.req.param("id"));
-  return world ? c.json(world) : c.json({ error: "introuvable" }, 404);
+  const store = createStore(c.env);
+  const world = await store.get(c.req.param("id"));
+  if (!world) return c.json({ error: "introuvable" }, 404);
+  await store.see(world.id);
+  return c.json(world);
 });
 
 /**
@@ -58,6 +62,7 @@ app.post("/api/worlds", async (c) => {
     height: body.height,
     data: body.data,
     createdAt: new Date().toISOString(),
+    views: 0,
   });
   return c.json({ id }, 201);
 });

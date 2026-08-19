@@ -62,6 +62,7 @@ select(current);
 // Raccourcis : 1..9 puis 0 pour la gomme.
 addEventListener("keydown", (e) => {
   if (e.key === " ") { toggleRun(); e.preventDefault(); return; }
+  if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "Z" && e.shiftKey))) { redo(); e.preventDefault(); return; }
   if (e.key === "z" && (e.ctrlKey || e.metaKey)) { undo(); e.preventDefault(); return; }
   const n = Number(e.key);
   if (!Number.isNaN(n) && SHORTCUTS[n - 1] !== undefined) select(SHORTCUTS[n - 1]);
@@ -84,8 +85,14 @@ function toCell(e: PointerEvent): { x: number; y: number } {
   };
 }
 
-/** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */
+/** Un coup de pinceau, plus son reflet si la symétrie est cochée. */
 function paintAt(x: number, y: number): void {
+  dab(x, y);
+  if (mirrorInput.checked) dab(WIDTH - 1 - x, y);
+}
+
+/** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */
+function dab(x: number, y: number): void {
   if (toolInput.value !== "paint") {
     engine.setFrozen(x, y, brush, toolInput.value === "freeze");
     return;
@@ -128,9 +135,20 @@ canvas.addEventListener("pointerdown", (e) => {
   last = p;
 });
 
+const probeEl = document.querySelector<HTMLSpanElement>("#probe")!;
+
+/** Matière et température sous le curseur : c'est ce qui rend la vue thermique lisible. */
+function probe(p: { x: number; y: number }): void {
+  if (!engine.inBounds(p.x, p.y)) { probeEl.textContent = "–"; return; }
+  const i = engine.index(p.x, p.y);
+  probeEl.textContent = `${MATERIALS[engine.cells[i]].name} · ${Math.round(engine.temp[i])} °C`;
+}
+
 canvas.addEventListener("pointermove", (e) => {
+  const at = toCell(e);
+  probe(at);
   if (!painting) return;
-  const p = toCell(e);
+  const p = at;
   // Interpolation : à 60 fps un geste rapide saute des dizaines de cellules.
   if (last) strokeTo(last, p);
   else paintAt(p.x, p.y);
@@ -141,37 +159,54 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
   // `last` est conservé : c'est l'ancre de la ligne droite au Maj.
   canvas.addEventListener(type, () => (painting = false));
 }
+canvas.addEventListener("pointerleave", () => (probeEl.textContent = "–"));
 
 /* ----------------------------------------------------------------- annuler */
 
 // Une copie des quatre tableaux avant chaque geste destructeur, dix crans
 // gardés (~230 ko le cran, `temp` étant en Float32 : 2,3 Mo au plus).
-// ponytail: pas de rétablir — le geste annulé est perdu.
 const UNDO_MAX = 10;
 type Snapshot = { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array };
 const undoStack: Snapshot[] = [];
+const redoStack: Snapshot[] = [];
 
-function snapshot(): void {
-  undoStack.push({
+function capture(): Snapshot {
+  return {
     cells: engine.cells.slice(),
     life: engine.life.slice(),
     temp: engine.temp.slice(),
     frozen: engine.frozen.slice(),
-  });
-  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  };
 }
 
-function undo(): void {
-  const state = undoStack.pop();
-  if (!state) { statusEl.textContent = "Rien à annuler."; return; }
+function restore(state: Snapshot): void {
   engine.cells.set(state.cells);
   engine.life.set(state.life);
   engine.temp.set(state.temp);
   engine.frozen.set(state.frozen);
-  statusEl.textContent = `Annulé (${undoStack.length} cran${undoStack.length > 1 ? "s" : ""} restant${undoStack.length > 1 ? "s" : ""}).`;
 }
 
+function snapshot(): void {
+  undoStack.push(capture());
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack.length = 0; // un nouveau geste referme la branche annulée
+}
+
+/** Dépile d'un côté en empilant de l'autre : annuler et rétablir sont le même geste. */
+function jump(from: Snapshot[], to: Snapshot[], done: string, empty: string): void {
+  const state = from.pop();
+  if (!state) { statusEl.textContent = empty; return; }
+  to.push(capture());
+  restore(state);
+  const left = from.length;
+  statusEl.textContent = `${done} (${left} cran${left > 1 ? "s" : ""} restant${left > 1 ? "s" : ""}).`;
+}
+
+const undo = (): void => jump(undoStack, redoStack, "Annulé", "Rien à annuler.");
+const redo = (): void => jump(redoStack, undoStack, "Rétabli", "Rien à rétablir.");
+
 document.querySelector<HTMLButtonElement>("#undo")!.addEventListener("click", undo);
+document.querySelector<HTMLButtonElement>("#redo")!.addEventListener("click", redo);
 
 /* ----------------------------------------------------------------- réglages */
 
@@ -184,6 +219,7 @@ brushInput.addEventListener("input", () => {
 
 const keepInput = document.querySelector<HTMLInputElement>("#keep")!;
 const onlyInput = document.querySelector<HTMLInputElement>("#only")!;
+const mirrorInput = document.querySelector<HTMLInputElement>("#mirror")!;
 const toolInput = document.querySelector<HTMLSelectElement>("#tool")!;
 
 /** Ticks de simulation par frame : 0,25 (ralenti) à 4 (accéléré). */
@@ -271,25 +307,38 @@ const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const galleryEl = document.querySelector<HTMLDialogElement>("#gallery")!;
 const galleryGrid = document.querySelector<HTMLDivElement>("#gallery-grid")!;
 
-interface World { id: string; name: string; createdAt: string; width: number; height: number; data: string }
+interface World { id: string; name: string; createdAt: string; width: number; height: number; data: string; views: number }
 
 /**
  * Galerie : une seule requête ramène les mondes avec leur grille, qui devient la
  * vignette. Ouverte en modale (`<dialog>`), le panneau est trop étroit pour
  * montrer des images.
  */
+let worlds: World[] = [];
+
 async function openGallery(): Promise<void> {
   galleryEl.showModal();
   galleryGrid.replaceChildren(note("Chargement…"));
-  let worlds: World[];
   try {
     worlds = await (await fetch("/api/worlds")).json();
   } catch {
     galleryGrid.replaceChildren(note("API injoignable."));
     return;
   }
+  drawGallery();
+}
+
+// Le tri se fait sur la liste déjà en main : elle est plafonnée à 50 mondes,
+// inutile de redemander au Worker.
+const sortInput = document.querySelector<HTMLSelectElement>("#gallery-sort")!;
+sortInput.addEventListener("change", drawGallery);
+
+function drawGallery(): void {
+  const sorted = [...worlds].sort((a, b) =>
+    sortInput.value === "views" ? (b.views ?? 0) - (a.views ?? 0) : b.createdAt.localeCompare(a.createdAt),
+  );
   galleryGrid.replaceChildren(
-    ...(worlds.length ? worlds.map(card) : [note("Aucun monde. « Sauvegarder » en dépose un.")]),
+    ...(sorted.length ? sorted.map(card) : [note("Aucun monde. « Sauvegarder » en dépose un.")]),
   );
 }
 
@@ -311,7 +360,7 @@ function card(w: World): HTMLDivElement {
   name.textContent = w.name; // textContent : le nom vient d'un autre visiteur
   const date = document.createElement("span");
   date.className = "date";
-  date.textContent = new Date(w.createdAt).toLocaleDateString("fr-FR");
+  date.textContent = `${new Date(w.createdAt).toLocaleDateString("fr-FR")} · ${w.views ?? 0} vue${(w.views ?? 0) > 1 ? "s" : ""}`;
   button.append(name, date);
 
   // La grille sert deux fois : à dessiner la vignette, puis à charger le monde.
@@ -322,9 +371,12 @@ function card(w: World): HTMLDivElement {
   } catch {
     button.title = "Monde illisible";
   }
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
     if (!usable) return;
-    load(w.data);
+    // On charge par l'API plutôt que par la copie déjà en main : c'est ce
+    // passage qui compte la vue. Injoignable, on se rabat sur la copie.
+    const fresh = await fetch(`/api/worlds/${w.id}`).then((r) => r.json() as Promise<World>).catch(() => w);
+    load(fresh.data ?? w.data);
     galleryEl.close();
     statusEl.textContent = `« ${w.name} » chargé.`;
   });
@@ -407,6 +459,13 @@ document.querySelector<HTMLButtonElement>("#png")!.addEventListener("click", () 
 const goalEl = document.querySelector<HTMLParagraphElement>("#goal")!;
 const challengesEl = document.querySelector<HTMLDivElement>("#challenges")!;
 let challenge: Challenge | null = null;
+/** Horloge murale : la pause et le ralenti comptent aussi, c'est un chrono de joueur. */
+let startedAt = 0;
+
+// Meilleur temps par défi, en secondes. ponytail: local à la machine, pas de classement.
+const RECORDS = "sandbox-rabbit:records";
+const records: Record<string, number> = JSON.parse(localStorage.getItem(RECORDS) ?? "{}");
+const best = (name: string): string => (records[name] === undefined ? "" : ` (record : ${records[name]} s)`);
 
 for (const c of CHALLENGES) {
   const button = document.createElement("button");
@@ -417,7 +476,8 @@ for (const c of CHALLENGES) {
     engine.clear();
     c.build(engine);
     challenge = c;
-    goalEl.textContent = `${c.name} — ${c.goal}`;
+    startedAt = performance.now();
+    goalEl.textContent = `${c.name} — ${c.goal}${best(c.name)}`;
   });
   challengesEl.append(button);
 }
@@ -482,7 +542,13 @@ function frame(now: number): void {
     for (let i = 0; i < engine.cells.length; i++) if (engine.cells[i] !== EMPTY) filled++;
     filledEl.textContent = filled.toLocaleString("fr-FR");
     if (challenge && challenge.won(engine)) {
-      goalEl.textContent = `${challenge.name} — réussi !`;
+      const secs = Math.round((now - startedAt) / 1000);
+      const record = records[challenge.name] === undefined || secs < records[challenge.name];
+      if (record) {
+        records[challenge.name] = secs;
+        localStorage.setItem(RECORDS, JSON.stringify(records));
+      }
+      goalEl.textContent = `${challenge.name} — réussi en ${secs} s${record ? " — nouveau record !" : best(challenge.name)}`;
       challenge = null;
     }
     frames = 0;

@@ -22,7 +22,7 @@
   <body>
     <header class="bar">
       <h1>Sandbox<span>Rabbit</span></h1>
-      <div class="stats"><span id="fps">–</span> fps · <span id="filled">0</span> cellules</div>
+      <div class="stats"><span id="fps">–</span> fps · <span id="filled">0</span> cellules · <span id="probe">–</span></div>
     </header>
 
     <main>
@@ -57,6 +57,10 @@
             <span>Ne pas remplacer la matière déjà posée</span>
           </label>
           <label class="check">
+            <input id="mirror" type="checkbox" />
+            <span>Symétrie : le pinceau peint aussi son reflet</span>
+          </label>
+          <label class="check">
             <input id="only" type="checkbox" />
             <span>Gomme sélective : n'efface que la dernière matière choisie</span>
           </label>
@@ -79,6 +83,7 @@
             <button id="step" type="button">Pas à pas</button>
             <button id="full" type="button" title="Le bac en plein écran">Plein écran</button>
             <button id="undo" type="button" title="Annuler le dernier geste (Ctrl+Z)">Annuler</button>
+            <button id="redo" type="button" title="Rétablir le geste annulé (Ctrl+Y)">Rétablir</button>
             <button id="clear" type="button">Vider</button>
           </div>
         </details>
@@ -128,6 +133,13 @@
     <dialog id="gallery">
       <form method="dialog" class="gallery-bar">
         <h2>Galerie</h2>
+        <label>
+          <span>Tri</span>
+          <select id="gallery-sort">
+            <option value="date">Plus récents</option>
+            <option value="views">Plus vus</option>
+          </select>
+        </label>
         <button type="submit">Fermer</button>
       </form>
       <div id="gallery-grid" class="gallery"></div>

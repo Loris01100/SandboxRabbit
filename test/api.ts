@@ -37,6 +37,13 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   assert.ok(found, "le monde sauvegardé apparaît dans la liste");
   assert.equal(found.data, monde.data, "la liste porte la grille : la galerie n'a qu'une requête à faire");
 
+  // Charger un monde compte une vue ; la liste la porte, c'est ce qui trie la galerie.
+  assert.equal(found.views, 0, "un monde neuf n'a pas de vue");
+  await app.request(`/api/worlds/${id}`, {}, env);
+  await app.request(`/api/worlds/${id}`, {}, env);
+  const seen = await (await app.request("/api/worlds", {}, env)).json();
+  assert.equal(seen.find((w: { id: string }) => w.id === id).views, 2, "deux chargements, deux vues");
+
   assert.equal((await app.request(`/api/worlds/${id}`, { method: "DELETE" }, env)).status, 204);
   const after = await (await app.request("/api/worlds", {}, env)).json();
   assert.equal(after.find((w: { id: string }) => w.id === id), undefined, "supprimé de la liste");

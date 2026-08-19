@@ -218,6 +218,8 @@ kbd {
 }
 
 .gallery-bar h2 { margin: 0; font-size: 0.95rem; }
+/* Le tri s'intercale entre le titre et « Fermer » : deux éléments côte à côte. */
+.gallery-bar label { display: flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.82rem; }
 
 .gallery {
   display: grid;

@@ -8,6 +8,8 @@ export interface World {
   /** Grille encodée (RLE + base64), voir src/client/sim/codec.ts */
   data: string;
   createdAt: string;
+  /** Nombre de chargements depuis la galerie. */
+  views: number;
 }
 
 export interface Store {
@@ -16,6 +18,8 @@ export interface Store {
   get(id: string): Promise<World | null>;
   save(world: World): Promise<void>;
   remove(id: string): Promise<void>;
+  /** Compte un chargement. Appelé par `GET /api/worlds/:id`, seul chemin de chargement. */
+  see(id: string): Promise<void>;
 }
 
 /**
@@ -47,6 +51,10 @@ function memoryStore(): Store {
     async remove(id) {
       memory.delete(id);
     },
+    async see(id) {
+      const world = memory.get(id);
+      if (world) world.views++;
+    },
   };
 }
 
@@ -54,13 +62,13 @@ function d1Store(db: D1Database): Store {
   return {
     async list() {
       const { results } = await db
-        .prepare("SELECT id, name, width, height, data, created_at AS createdAt FROM worlds ORDER BY created_at DESC LIMIT 50")
+        .prepare("SELECT id, name, width, height, data, created_at AS createdAt, views FROM worlds ORDER BY created_at DESC LIMIT 50")
         .all<World>();
       return results;
     },
     async get(id) {
       return db
-        .prepare("SELECT id, name, width, height, data, created_at AS createdAt FROM worlds WHERE id = ?")
+        .prepare("SELECT id, name, width, height, data, created_at AS createdAt, views FROM worlds WHERE id = ?")
         .bind(id)
         .first<World>();
     },
@@ -72,6 +80,9 @@ function d1Store(db: D1Database): Store {
     },
     async remove(id) {
       await db.prepare("DELETE FROM worlds WHERE id = ?").bind(id).run();
+    },
+    async see(id) {
+      await db.prepare("UPDATE worlds SET views = views + 1 WHERE id = ?").bind(id).run();
     },
   };
 }
