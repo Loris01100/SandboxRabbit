@@ -7,6 +7,11 @@ import assert from "node:assert/strict";
 import app from "../src/worker/app.ts";
 
 const env = {} as never;
+
+/** Faux binding ASSETS : de quoi vérifier ce que le Worker ajoute au statique. */
+const assets = {
+  ASSETS: { fetch: async () => new Response("<!doctype html>", { headers: { "content-type": "text/html" } }) },
+} as never;
 const json = (body: unknown) => ({
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -61,6 +66,21 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
 
 // Sans binding Durable Object (tests, `vite dev`), le bac partagé se dit indisponible.
 assert.equal((await app.request("/api/room/public", {}, env)).status, 503);
+
+// En-têtes de sécurité partout, et cache éternel pour les seuls fichiers hashés.
+{
+  const api = await app.request("/api/health", {}, env);
+  assert.match(api.headers.get("content-security-policy") ?? "", /default-src 'self'/, "CSP sur l'API");
+  assert.equal(api.headers.get("x-content-type-options"), "nosniff");
+
+  const page = await app.request("/", {}, assets);
+  assert.equal(page.status, 200, "la page passe par le fallback ASSETS");
+  assert.equal(page.headers.get("cache-control"), "no-cache", "le HTML est revérifié à chaque visite");
+  assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+
+  const file = await app.request("/assets/index-abc123.js", {}, assets);
+  assert.match(file.headers.get("cache-control") ?? "", /immutable/, "un fichier hashé se garde un an");
+}
 
 assert.equal((await app.request("/api/inconnu", {}, env)).status, 404);
 

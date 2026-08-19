@@ -15,7 +15,29 @@ export interface Env {
   ROOM?: DurableObjectNamespace;
 }
 
+/**
+ * En-têtes posés sur toutes les réponses. La page ne charge rien d'ailleurs :
+ * un bundle et une feuille de style de même origine, des images en `data:` (le
+ * favicon) et en `blob:` (le PNG et la vidéo produits par le canvas), et une
+ * websocket vers le même hôte pour le bac partagé — d'où `connect-src 'self'`.
+ * `form-action` est laissé libre : le seul <form> de la page est un
+ * `method="dialog"` qui ne navigue nulle part.
+ */
+const HEADERS: Record<string, string> = {
+  "content-security-policy":
+    "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "strict-origin-when-cross-origin",
+};
+
 const app = new Hono<{ Bindings: Env }>();
+
+app.use("*", async (c, next) => {
+  await next();
+  // Une réponse 101 passe la main à la websocket : ses en-têtes ne se touchent plus.
+  if (c.res.status === 101) return;
+  for (const [name, value] of Object.entries(HEADERS)) c.res.headers.set(name, value);
+});
 
 app.get("/api/health", (c) =>
   c.json({
@@ -97,6 +119,19 @@ app.get("/api/room/:id", async (c) => {
 app.all("/api/*", (c) => c.json({ error: "route inconnue" }, 404));
 
 // Tout le reste est servi par les assets statiques (build Vite).
-app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+app.get("*", async (c) => {
+  const asset = await c.env.ASSETS.fetch(c.req.raw);
+  // Les en-têtes d'ASSETS sont figés : on recopie la réponse telle quelle
+  // (corps compris, encodage inclus) pour pouvoir y ajouter les nôtres.
+  const res = new Response(asset.body, asset);
+  // Les fichiers de /assets portent un hash dans leur nom : ils ne changent
+  // jamais. Le HTML, lui, doit être revérifié à chaque visite, sinon un
+  // déploiement met une journée à se voir.
+  res.headers.set(
+    "cache-control",
+    new URL(c.req.url).pathname.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache",
+  );
+  return res;
+});
 
 export default app;
