@@ -1,6 +1,6 @@
 import {
   ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FALLOUT, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
-  MINE, NANITE, NITRO, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM,
+  FILINGS, MAGNET, MINE, NANITE, NITRO, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM,
   STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
@@ -24,6 +24,8 @@ const CRITICAL = 3;
 const MELTDOWN = 120;
 /** Rayon du souffle nucléaire. */
 const NUKE = 16;
+/** Portée de l'aimant, en cellules. */
+const PULL = 5;
 
 /**
  * Offsets d'un disque de rayon `radius`, du bord vers le centre — l'ordre dans
@@ -79,6 +81,8 @@ export class Engine {
   gravity: 1 | -1 = 1;
   /** Vent horizontal, de -1 (plein ouest) à 1 (plein est). */
   wind = 0;
+  /** Température de l'air au repos : tout y retourne (climat de la scène). */
+  ambient = AMBIENT;
   /** Matière émise par les cellules `SOURCE` déposées ensuite. */
   emit: MaterialId = WATER;
 
@@ -88,7 +92,7 @@ export class Engine {
     const n = width * height;
     this.cells = new Uint8Array(n);
     this.life = new Uint8Array(n);
-    this.temp = new Float32Array(n).fill(AMBIENT);
+    this.temp = new Float32Array(n).fill(this.ambient);
     this.tempNext = new Float32Array(n);
     this.clock = new Uint8Array(n);
     this.frozen = new Uint8Array(n);
@@ -123,7 +127,7 @@ export class Engine {
     this.cells.fill(EMPTY);
     this.life.fill(0);
     this.frozen.fill(0);
-    this.temp.fill(AMBIENT);
+    this.temp.fill(this.ambient);
   }
 
   /**
@@ -258,6 +262,7 @@ export class Engine {
       case SWITCH: this.updateSwitch(i, x, y); return;
       case EMBER: this.updateEmber(i, x, y); return;
       case SPARK: this.updateSpark(i, x, y); return;
+      case MAGNET: this.updateMagnet(x, y); return;
       // Le métal ne fait que sortir de sa période de repos.
       case METAL: if (this.life[i] > 0) this.life[i]--; return;
     }
@@ -686,7 +691,7 @@ export class Engine {
         const sum =
           (y > 0 ? temp[i - w] : t) + (y < h - 1 ? temp[i + w] : t) +
           (x > 0 ? temp[i - 1] : t) + (x < w - 1 ? temp[i + 1] : t);
-        tempNext[i] = t + CONDUCTION * (sum - 4 * t) + COOLING * (AMBIENT - t);
+        tempNext[i] = t + CONDUCTION * (sum - 4 * t) + COOLING * (this.ambient - t);
       }
     }
     temp.set(tempNext);
@@ -694,6 +699,24 @@ export class Engine {
       const m = MATERIALS[cells[i]];
       if (m.boil && temp[i] > m.boil.at) this.convert(i, m.boil.into);
       else if (m.freeze && temp[i] < m.freeze.at) this.convert(i, m.freeze.into);
+    }
+  }
+
+  /**
+   * Attire la limaille d'un cran vers l'aimant — le seul mouvement qui ignore
+   * la gravité. On traite le disque **du centre vers le bord** (l'inverse du
+   * souffle) : les grains proches se collent d'abord et libèrent la place aux
+   * suivants.
+   */
+  private updateMagnet(x: number, y: number): void {
+    const cells = disc(PULL);
+    for (let k = cells.length - 1; k >= 0; k--) {
+      const [dx, dy] = cells[k];
+      if (dx === 0 && dy === 0) continue;
+      if (!this.inBounds(x + dx, y + dy)) continue;
+      const i = this.index(x + dx, y + dy);
+      if (this.cells[i] !== FILINGS || this.frozen[i]) continue;
+      this.tryMove(i, x + dx - Math.sign(dx), y + dy - Math.sign(dy), FILINGS);
     }
   }
 

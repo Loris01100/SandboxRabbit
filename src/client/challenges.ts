@@ -5,7 +5,7 @@
  */
 import type { Engine } from "./sim/engine.ts";
 import {
-  CANDLE, FIREDAMP, GLASS, ICE, METAL, OIL, PETROLEUM, PLANT, SEED, SNOW, STEAM, STONE, TNT,
+  CANDLE, FILINGS, FIREDAMP, GLASS, ICE, METAL, OIL, PETROLEUM, PLANT, SEED, SNOW, STEAM, STONE, TNT,
   URANIUM, WATER, WOOD, type MaterialId,
 } from "./sim/materials.ts";
 
@@ -47,6 +47,18 @@ function clumped(e: Engine, id: MaterialId, least: number): number {
 
 function block(e: Engine, x0: number, y0: number, x1: number, y1: number, id: MaterialId): void {
   for (let x = x0; x < x1; x++) for (let y = y0; y < y1; y++) e.set(x, y, id);
+}
+
+/** Cellules d'`id` dans un rectangle. */
+function countIn(e: Engine, x0: number, y0: number, x1: number, y1: number, id: MaterialId): number {
+  let n = 0;
+  for (let x = x0; x < x1; x++) for (let y = y0; y < y1; y++) if (e.get(x, y) === id) n++;
+  return n;
+}
+
+/** Le rectangle est-il entièrement fait d'`id` ? */
+function full(e: Engine, x0: number, y0: number, x1: number, y1: number, id: MaterialId): boolean {
+  return countIn(e, x0, y0, x1, y1, id) === (x1 - x0) * (y1 - y0);
 }
 
 export const CHALLENGES: Challenge[] = [
@@ -124,5 +136,38 @@ export const CHALLENGES: Challenge[] = [
       for (let x = 70; x < 250; x += 6) e.set(x, 130, SEED);
     },
     won: (e) => count(e, PLANT) >= 400,
+  },
+  {
+    name: "Coffrage",
+    goal: "Remplir le moule de ciment et le faire prendre : il durcit en pierre à 60 °C — par le feu, ou en montant la température ambiante.",
+    build(e) {
+      floor(e, 150);
+      block(e, 120, 144, 124, 150, STONE);
+      block(e, 148, 144, 152, 150, STONE);
+    },
+    won: (e) => full(e, 124, 144, 148, 150, STONE),
+  },
+  {
+    name: "Ferraille",
+    goal: "Faire passer 200 cellules de limaille par-dessus le mur, jusqu'au bac de droite. Un aimant l'attire, gravité ou pas.",
+    build(e) {
+      floor(e, 170);
+      block(e, 150, 145, 156, 170, STONE);
+      block(e, 40, 160, 100, 170, FILINGS);
+      block(e, 210, 150, 214, 170, STONE);
+      block(e, 280, 150, 284, 170, STONE);
+    },
+    won: (e) => countIn(e, 214, 150, 280, 170, FILINGS) >= 200,
+  },
+  {
+    name: "Grand froid",
+    goal: "Prendre le lac en glace sans y toucher : c'est la température ambiante qu'il faut faire descendre.",
+    build(e) {
+      floor(e, 170);
+      block(e, 56, 120, 60, 170, STONE);
+      block(e, 260, 120, 264, 170, STONE);
+      block(e, 60, 130, 260, 170, WATER);
+    },
+    won: (e) => count(e, ICE) >= 6000,
   },
 ];

@@ -9,7 +9,7 @@ import { CHALLENGES } from "../src/client/challenges.ts";
 import {
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
-  SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
+  CEMENT, FILINGS, MAGNET, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
 const W = 60, H = 40;
@@ -598,6 +598,60 @@ function count(e: Engine, id: MaterialId): number {
   for (let x = 20; x < 30; x++) e.set(x, 19, FALLOUT);
   for (let t = 0; t < 30; t++) e.step();
   assert.equal(count(e, PLANT), 0, "les retombées tuent la plante");
+}
+
+/** Ligne la plus haute où l'on trouve `id` (H si absent). */
+function top(e: Engine, id: MaterialId): number {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (e.get(x, y) === id) return y;
+  return H;
+}
+
+// L'ambiante est le climat de la scène : à -10 °C, le lac gèle tout seul.
+{
+  const e = engine();
+  e.ambient = -10;
+  for (let x = 10; x < 50; x++) for (let y = 30; y < 38; y++) e.set(x, y, WATER);
+  for (let t = 0; t < 200; t++) e.step();
+  assert.ok(count(e, ICE) > 200, `l'eau gèle sous une ambiante négative (${count(e, ICE)})`);
+
+  // …et à 90 °C rien ne gèle : le réglage marche dans les deux sens.
+  const warm = engine();
+  warm.ambient = 90;
+  for (let x = 10; x < 50; x++) for (let y = 30; y < 38; y++) warm.set(x, y, WATER);
+  for (let t = 0; t < 200; t++) warm.step();
+  assert.equal(count(warm, ICE), 0, "pas de glace dans un bac à 90 °C");
+}
+
+// Le ciment coule dans son moule, puis prend en pierre une fois chauffé.
+{
+  const e = engine();
+  for (let y = 30; y < 38; y++) { e.set(20, y, STONE); e.set(31, y, STONE); }
+  for (let x = 20; x < 32; x++) e.set(x, 38, STONE);
+  for (let x = 22; x < 30; x++) for (let y = 30; y < 34; y++) e.set(x, y, CEMENT);
+  for (let t = 0; t < 40; t++) e.step();
+  assert.ok(count(e, CEMENT) > 20, "le ciment reste liquide à froid");
+  const stone = count(e, STONE);
+  e.ambient = 80;
+  for (let t = 0; t < 200; t++) e.step();
+  assert.equal(count(e, CEMENT), 0, "chauffé, il a entièrement pris");
+  assert.ok(count(e, STONE) >= stone + 30, "et il est devenu de la pierre");
+}
+
+// L'aimant fait remonter la limaille : le seul mouvement qui ignore la gravité.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) e.set(x, 38, STONE);
+  for (let x = 28; x < 32; x++) e.set(x, 37, FILINGS);
+  e.set(30, 33, MAGNET); // à portée (PULL = 5)
+  for (let t = 0; t < 60; t++) e.step();
+  assert.ok(top(e, FILINGS) <= 35, `la limaille a grimpé vers l'aimant (jusqu'en ${top(e, FILINGS)})`);
+
+  // Sans aimant, elle reste au sol.
+  const free = engine();
+  for (let x = 0; x < W; x++) free.set(x, 38, STONE);
+  for (let x = 28; x < 32; x++) free.set(x, 37, FILINGS);
+  for (let t = 0; t < 60; t++) free.step();
+  assert.equal(top(free, FILINGS), 37, "sans aimant, elle reste au sol");
 }
 
 // Le vide reste du vide.

@@ -1,5 +1,5 @@
 import "./style.css";
-import { AMBIENT, Engine } from "./sim/engine.ts";
+import { Engine } from "./sim/engine.ts";
 import { Renderer, thumbnail } from "./sim/render";
 import { decode, decodeFrozen, encode } from "./sim/codec";
 import { CATEGORIES, EMPTY, MATERIALS, SAND, SHORTCUTS, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
@@ -202,6 +202,14 @@ windInput.addEventListener("input", () => {
   windValue.value = windInput.value;
 });
 
+// Climat de la scène : tout retourne à cette température (hiver, four…).
+const ambientInput = document.querySelector<HTMLInputElement>("#ambient")!;
+const ambientValue = document.querySelector<HTMLOutputElement>("#ambient-value")!;
+ambientInput.addEventListener("input", () => {
+  engine.ambient = Number(ambientInput.value);
+  ambientValue.value = `${ambientInput.value} °C`;
+});
+
 const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
 heatmapInput.addEventListener("change", () => (renderer.heatmap = heatmapInput.checked));
 
@@ -212,15 +220,17 @@ const SETTINGS = "sandbox-rabbit:reglages";
 function remember(): void {
   localStorage.setItem(SETTINGS, JSON.stringify({
     current, brush: brushInput.value, speed: speedInput.value, wind: windInput.value,
+    ambient: ambientInput.value,
   }));
 }
-for (const el of [brushInput, speedInput, windInput]) el.addEventListener("input", remember);
+for (const el of [brushInput, speedInput, windInput, ambientInput]) el.addEventListener("input", remember);
 paletteEl.addEventListener("click", remember);
 
 const saved = JSON.parse(localStorage.getItem(SETTINGS) ?? "null");
 if (saved) {
   if (MATERIALS[saved.current as MaterialId]) select(saved.current as MaterialId);
-  for (const [el, value] of [[brushInput, saved.brush], [speedInput, saved.speed], [windInput, saved.wind]] as const) {
+  for (const [el, value] of [[brushInput, saved.brush], [speedInput, saved.speed], [windInput, saved.wind], [ambientInput, saved.ambient]] as const) {
+    if (value === undefined) continue; // réglage absent d'une version précédente
     el.value = value;
     el.dispatchEvent(new Event("input"));
   }
@@ -357,7 +367,7 @@ function load(data: string): void {
   engine.cells.set(decode(data, WIDTH * HEIGHT));
   engine.frozen.set(decodeFrozen(data, WIDTH * HEIGHT));
   engine.life.fill(0);
-  engine.temp.fill(AMBIENT);
+  engine.temp.fill(engine.ambient);
 }
 
 // Partage : le monde entier tient dans l'URL (RLE + base64, ~1 ko).

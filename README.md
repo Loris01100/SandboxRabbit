@@ -3,13 +3,13 @@
 Un bac à sable cellulaire (« falling sand ») qui tourne entièrement dans le
 navigateur, servi par un Worker Cloudflare qui héberge aussi l'API.
 
-Quarante-trois matières, rangées en familles repliables (terrain, liquides,
+Quarante-six matières, rangées en familles repliables (terrain, liquides,
 inflammable, explosifs, froid, vivant, électricité, gaz, outils) : `sable / eau /
 pierre / bois / huile / goudron / alcool / acide / lave / plante / feu / glace /
 neige / azote liquide / sel / eau salée / poudre / TNT / nitroglycérine / C4 /
 mine / thermite / uranium / grisou / retombées / pétrole / graine / nanites / verre / verre fondu / mercure /
 cire / bougie / boue / braise / métal / pile / interrupteur / étincelle /
-source / fumée`, pinceau réglable, vue thermique, pause & pas à pas, galerie de
+ciment / limaille / aimant / source / fumée`, pinceau réglable, vue thermique, pause & pas à pas, galerie de
 mondes partagés.
 
 ### Ce qui se passe quand on mélange
@@ -42,12 +42,15 @@ mondes partagés.
 | Vue thermique | Case à cocher ou touche `h` : affiche `temp` au lieu de la matière, bleu pour le froid, corps noir jusqu'au blanc à 1200 °C. |
 | Vitesse | Curseur ×0,25 à ×4 : nombre de ticks de simulation par frame, avec reliquat pour le ralenti et plafond à 8 ticks pour ne pas s'enliser. |
 | Vent & gravité | Un curseur biaise la dérive horizontale, la touche `g` retourne la gravité. |
+| Température ambiante | Un curseur de -40 à 90 °C : c'est la température vers laquelle tout le bac retourne (`COOLING`). À -5 °C un lac gèle tout seul, à 90 °C plus rien ne prend. Le climat de la scène, en un réglage. |
+| Ciment | Liquide qui prend en pierre à 60 °C : on le coule dans un moule et on le chauffe. Bâtir devient un geste de simulation, pas un coup de pinceau. Zéro ligne dans le moteur, juste un `boil`. |
+| Aimant & limaille | La seule règle de déplacement qui **ignore la gravité** : l'aimant tire d'un cran vers lui toute limaille dans un rayon de 5, du centre vers le bord (l'inverse du souffle) pour que les grains proches se collent d'abord. Un chapelet d'aimants fait remonter un tas de limaille le long d'un mur. |
 | Figer | L'outil « Figer » (touche `f`) immobilise la matière sous le pinceau : elle garde son identité et sa couleur (tramée en damier), mais aucune règle ne s'applique plus et rien ne peut la pousser. « Libérer » la rend à la gravité, repeindre par-dessus aussi. De quoi bâtir une structure en sable ou suspendre une cascade. |
 | Annuler | Bouton « Annuler » ou `Ctrl+Z` : dix crans, chacun revenant à l'état d'avant un geste (coup de pinceau, remplissage, « Vider », chargement d'un monde ou d'un défi). Une copie des quatre tableaux de la grille, ~230 ko le cran. Pas de « rétablir ». |
 | Figé sauvegardé | La sérialisation porte deux blocs séparés par un point : la matière, puis le figé quand il y en a. Un monde partagé garde donc ses structures suspendues, et un monde d'avant (sans point) reste lisible. |
 | Lien court | Le RLE est en base64 **url** (`-`, `_`, sans `=`) : les trois seuls caractères qu'`encodeURIComponent` échappe à trois caractères pièce. Et une longueur de 0 sert d'échappe vers un compte sur 16 bits, sinon un ciel vide coûtait une paire tous les 255 pixels. La scène de départ passe de 1388 à 646 caractères d'URL. |
 | Pipette | `Alt` + clic sur le bac reprend la matière sous le curseur : plus court que de rouvrir la famille dans la palette. |
-| Réglages retenus | Matière, pinceau, vitesse et vent sont relus dans `localStorage` au chargement suivant. |
+| Réglages retenus | Matière, pinceau, vitesse, vent et ambiante sont relus dans `localStorage` au chargement suivant. |
 | Bac repris | La scène est écrite dans `localStorage` quand l'onglet passe en arrière-plan (`visibilitychange`, le seul événement fiable sur mobile) et rechargée au retour. Un lien partagé passe devant, la cuvette de départ n'arrive qu'à défaut. Seule la grille est gardée : températures et vies repartent au repos. |
 | Plein écran | Bouton « Plein écran » : `requestFullscreen()` sur le canvas, le CSS `pixelated` fait la mise à l'échelle et le rendu ne change pas d'une ligne. |
 | Image PNG | Le bac est réexporté ×4 sans lissage (`imageSmoothingEnabled = false`) et téléchargé : un PNG net, pas une capture d'écran floue. |

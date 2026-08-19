@@ -48,6 +48,9 @@ export const THERMITE = 40;
 export const PETROLEUM = 41;
 export const URANIUM = 42;
 export const FALLOUT = 43;
+export const CEMENT = 44;
+export const FILINGS = 45;
+export const MAGNET = 46;
 
 export type MaterialId = number;
 
@@ -135,6 +138,9 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [PETROLEUM]: { id: PETROLEUM, name: "Pétrole", kind: "liquid", density: 3, color: [30, 28, 40], noise: 10, spread: 2, boil: { at: 200, into: FIREDAMP }, hint: "Ne brûle pas : chauffé, il dégage du grisou — c'est le gaz qui explose" },
   [URANIUM]: { id: URANIUM, name: "Uranium", kind: "powder", density: 12, color: [96, 132, 88], noise: 14, heat: 60, hint: "Un grain tiédit ; un tas s'emballe, chauffe et finit par sauter — l'éparpiller le calme" },
   [FALLOUT]: { id: FALLOUT, name: "Retombées", kind: "gas", density: 1, color: [176, 208, 96], noise: 22, life: 250, hint: "Nuage radioactif : rien ne pousse dedans, et il traîne longtemps" },
+  [CEMENT]: { id: CEMENT, name: "Ciment", kind: "liquid", density: 8, color: [148, 148, 140], noise: 10, spread: 1, boil: { at: 60, into: STONE }, hint: "Se coule dans un moule et prend en pierre dès 60 °C" },
+  [FILINGS]: { id: FILINGS, name: "Limaille", kind: "powder", density: 8, color: [96, 98, 104], noise: 26, hint: "Poudre de fer : un aimant la fait venir, même vers le haut" },
+  [MAGNET]: { id: MAGNET, name: "Aimant", kind: "static", density: 9, color: [204, 84, 96], noise: 8, hint: "Attire la limaille alentour, gravité ou pas" },
   [THERMITE]: { id: THERMITE, name: "Thermite", kind: "powder", density: 8, color: [124, 112, 102], noise: 20, hint: "Ne souffle rien : brûle à 2800 °C et perce la pierre" },
 };
 
@@ -143,13 +149,13 @@ export const MATERIALS: Record<MaterialId, Material> = {
  * Une matière peut n'y figurer nulle part (elle n'est alors obtenue qu'en jeu).
  */
 export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
-  { name: "Terrain", ids: [SAND, STONE, WOOD, GLASS, MUD, SALT] },
-  { name: "Liquides", ids: [WATER, SALTWATER, OIL, PETROLEUM, TAR, ALCOHOL, ACID, MERCURY, MOLTEN_WAX, MOLTEN_GLASS] },
+  { name: "Terrain", ids: [SAND, STONE, WOOD, GLASS, MUD, SALT, FILINGS] },
+  { name: "Liquides", ids: [WATER, SALTWATER, OIL, PETROLEUM, TAR, ALCOHOL, ACID, MERCURY, MOLTEN_WAX, MOLTEN_GLASS, CEMENT] },
   { name: "Inflammable", ids: [FIRE, EMBER, LAVA, WAX, CANDLE] },
   { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, THERMITE, URANIUM] },
   { name: "Froid", ids: [ICE, SNOW, NITROGEN] },
   { name: "Vivant", ids: [SEED, PLANT, NANITE] },
-  { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK] },
+  { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK, MAGNET] },
   { name: "Gaz", ids: [SMOKE, STEAM, FIREDAMP, FALLOUT] },
   { name: "Outils", ids: [SOURCE, EMPTY] },
 ];
