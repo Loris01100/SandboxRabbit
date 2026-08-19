@@ -1,7 +1,7 @@
 import "./style.css";
 import { AMBIENT, Engine } from "./sim/engine.ts";
 import { Renderer, thumbnail } from "./sim/render";
-import { decode, encode } from "./sim/codec";
+import { decode, decodeFrozen, encode } from "./sim/codec";
 import { CATEGORIES, EMPTY, MATERIALS, SAND, SHORTCUTS, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, type Challenge } from "./challenges.ts";
 
@@ -251,19 +251,17 @@ const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const galleryEl = document.querySelector<HTMLDialogElement>("#gallery")!;
 const galleryGrid = document.querySelector<HTMLDivElement>("#gallery-grid")!;
 
-interface WorldSummary { id: string; name: string; createdAt: string }
+interface World { id: string; name: string; createdAt: string; width: number; height: number; data: string }
 
 /**
- * Galerie : la liste donne les noms, une requête par monde donne sa grille, qui
- * devient la vignette. Ouverte en modale (`<dialog>`), le panneau est trop
- * étroit pour montrer des images.
+ * Galerie : une seule requête ramène les mondes avec leur grille, qui devient la
+ * vignette. Ouverte en modale (`<dialog>`), le panneau est trop étroit pour
+ * montrer des images.
  */
-// ponytail: une requête par vignette (l'API en liste 50 max, ~1 ko chacune). Si
-// la galerie grossit, mettre la vignette dans /api/worlds plutôt que boucler.
 async function openGallery(): Promise<void> {
   galleryEl.showModal();
   galleryGrid.replaceChildren(note("Chargement…"));
-  let worlds: WorldSummary[];
+  let worlds: World[];
   try {
     worlds = await (await fetch("/api/worlds")).json();
   } catch {
@@ -282,7 +280,7 @@ function note(text: string): HTMLParagraphElement {
   return p;
 }
 
-function card(w: WorldSummary): HTMLDivElement {
+function card(w: World): HTMLDivElement {
   const slot = document.createElement("div");
   slot.className = "slot";
   const button = document.createElement("button");
@@ -297,22 +295,19 @@ function card(w: WorldSummary): HTMLDivElement {
   button.append(name, date);
 
   // La grille sert deux fois : à dessiner la vignette, puis à charger le monde.
-  let data: string | null = null;
+  const usable = w.width === WIDTH && w.height === HEIGHT;
+  try {
+    button.prepend(thumbnail(decode(w.data, w.width * w.height), w.width, w.height));
+    if (!usable) button.title = "Taille de grille incompatible";
+  } catch {
+    button.title = "Monde illisible";
+  }
   button.addEventListener("click", () => {
-    if (!data) return;
-    load(data);
+    if (!usable) return;
+    load(w.data);
     galleryEl.close();
     statusEl.textContent = `« ${w.name} » chargé.`;
   });
-
-  void fetch(`/api/worlds/${w.id}`)
-    .then((r) => r.json() as Promise<{ width: number; height: number; data: string }>)
-    .then((world) => {
-      button.prepend(thumbnail(decode(world.data, world.width * world.height), world.width, world.height));
-      if (world.width === WIDTH && world.height === HEIGHT) data = world.data;
-      else button.title = "Taille de grille incompatible";
-    })
-    .catch(() => (button.title = "Monde illisible"));
 
   // Suppression : rien ne protège les mondes des autres, comme la sauvegarde
   // n'identifie personne. ponytail: ajouter un jeton le jour où ça compte.
@@ -341,7 +336,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
   const res = await fetch("/api/worlds", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, width: WIDTH, height: HEIGHT, data: encode(engine.cells) }),
+    body: JSON.stringify({ name, width: WIDTH, height: HEIGHT, data: encode(engine.cells, engine.frozen) }),
   });
   statusEl.textContent = res.ok ? "Sauvegardé — visible dans la galerie." : "Échec de la sauvegarde.";
 });
@@ -350,19 +345,40 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
 function load(data: string): void {
   snapshot();
   engine.cells.set(decode(data, WIDTH * HEIGHT));
+  engine.frozen.set(decodeFrozen(data, WIDTH * HEIGHT));
   engine.life.fill(0);
   engine.temp.fill(AMBIENT);
 }
 
 // Partage : le monde entier tient dans l'URL (RLE + base64, ~1 ko).
 document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", async () => {
-  location.hash = encodeURIComponent(encode(engine.cells));
+  location.hash = encodeURIComponent(encode(engine.cells, engine.frozen));
   try {
     await navigator.clipboard.writeText(location.href);
     statusEl.textContent = "Lien copié.";
   } catch {
     statusEl.textContent = "Lien dans la barre d'adresse.";
   }
+});
+
+
+// Image : le canvas fait 320x180, on le repasse ×4 sans lissage pour sortir un
+// PNG regardable plutôt qu'une vignette.
+document.querySelector<HTMLButtonElement>("#png")!.addEventListener("click", () => {
+  const big = document.createElement("canvas");
+  big.width = WIDTH * 4;
+  big.height = HEIGHT * 4;
+  const ctx = big.getContext("2d")!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(canvas, 0, 0, big.width, big.height);
+  big.toBlob((blob) => {
+    if (!blob) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `bac-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
 });
 
 

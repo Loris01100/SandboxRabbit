@@ -44,14 +44,16 @@ mondes partagés.
 | Vent & gravité | Un curseur biaise la dérive horizontale, la touche `g` retourne la gravité. |
 | Figer | L'outil « Figer » (touche `f`) immobilise la matière sous le pinceau : elle garde son identité et sa couleur (tramée en damier), mais aucune règle ne s'applique plus et rien ne peut la pousser. « Libérer » la rend à la gravité, repeindre par-dessus aussi. De quoi bâtir une structure en sable ou suspendre une cascade. |
 | Annuler | Bouton « Annuler » ou `Ctrl+Z` : un cran, revient à l'état d'avant le dernier geste (coup de pinceau, remplissage, « Vider », chargement d'un monde ou d'un défi). Une copie des quatre tableaux de la grille, pas une pile d'historique. |
+| Figé sauvegardé | La sérialisation porte deux blocs séparés par un point : la matière, puis le figé quand il y en a. Un monde partagé garde donc ses structures suspendues, et un monde d'avant (sans point) reste lisible. |
 | Pipette | `Alt` + clic sur le bac reprend la matière sous le curseur : plus court que de rouvrir la famille dans la palette. |
 | Réglages retenus | Matière, pinceau, vitesse et vent sont relus dans `localStorage` au chargement suivant. |
+| Image PNG | Le bac est réexporté ×4 sans lissage (`imageSmoothingEnabled = false`) et téléchargé : un PNG net, pas une capture d'écran floue. |
 | Ligne & remplissage | `Maj` + clic trace une ligne droite depuis le dernier point posé, clic droit remplit toute la poche de matière identique sous le curseur. |
 | Défis | Quatre scènes prêtes à jouer (Débâcle, Mèche lente, Court-circuit, Jardin) avec leur objectif et sa détection de victoire, construites en code dans `challenges.ts`. |
 | Familles | La barre d'outils est découpée en `<details>` repliables (`CATEGORIES` dans `materials.ts`) : une famille ouverte à la fois suffit à tenir dans le panneau. Les raccourcis 1..9 / 0 restent sur les dix classiques, indépendamment de l'ordre d'affichage. |
 | Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours), case « Gomme sélective » : la gomme ne retire que la dernière matière choisie. Clic maintenu = dépôt continu, même sans bouger la souris. |
 | Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. Ouvrir le lien recharge la scène. |
-| Galerie | « Sauvegarder » envoie le monde au Worker, « Galerie » ouvre une modale (`<dialog>` natif) qui liste tous les mondes sauvegardés avec leur vignette : la grille décodée est redessinée dans un canvas hors écran, mêmes couleurs que le bac. Un clic charge la scène, la croix au survol d'une vignette supprime le monde. |
+| Galerie | « Sauvegarder » envoie le monde au Worker, « Galerie » ouvre une modale (`<dialog>` natif) qui liste tous les mondes sauvegardés avec leur vignette : la grille décodée est redessinée dans un canvas hors écran, mêmes couleurs que le bac. Un clic charge la scène, la croix au survol d'une vignette supprime le monde. Une seule requête : la liste renvoie les grilles, ~1 ko chacune. |
 
 ## Stack
 
@@ -99,7 +101,7 @@ npm run deploy     # déploiement (npx wrangler login la première fois)
 | Route | Effet |
 | --- | --- |
 | `GET /api/health` | État + backend de stockage actif |
-| `GET /api/worlds` | Liste des mondes (sans les données) |
+| `GET /api/worlds` | Liste des mondes, grille comprise (50 max) |
 | `GET /api/worlds/:id` | Un monde complet |
 | `POST /api/worlds` | Sauvegarde `{ name, width, height, data }` |
 | `DELETE /api/worlds/:id` | Supprime un monde (ouvert à tous, comme la sauvegarde) |

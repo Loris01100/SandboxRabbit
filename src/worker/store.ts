@@ -10,10 +10,9 @@ export interface World {
   createdAt: string;
 }
 
-export type WorldSummary = Omit<World, "data">;
-
 export interface Store {
-  list(): Promise<WorldSummary[]>;
+  /** Renvoie les grilles : la galerie en fait ses vignettes, ~1 ko par monde. */
+  list(): Promise<World[]>;
   get(id: string): Promise<World | null>;
   save(world: World): Promise<void>;
   remove(id: string): Promise<void>;
@@ -37,9 +36,7 @@ const memory = new Map<string, World>();
 function memoryStore(): Store {
   return {
     async list() {
-      return [...memory.values()]
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .map(({ data: _data, ...summary }) => summary);
+      return [...memory.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     },
     async get(id) {
       return memory.get(id) ?? null;
@@ -57,8 +54,8 @@ function d1Store(db: D1Database): Store {
   return {
     async list() {
       const { results } = await db
-        .prepare("SELECT id, name, width, height, created_at AS createdAt FROM worlds ORDER BY created_at DESC LIMIT 50")
-        .all<WorldSummary>();
+        .prepare("SELECT id, name, width, height, data, created_at AS createdAt FROM worlds ORDER BY created_at DESC LIMIT 50")
+        .all<World>();
       return results;
     },
     async get(id) {

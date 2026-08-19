@@ -2,9 +2,26 @@
  * Sérialisation d'une grille : RLE puis base64.
  * Un monde de 320x180 majoritairement vide tient en quelques centaines d'octets,
  * ce qui rentre sans souci dans une colonne D1 plus tard.
+ *
+ * Deux blocs séparés par un point : la matière, puis le figé s'il y en a. Un
+ * monde d'avant (sans point) reste lisible, son figé est simplement vide.
  */
 
-export function encode(cells: Uint8Array): string {
+export function encode(cells: Uint8Array, frozen?: Uint8Array): string {
+  return frozen?.some(Boolean) ? rle(cells) + "." + rle(frozen) : rle(cells);
+}
+
+export function decode(data: string, size: number): Uint8Array {
+  return unrle(data.split(".")[0], size);
+}
+
+/** Le second bloc, ou une grille vide pour un monde sauvegardé sans figé. */
+export function decodeFrozen(data: string, size: number): Uint8Array {
+  const block = data.split(".")[1];
+  return block ? unrle(block, size) : new Uint8Array(size);
+}
+
+function rle(cells: Uint8Array): string {
   const out: number[] = [];
   let id = cells[0], run = 0;
   for (let i = 0; i < cells.length; i++) {
@@ -21,7 +38,7 @@ export function encode(cells: Uint8Array): string {
   return btoa(binary);
 }
 
-export function decode(data: string, size: number): Uint8Array {
+function unrle(data: string, size: number): Uint8Array {
   const binary = atob(data);
   const cells = new Uint8Array(size);
   let at = 0;

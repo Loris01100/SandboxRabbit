@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { Engine } from "../src/client/sim/engine.ts";
-import { decode, encode } from "../src/client/sim/codec.ts";
+import { decode, decodeFrozen, encode } from "../src/client/sim/codec.ts";
 import { CHALLENGES } from "../src/client/challenges.ts";
 import {
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
@@ -149,6 +149,13 @@ function count(e: Engine, id: MaterialId): number {
   const round = decode(encode(e.cells), W * H);
   assert.deepEqual([...round], [...e.cells], "encode/decode conserve la grille");
   assert.ok(encode(e.cells).length < 4000, "un monde tient dans une URL");
+
+  // Le figé voyage dans un second bloc, et un monde d'avant reste lisible.
+  e.setFrozen(20, 20, 4, true);
+  const data = encode(e.cells, e.frozen);
+  assert.deepEqual([...decode(data, W * H)], [...e.cells], "le second bloc ne casse pas la grille");
+  assert.deepEqual([...decodeFrozen(data, W * H)], [...e.frozen], "le figé fait l'aller-retour");
+  assert.ok(!decodeFrozen(encode(e.cells), W * H).some(Boolean), "sans figé, grille vide");
 }
 
 // `flammable` règle la vitesse de propagation : l'huile s'embrase, le bois traîne.
