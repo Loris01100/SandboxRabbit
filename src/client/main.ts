@@ -62,6 +62,7 @@ select(current);
 // Raccourcis : 1..9 puis 0 pour la gomme.
 addEventListener("keydown", (e) => {
   if (e.key === " ") { toggleRun(); e.preventDefault(); return; }
+  if (e.key === "z" && (e.ctrlKey || e.metaKey)) { undo(); e.preventDefault(); return; }
   const n = Number(e.key);
   if (!Number.isNaN(n) && SHORTCUTS[n - 1] !== undefined) select(SHORTCUTS[n - 1]);
   if (e.key === "0") select(EMPTY);
@@ -113,6 +114,7 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("pointerdown", (e) => {
   const p = toCell(e);
+  snapshot();
   if (e.button === 2) { engine.fill(p.x, p.y, current); return; }
   // Cliquer un interrupteur déjà posé le bascule au lieu d'en reposer un.
   if (current === SWITCH && engine.get(p.x, p.y) === SWITCH) { engine.toggleSwitch(p.x, p.y); return; }
@@ -137,6 +139,34 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
   // `last` est conservé : c'est l'ancre de la ligne droite au Maj.
   canvas.addEventListener(type, () => (painting = false));
 }
+
+/* ----------------------------------------------------------------- annuler */
+
+// Un seul cran : une copie des quatre tableaux avant chaque geste destructeur
+// (57 ko par tableau sur une grille 320x180, donc gratuit).
+// ponytail: un seul niveau, empiler si un vrai historique manque.
+let undoState: { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array } | null = null;
+
+function snapshot(): void {
+  undoState = {
+    cells: engine.cells.slice(),
+    life: engine.life.slice(),
+    temp: engine.temp.slice(),
+    frozen: engine.frozen.slice(),
+  };
+}
+
+function undo(): void {
+  if (!undoState) return;
+  engine.cells.set(undoState.cells);
+  engine.life.set(undoState.life);
+  engine.temp.set(undoState.temp);
+  engine.frozen.set(undoState.frozen);
+  undoState = null;
+  statusEl.textContent = "Annulé.";
+}
+
+document.querySelector<HTMLButtonElement>("#undo")!.addEventListener("click", undo);
 
 /* ----------------------------------------------------------------- réglages */
 
@@ -190,7 +220,7 @@ document.querySelector<HTMLButtonElement>("#step")!.addEventListener("click", ()
   engine.step();
 });
 
-document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => engine.clear());
+document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => { snapshot(); engine.clear(); });
 
 /* -------------------------------------------------------------- mondes/API */
 
@@ -277,6 +307,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
 
 /** Charge une grille encodée (API ou lien partagé). */
 function load(data: string): void {
+  snapshot();
   engine.cells.set(decode(data, WIDTH * HEIGHT));
   engine.life.fill(0);
   engine.temp.fill(AMBIENT);
@@ -305,6 +336,7 @@ for (const c of CHALLENGES) {
   button.type = "button";
   button.textContent = c.name;
   button.addEventListener("click", () => {
+    snapshot();
     engine.clear();
     c.build(engine);
     challenge = c;
