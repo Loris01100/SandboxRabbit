@@ -1,11 +1,18 @@
 :root {
-  --bg: #0b0d14;
-  --panel: #141824;
-  --line: #232838;
-  --text: #e6e9f2;
-  --muted: #8b93a7;
-  --accent: #f0a13c;
-  color-scheme: dark;
+  /* `light-dark()` évite le doublon : une valeur claire, une sombre, et c'est
+     `color-scheme` qui tranche — celui du système par défaut, ou celui que le
+     bouton ☀/🌙 pose sur <html>. Les contrôles natifs suivent au passage. */
+  color-scheme: light dark;
+  --bg: light-dark(#f2f3f7, #0b0d14);
+  --panel: light-dark(#ffffff, #141824);
+  --line: light-dark(#d6d9e2, #232838);
+  --text: light-dark(#191c25, #e6e9f2);
+  --muted: light-dark(#5c6478, #8b93a7);
+  --accent: light-dark(#c67a0c, #f0a13c);
+  /* Fond des contrôles, bord au survol, fond d'un bouton actif. */
+  --control: light-dark(#f6f7fa, #1b2030);
+  --edge: light-dark(#a9b0c4, #39405a);
+  --pressed: light-dark(#fbeed9, #262a3a);
 }
 
 * { box-sizing: border-box; }
@@ -31,6 +38,7 @@ body {
 
 .bar h1 { margin: 0; font-size: 1rem; letter-spacing: 0.02em; }
 .bar h1 span { color: var(--accent); }
+#theme { padding: 0.2rem 0.45rem; line-height: 1; }
 .stats { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 main {
@@ -55,6 +63,8 @@ canvas {
   max-height: 100%;
   aspect-ratio: 16 / 9;
   image-rendering: pixelated;
+  /* Le bac garde son fond sombre en mode jour : c'est le vide de la
+     simulation (la couleur d'EMPTY), pas un élément d'interface. */
   background: #0c0e14;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -102,7 +112,7 @@ canvas {
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 5px;
-  background: #1b2030;
+  background: var(--control);
   color: var(--text);
   font: inherit;
   font-size: 0.82rem;
@@ -110,9 +120,9 @@ canvas {
   text-align: left;
 }
 
-.palette button:hover { border-color: #39405a; }
-.palette button[aria-pressed="true"] { border-color: var(--accent); background: #262a3a; }
-.swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; box-shadow: inset 0 0 0 1px #0006; }
+.palette button:hover { border-color: var(--edge); }
+.palette button[aria-pressed="true"] { border-color: var(--accent); background: var(--pressed); }
+.swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; box-shadow: inset 0 0 0 1px light-dark(#0003, #0006); }
 
 .hint { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.78rem; min-height: 1.2em; }
 
@@ -137,7 +147,7 @@ select {
   padding: 0.35rem 0.4rem;
   border: 1px solid var(--line);
   border-radius: 5px;
-  background: #1b2030;
+  background: var(--control);
   color: var(--text);
   font: inherit;
   font-size: 0.82rem;
@@ -164,14 +174,14 @@ button {
   padding: 0.4rem 0.7rem;
   border: 1px solid var(--line);
   border-radius: 5px;
-  background: #1b2030;
+  background: var(--control);
   color: var(--text);
   font: inherit;
   font-size: 0.82rem;
   cursor: pointer;
 }
 
-button:hover { border-color: #39405a; }
+button:hover { border-color: var(--edge); }
 
 @media (max-width: 760px) {
   /* En bloc et non en grille : la zone d'un élément de grille fait sa propre
@@ -211,7 +221,7 @@ button:hover { border-color: #39405a; }
 .quick button:nth-child(n + 3) { flex: 0 0 2.2rem; font-size: 1rem; }
 
 kbd {
-  border: 1px solid #3a3f4c;
+  border: 1px solid var(--edge);
   border-radius: 3px;
   padding: 0 0.25em;
   font: inherit;
@@ -246,7 +256,7 @@ kbd {
   font: inherit;
 }
 
-#gallery::backdrop { background: #000a; }
+#gallery::backdrop { background: light-dark(#3339, #000a); }
 
 .gallery-bar {
   display: flex;
