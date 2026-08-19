@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { Engine } from "../src/client/sim/engine.ts";
-import { decode, decodeFrozen, encode } from "../src/client/sim/codec.ts";
+import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/client/sim/codec.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import {
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
@@ -168,6 +168,20 @@ function count(e: Engine, id: MaterialId): number {
   assert.deepEqual([...decode(data, W * H)], [...e.cells], "le second bloc ne casse pas la grille");
   assert.deepEqual([...decodeFrozen(data, W * H)], [...e.frozen], "le figé fait l'aller-retour");
   assert.ok(!decodeFrozen(encode(e.cells), W * H).some(Boolean), "sans figé, grille vide");
+
+  // État vivant : un incendie enregistré doit repartir chaud.
+  assert.equal(decodeLife(data, W * H), null, "deux blocs : pas d'état vivant");
+  e.paint(30, 10, 3, FIRE);
+  for (let t = 0; t < 5; t++) e.step();
+  const full = encode(e.cells, e.frozen, e.life, e.temp);
+  assert.deepEqual([...decode(full, W * H)], [...e.cells], "la matière survit aux quatre blocs");
+  assert.deepEqual([...decodeFrozen(full, W * H)], [...e.frozen], "le figé aussi");
+  assert.deepEqual([...decodeLife(full, W * H)!], [...e.life], "les vies font l'aller-retour");
+  const temp = decodeTemp(full, W * H)!;
+  let worst = 0;
+  for (let i = 0; i < temp.length; i++) worst = Math.max(worst, Math.abs(temp[i] - e.temp[i]));
+  assert.ok(worst <= 4, `la température revient à 4 °C près (${worst.toFixed(1)})`);
+  assert.ok(Math.max(...temp) > 300, "et le feu est toujours chaud");
 }
 
 // `flammable` règle la vitesse de propagation : l'huile s'embrase, le bois traîne.

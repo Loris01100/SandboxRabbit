@@ -16,10 +16,10 @@ npm run build      # typecheck puis vite build
 npm run preview    # build puis `wrangler dev` sur le bundle
 npm run deploy
 npm run cf-typegen # régénère worker-configuration.d.ts après un changement de bindings
-npm run check      # asserts sur la simulation (test/sim.ts) et sur l'API (test/api.ts), exécutés par Node
+npm run check      # asserts sur la simulation (test/sim.ts), le panneau (test/ui.ts) et l'API (test/api.ts), exécutés par Node
 ```
 
-Pas de framework de test : [test/sim.ts](test/sim.ts) et [test/api.ts](test/api.ts) sont des scripts d'`assert`, lancés directement par Node (exécution native du TypeScript, d'où les imports en `.ts` dans `src/client/sim` et `src/worker`). `test/api.ts` interroge le Worker en mémoire via `app.request()` de Hono : ni serveur, ni wrangler, et sans binding `DB` c'est le store mémoire qui répond.
+Pas de framework de test : [test/sim.ts](test/sim.ts), [test/ui.ts](test/ui.ts) et [test/api.ts](test/api.ts) sont des scripts d'`assert`, lancés directement par Node (exécution native du TypeScript, d'où les imports en `.ts` dans `src/client/sim` et `src/worker`). `test/api.ts` interroge le Worker en mémoire via `app.request()` de Hono : ni serveur, ni wrangler, et sans binding `DB` c'est le store mémoire qui répond.
 
 ## Architecture
 
@@ -32,7 +32,8 @@ Un seul Worker Cloudflare sert le site statique **et** l'API (binding `ASSETS`, 
 - [src/client/sim/engine.ts](src/client/sim/engine.ts) — l'automate cellulaire. État = tableaux plats (`cells`, `life`, `clock`, `noise`), pas d'objets par cellule : c'est délibéré, pour pouvoir remplacer l'intérieur d'`Engine` par un module Rust/WASM en gardant l'interface (`step`, `paint`, `cells`).
 - [src/client/sim/render.ts](src/client/sim/render.ts) — 1 cellule = 1 pixel dans un `ImageData`, un seul `putImageData` par frame, mise à l'échelle via CSS `image-rendering: pixelated`. Ne pas introduire de dessin par cellule. `renderer.heatmap` bascule sur un rendu de `temp` (même boucle, autre palette).
 - [src/client/sim/codec.ts](src/client/sim/codec.ts) — RLE + base64 ; format partagé avec la colonne `data` de D1. Toute modification du codec casse les mondes déjà sauvegardés.
-- [src/client/main.ts](src/client/main.ts) — DOM impératif, aucun framework UI. La galerie est un `<dialog>` ouvert en `showModal()` ; `GET /api/worlds` ramène les grilles, dont la galerie fait ses vignettes (`thumbnail()` dans `render.ts`) — une seule requête. Le tri (date / vues) se fait sur cette liste, côté client. Cliquer une carte charge par `GET /api/worlds/:id` : c'est le seul chemin qui compte une vue (`store.see`), donc le raccourci « charger depuis la copie en main » ferait retomber le compteur à zéro. Les éléments viennent de [index.html](index.html) via `querySelector` non-null (`!`) : ajouter un contrôle = ajouter l'élément dans le HTML **et** son câblage ici. Le panneau est fait de `<details class="group">` repliables (natif, aucun JS) ; un réglage = une `.row` (libellé / contrôle / valeur, colonnes alignées) ou une `.check` pour une case à cocher.
+- [src/client/ui.ts](src/client/ui.ts) — la logique du panneau qui ne touche ni au DOM ni au moteur (objectifs, matières récentes, math du zoom) : la seule partie du client que Node peut vérifier. Ce qui est testable y va, plutôt que de grossir main.ts.
+- [src/client/main.ts](src/client/main.ts) — DOM impératif, aucun framework UI. Toute modification de la grille passe par `gesture()` : c'est ce passage unique qui permet de relayer un geste à l'hôte d'un salon partagé. Appeler `engine.paint`/`fill`/`paste` directement rouvrirait le trou. La galerie est un `<dialog>` ouvert en `showModal()` ; `GET /api/worlds` ramène les grilles, dont la galerie fait ses vignettes (`thumbnail()` dans `render.ts`) — une seule requête. Le tri (date / vues) se fait sur cette liste, côté client. Cliquer une carte charge par `GET /api/worlds/:id` : c'est le seul chemin qui compte une vue (`store.see`), donc le raccourci « charger depuis la copie en main » ferait retomber le compteur à zéro. Les éléments viennent de [index.html](index.html) via `querySelector` non-null (`!`) : ajouter un contrôle = ajouter l'élément dans le HTML **et** son câblage ici. Le panneau est fait de `<details class="group">` repliables (natif, aucun JS) ; un réglage = une `.row` (libellé / contrôle / valeur, colonnes alignées) ou une `.check` pour une case à cocher.
 
 ### Invariants de la simulation
 

@@ -1,9 +1,10 @@
 import "./style.css";
 import { Engine, type Clip } from "./sim/engine.ts";
 import { Renderer, thumbnail } from "./sim/render";
-import { decode, decodeFrozen, encode } from "./sim/codec";
+import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./sim/codec";
 import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PALETTE, SAND, SHORTCUTS, SNOW, SOURCE, STONE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, count, type Challenge } from "./challenges.ts";
+import { goalText, panAfterZoom, parseGoal, pushRecent } from "./ui.ts";
 
 // La taille de la grille est un réglage : `Engine` et `Renderer` sont recréés
 // à chaque changement (le rendu écrit dans un ImageData de la taille exacte).
@@ -53,22 +54,36 @@ function swatch(id: MaterialId): HTMLButtonElement {
 }
 paletteEl.addEventListener("pointerleave", () => (hintEl.textContent = MATERIALS[current].hint));
 
+
 // Les six dernières matières choisies, épinglées au-dessus des familles :
 // depuis que la palette est un accordéon exclusif, y revenir coûtait deux clics.
 const recentEl = document.querySelector<HTMLDivElement>("#recent")!;
-const recent: MaterialId[] = [];
+let recent: MaterialId[] = [];
 
-function pushRecent(id: MaterialId): void {
-  const known = recent.indexOf(id);
-  if (known >= 0) recent.splice(known, 1);
-  recent.unshift(id);
-  recent.length = Math.min(recent.length, 6);
+function keepRecent(id: MaterialId): void {
+  recent = pushRecent(recent, id, 6);
   recentEl.replaceChildren(...recent.map(swatch));
+}
+
+// Clavier : les flèches parcourent une grille de matières. Sans ça il faut
+// quarante-six tabulations pour traverser la palette.
+for (const grid of [paletteEl, recentEl]) {
+  grid.addEventListener("keydown", (e) => {
+    const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 2, ArrowUp: -2 }[e.key];
+    if (step === undefined) return;
+    const box = (e.target as HTMLElement).closest(".palette");
+    if (!box) return;
+    const buttons = [...box.querySelectorAll("button")];
+    const next = buttons[buttons.indexOf(e.target as HTMLButtonElement) + step];
+    if (!next) return;
+    next.focus();
+    e.preventDefault();
+  });
 }
 
 function select(id: MaterialId): void {
   current = id;
-  pushRecent(id);
+  keepRecent(id);
   // Une source crache la dernière matière choisie avant elle.
   if (id !== SOURCE && id !== EMPTY) engine.emit = id;
   hintEl.textContent = MATERIALS[id].hint;
@@ -86,7 +101,13 @@ addEventListener("keydown", (e) => {
   if (e.key === "v" && (e.ctrlKey || e.metaKey) && clip && last) {
     snapshot();
     // Centré sur le curseur : c'est là qu'on regarde en collant.
-    engine.paste(clip, last.x - (clip.width >> 1), last.y - (clip.height >> 1));
+    gesture({
+      t: "clip",
+      x: last.x - (clip.width >> 1),
+      y: last.y - (clip.height >> 1),
+      w: clip.width, h: clip.height,
+      cells: encode(clip.cells, clip.frozen), life: encode(clip.life),
+    });
     e.preventDefault();
     return;
   }
@@ -111,6 +132,7 @@ function setTheme(mode: "light" | "dark" | ""): void {
   const night = mode ? mode === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   themeButton.textContent = night ? "☀" : "🌙";
   themeButton.title = night ? "Passer en mode jour" : "Passer en mode nuit";
+  themeButton.setAttribute("aria-label", themeButton.title);
   if (mode) localStorage.setItem(THEME, mode);
   else localStorage.removeItem(THEME);
 }
@@ -193,17 +215,11 @@ function applyView(): void {
   canvas.style.transform = zoom === 1 ? "" : `translate(${panX}px, ${panY}px) scale(${zoom})`;
 }
 
-/**
- * Zoome autour d'un point de l'écran, qui ne bouge pas. La boîte non
- * transformée se déduit de la boîte affichée : origine `r.left - panX`,
- * largeur `r.width / zoom`.
- */
+/** Zoome autour d'un point de l'écran, qui ne bouge pas (math dans ui.ts). */
 function zoomAt(clientX: number, clientY: number, next: number): void {
   const r = canvas.getBoundingClientRect();
-  const fx = (clientX - r.left) / r.width;
-  const fy = (clientY - r.top) / r.height;
-  panX = clientX - (r.left - panX) - fx * (r.width / zoom) * next;
-  panY = clientY - (r.top - panY) - fy * (r.height / zoom) * next;
+  panX = panAfterZoom(clientX, r.left, r.width, panX, zoom, next);
+  panY = panAfterZoom(clientY, r.top, r.height, panY, zoom, next);
   zoom = next;
   if (zoom === 1) { panX = 0; panY = 0; }
   applyView();
@@ -239,23 +255,52 @@ function span(): { gap: number; x: number; y: number } {
 // de souris vaut un pixel d'écran, quel que soit le zoom.
 canvas.addEventListener("auxclick", (e) => e.preventDefault());
 
+/**
+ * Tout geste qui modifie la grille passe par ici : appliqué chez soi, puis
+ * relayé à l'hôte si on est invité d'un salon. Sans ce passage unique, un
+ * invité qui remplit, fige ou colle voit son geste effacé par l'instantané
+ * suivant — c'est le trou qu'avait laissé le relais du seul pinceau.
+ */
+type Gesture =
+  | { t: "paint"; x: number; y: number; r: number; id: MaterialId; d: number; over: boolean; only?: MaterialId }
+  | { t: "fill"; x: number; y: number; id: MaterialId }
+  | { t: "frozen"; x: number; y: number; r: number; on: boolean }
+  | { t: "toggle"; x: number; y: number }
+  | { t: "clip"; x: number; y: number; w: number; h: number; cells: string; life: string };
+
+function gesture(g: Gesture): void {
+  applyGesture(g);
+  if (socket?.readyState === WebSocket.OPEN && !host) socket.send(JSON.stringify({ type: "do", g }));
+}
+
+function applyGesture(g: Gesture): void {
+  switch (g.t) {
+    case "paint": engine.paint(g.x, g.y, g.r, g.id, g.d, g.over, g.only); return;
+    case "fill": engine.fill(g.x, g.y, g.id); return;
+    case "frozen": engine.setFrozen(g.x, g.y, g.r, g.on); return;
+    // Un seul message pour les deux bascules : la cellule dit laquelle c'est.
+    case "toggle": engine.toggleSwitch(g.x, g.y); engine.toggleMagnet(g.x, g.y); return;
+    case "clip": {
+      const n = g.w * g.h;
+      engine.paste({ width: g.w, height: g.h, cells: decode(g.cells, n), frozen: decodeFrozen(g.cells, n), life: decode(g.life, n) }, g.x, g.y);
+      return;
+    }
+  }
+}
+
 /** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */
 function dab(x: number, y: number): void {
   if (toolInput.value !== "paint") {
     // « Copier » ne touche à rien : il se contente de découper au relâchement.
     if (toolInput.value === "copy") return;
-    engine.setFrozen(x, y, brush, toolInput.value === "freeze");
+    gesture({ t: "frozen", x, y, r: brush, on: toolInput.value === "freeze" });
     return;
   }
   const kind = MATERIALS[current].kind;
   const density = kind === "liquid" || kind === "gas" ? 0.35 : 1;
   // Gomme sélective : on n'efface que la dernière matière choisie avant la gomme.
   const only = current === EMPTY && onlyInput.checked ? engine.emit : undefined;
-  engine.paint(x, y, brush, current, density, !keepInput.checked, only);
-  // Invité d'un salon : c'est l'hôte qui fait foi, il faut lui repasser le geste.
-  if (socket?.readyState === WebSocket.OPEN && !host) {
-    socket.send(JSON.stringify({ type: "paint", x, y, r: brush, id: current, density }));
-  }
+  gesture({ t: "paint", x, y, r: brush, id: current, d: density, over: !keepInput.checked, only });
 }
 
 /** Trace un segment de cellules (geste rapide, ou ligne droite au Maj). */
@@ -292,10 +337,13 @@ canvas.addEventListener("pointerdown", (e) => {
   // Pipette : Alt+clic reprend la matière sous le curseur, sans rien modifier.
   if (e.altKey) { select(engine.get(p.x, p.y) as MaterialId); return; }
   snapshot();
-  if (e.button === 2) { engine.fill(p.x, p.y, current); return; }
+  if (e.button === 2) { gesture({ t: "fill", x: p.x, y: p.y, id: current }); return; }
   // Cliquer un interrupteur (ou un aimant) déjà posé le bascule au lieu d'en reposer un.
-  if (current === SWITCH && engine.get(p.x, p.y) === SWITCH) { engine.toggleSwitch(p.x, p.y); return; }
-  if (current === MAGNET && engine.get(p.x, p.y) === MAGNET) { engine.toggleMagnet(p.x, p.y); return; }
+  const at = engine.get(p.x, p.y);
+  if ((current === SWITCH && at === SWITCH) || (current === MAGNET && at === MAGNET)) {
+    gesture({ t: "toggle", x: p.x, y: p.y });
+    return;
+  }
   canvas.setPointerCapture(e.pointerId);
   // Outil « Copier » : le glissé trace un rectangle, il ne peint rien.
   if (toolInput.value === "copy") {
@@ -680,13 +728,6 @@ for (const id of PALETTE) {
   goalId.append(new Option(MATERIALS[id].name, String(id)));
 }
 
-/** Texte lisible d'un objectif encodé, ou null s'il n'en est pas un. */
-function goalText(goal: string | null | undefined): string | null {
-  const m = /^(ge|lt):(\d+):(\d+)$/.exec(goal ?? "");
-  if (!m || !MATERIALS[Number(m[2])]) return null;
-  return `${m[1] === "ge" ? "Au moins" : "Moins de"} ${m[3]} cellules de ${MATERIALS[Number(m[2])].name}`;
-}
-
 document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", async () => {
   const name = prompt("Nom du monde ?", `bac-${new Date().toLocaleTimeString("fr-FR")}`);
   if (!name) return;
@@ -695,25 +736,37 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      name, width: WIDTH, height: HEIGHT, data: encode(engine.cells, engine.frozen),
+      name, width: WIDTH, height: HEIGHT, data: snapshotData(),
       goal: goalOp.value ? `${goalOp.value}:${goalId.value}:${goalN.value}` : null,
     }),
   });
   statusEl.textContent = res.ok ? "Sauvegardé — visible dans la galerie." : "Échec de la sauvegarde.";
 });
 
+/**
+ * La grille **et** son état vivant : un incendie enregistré repart chaud.
+ * Ça coûte ~20 caractères sur une scène au repos, ~1,8 ko en plein feu.
+ */
+function snapshotData(): string {
+  return encode(engine.cells, engine.frozen, engine.life, engine.temp);
+}
+
 /** Charge une grille encodée (API ou lien partagé). */
 function load(data: string): void {
   snapshot();
-  engine.cells.set(decode(data, WIDTH * HEIGHT));
-  engine.frozen.set(decodeFrozen(data, WIDTH * HEIGHT));
-  engine.life.fill(0);
-  engine.temp.fill(engine.ambient);
+  const n = WIDTH * HEIGHT;
+  engine.cells.set(decode(data, n));
+  engine.frozen.set(decodeFrozen(data, n));
+  // Un monde d'avant les quatre blocs : on repart au repos, comme autrefois.
+  const life = decodeLife(data, n);
+  const temp = decodeTemp(data, n);
+  if (life) engine.life.set(life); else engine.life.fill(0);
+  if (temp) engine.temp.set(temp); else engine.temp.fill(engine.ambient);
 }
 
 // Partage : le monde entier tient dans l'URL (RLE + base64, ~1 ko).
 document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", async () => {
-  location.hash = encodeURIComponent(encode(engine.cells, engine.frozen));
+  location.hash = encodeURIComponent(snapshotData());
   try {
     await navigator.clipboard.writeText(location.href);
     statusEl.textContent = "Lien copié.";
@@ -834,7 +887,7 @@ roomButton.addEventListener("click", () => {
         : `Salon « ${name} » — vous suivez l'hôte.`;
     }
     if (msg.type === "grid" && !host) applyGrid(msg.data, msg.width, msg.height);
-    if (msg.type === "paint" && host) engine.paint(msg.x, msg.y, msg.r, msg.id, msg.density);
+    if (msg.type === "do" && host) applyGesture(msg.g);
   });
   ws.addEventListener("close", () => {
     leaveRoom();
@@ -867,14 +920,12 @@ const best = (name: string): string => (records[name] === undefined ? "" : ` (re
 
 /** Défi bâti sur un monde partagé : la grille est déjà chargée, `build` n'a rien à faire. */
 function challengeOf(w: World, objective: string): Challenge {
-  const [op, id, n] = w.goal!.split(":");
-  const material = Number(id);
-  const target = Number(n);
+  const { op, id, n } = parseGoal(w.goal)!;
   return {
     name: w.name,
     goal: objective,
     build: () => {},
-    won: (e) => (op === "ge" ? count(e, material) >= target : count(e, material) < target),
+    won: (e) => (op === "ge" ? count(e, id) >= n : count(e, id) < n),
   };
 }
 
@@ -929,7 +980,7 @@ undoStack.length = 0; // rien à annuler avant le premier geste
 // `visibilitychange` plutôt que `beforeunload` : c'est le seul que les mobiles
 // déclenchent vraiment quand l'onglet part en arrière-plan.
 addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") localStorage.setItem(BAC, encode(engine.cells, engine.frozen));
+  if (document.visibilityState === "hidden") localStorage.setItem(BAC, snapshotData());
 });
 
 /* ------------------------------------------------------------ boucle rendu */

@@ -32,12 +32,18 @@ export class Renderer {
 
   draw(): void {
     if (this.heatmap) { this.drawHeat(); return; }
-    const { cells, noise, frozen, life, width } = this.engine;
+    const { cells, noise, frozen, life, width, temp, ambient } = this.engine;
     const { buffer, palette } = this;
     for (let i = 0; i < cells.length; i++) {
       const id = cells[i];
       const base = palette[id];
-      if (id === EMPTY) { buffer[i] = base; continue; }
+      // Lumière : `temp` est déjà diffusé par le moteur, donc l'air autour
+      // d'une flamme est chaud — c'est un halo tout prêt, sans flou à calculer.
+      const lit = temp[i] > ambient + GLOW ? Math.min(1, (temp[i] - ambient - GLOW) / 400) : 0;
+      if (id === EMPTY) {
+        buffer[i] = lit === 0 ? base : light(base, lit);
+        continue;
+      }
       // Le bruit par cellule décale les 3 canaux d'un même delta : la teinte
       // reste identique, seule la luminosité varie.
       // Une cellule figée est tramée en damier, pour la distinguer au premier coup d'œil.
@@ -52,7 +58,8 @@ export class Renderer {
       const r = clamp((base & 0xff) + d);
       const g = clamp(((base >> 8) & 0xff) + d);
       const b = clamp(((base >> 16) & 0xff) + d);
-      buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
+      const shade = 0xff000000 | (b << 16) | (g << 8) | r;
+      buffer[i] = lit === 0 ? shade : light(shade, lit);
     }
     this.ctx.putImageData(this.image, 0, 0);
   }
@@ -77,6 +84,17 @@ export class Renderer {
     }
     this.ctx.putImageData(this.image, 0, 0);
   }
+}
+
+/** Écart à l'ambiante à partir duquel une cellule commence à éclairer, en °C. */
+const GLOW = 40;
+
+/** Réchauffe une couleur 0xAABBGGRR vers l'orange d'une flamme. */
+function light(color: number, amount: number): number {
+  const r = clamp((color & 0xff) + 170 * amount);
+  const g = clamp(((color >> 8) & 0xff) + 95 * amount);
+  const b = clamp(((color >> 16) & 0xff) + 25 * amount);
+  return 0xff000000 | (b << 16) | (g << 8) | r;
 }
 
 function clamp01(v: number): number {

@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
-    "check": "node test/sim.ts && node test/api.ts",
+    "check": "node test/sim.ts && node test/ui.ts && node test/api.ts",
     "preview": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
     "cf-typegen": "wrangler types",

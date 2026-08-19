@@ -24,7 +24,7 @@
       <h1>Sandbox<span>Rabbit</span></h1>
       <div class="stats">
         <span id="fps">–</span> fps · <span id="filled">0</span> cellules · <span id="probe">–</span>
-        <button id="theme" type="button">☀</button>
+        <button id="theme" type="button" aria-label="Basculer jour / nuit">☀</button>
       </div>
     </header>
 
@@ -33,8 +33,8 @@
         <canvas id="world" aria-label="Bac à sable"></canvas>
         <!-- Deux repères posés par-dessus le bac, en pixels d'écran : ils ne
              touchent pas au rendu et suivent le zoom sans le savoir. -->
-        <div id="ring" class="overlay" hidden></div>
-        <div id="marquee" class="overlay" hidden></div>
+        <div id="ring" class="overlay" hidden aria-hidden="true"></div>
+        <div id="marquee" class="overlay" hidden aria-hidden="true"></div>
       </div>
 
       <aside class="panel">
@@ -48,7 +48,7 @@
 
         <details class="group" name="panneau" open>
           <summary>Matière</summary>
-          <div id="recent" class="palette recent"></div>
+          <div id="recent" class="palette recent" aria-label="Matières récentes"></div>
           <div id="palette"></div>
           <p id="hint" class="hint"></p>
         </details>
@@ -145,7 +145,7 @@
         <details class="group" name="panneau">
           <summary>Défis</summary>
           <div id="challenges" class="buttons"></div>
-          <p id="goal" class="hint"></p>
+          <p id="goal" class="hint" role="status"></p>
         </details>
 
         <details class="group" name="panneau">
@@ -171,7 +171,7 @@
             <button id="room" type="button" title="Simuler à plusieurs dans le même bac">Bac partagé</button>
             <button id="gallery-open" type="button">Galerie</button>
           </div>
-          <p id="status" class="hint"></p>
+          <p id="status" class="hint" role="status"></p>
         </details>
       </aside>
     </main>

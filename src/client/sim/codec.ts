@@ -3,8 +3,13 @@
  * Un monde de 320x180 majoritairement vide tient en quelques centaines d'octets,
  * ce qui rentre sans souci dans une colonne D1 plus tard.
  *
- * Deux blocs séparés par un point : la matière, puis le figé s'il y en a. Un
- * monde d'avant (sans point) reste lisible, son figé est simplement vide.
+ * Des blocs séparés par des points : la matière, le figé, puis `life` et la
+ * température quand on veut sauver l'état vivant (un incendie enregistré doit
+ * repartir chaud). Un monde d'avant, avec un bloc ou deux, reste lisible : les
+ * blocs absents valent zéro.
+ *
+ * La température est ramenée à un octet par pas de 8 °C depuis -60 : la
+ * diffusion est continue, personne ne verra la marche.
  *
  * Base64 **url** (`-` et `_`, sans `=`) : les trois seuls caractères du base64
  * classique qu'`encodeURIComponent` échappe, à trois caractères pièce. Un lien
@@ -16,8 +21,29 @@
  * enregistrés se relisent sans rien changer.
  */
 
-export function encode(cells: Uint8Array, frozen?: Uint8Array): string {
-  return frozen?.some(Boolean) ? rle(cells) + "." + rle(frozen) : rle(cells);
+/** Pas de quantification de la température, en °C. */
+const STEP = 8;
+/** Température la plus froide représentable. */
+const FLOOR = -60;
+
+export function encode(cells: Uint8Array, frozen?: Uint8Array, life?: Uint8Array, temp?: Float32Array): string {
+  const blocks = [rle(cells)];
+  // Les blocs sont positionnels : garder `life` impose d'écrire le figé, même vide.
+  if (life && temp) {
+    blocks.push(rle(frozen ?? new Uint8Array(cells.length)), rle(life), rle(bytes(temp)));
+  } else if (frozen?.some(Boolean)) {
+    blocks.push(rle(frozen));
+  }
+  return blocks.join(".");
+}
+
+function bytes(temp: Float32Array): Uint8Array {
+  const out = new Uint8Array(temp.length);
+  for (let i = 0; i < temp.length; i++) {
+    const v = Math.round((temp[i] - FLOOR) / STEP);
+    out[i] = v < 0 ? 0 : v > 255 ? 255 : v;
+  }
+  return out;
 }
 
 export function decode(data: string, size: number): Uint8Array {
@@ -28,6 +54,22 @@ export function decode(data: string, size: number): Uint8Array {
 export function decodeFrozen(data: string, size: number): Uint8Array {
   const block = data.split(".")[1];
   return block ? unrle(block, size) : new Uint8Array(size);
+}
+
+/** Le troisième bloc (`life`), ou null pour un monde enregistré sans lui. */
+export function decodeLife(data: string, size: number): Uint8Array | null {
+  const block = data.split(".")[2];
+  return block ? unrle(block, size) : null;
+}
+
+/** Le quatrième bloc (températures), ou null. */
+export function decodeTemp(data: string, size: number): Float32Array | null {
+  const block = data.split(".")[3];
+  if (!block) return null;
+  const raw = unrle(block, size);
+  const temp = new Float32Array(size);
+  for (let i = 0; i < size; i++) temp[i] = raw[i] * STEP + FLOOR;
+  return temp;
 }
 
 function rle(cells: Uint8Array): string {
