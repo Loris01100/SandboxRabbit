@@ -43,13 +43,14 @@ mondes partagés.
 | Vitesse | Curseur ×0,25 à ×4 : nombre de ticks de simulation par frame, avec reliquat pour le ralenti et plafond à 8 ticks pour ne pas s'enliser. |
 | Vent & gravité | Un curseur biaise la dérive horizontale, la touche `g` retourne la gravité. |
 | Figer | L'outil « Figer » (touche `f`) immobilise la matière sous le pinceau : elle garde son identité et sa couleur (tramée en damier), mais aucune règle ne s'applique plus et rien ne peut la pousser. « Libérer » la rend à la gravité, repeindre par-dessus aussi. De quoi bâtir une structure en sable ou suspendre une cascade. |
-| Annuler | Bouton « Annuler » ou `Ctrl+Z` : un cran, revient à l'état d'avant le dernier geste (coup de pinceau, remplissage, « Vider », chargement d'un monde ou d'un défi). Une copie des quatre tableaux de la grille, pas une pile d'historique. |
+| Annuler | Bouton « Annuler » ou `Ctrl+Z` : dix crans, chacun revenant à l'état d'avant un geste (coup de pinceau, remplissage, « Vider », chargement d'un monde ou d'un défi). Une copie des quatre tableaux de la grille, ~230 ko le cran. Pas de « rétablir ». |
 | Figé sauvegardé | La sérialisation porte deux blocs séparés par un point : la matière, puis le figé quand il y en a. Un monde partagé garde donc ses structures suspendues, et un monde d'avant (sans point) reste lisible. |
 | Pipette | `Alt` + clic sur le bac reprend la matière sous le curseur : plus court que de rouvrir la famille dans la palette. |
 | Réglages retenus | Matière, pinceau, vitesse et vent sont relus dans `localStorage` au chargement suivant. |
+| Bac repris | La scène est écrite dans `localStorage` quand l'onglet passe en arrière-plan (`visibilitychange`, le seul événement fiable sur mobile) et rechargée au retour. Un lien partagé passe devant, la cuvette de départ n'arrive qu'à défaut. Seule la grille est gardée : températures et vies repartent au repos. |
 | Image PNG | Le bac est réexporté ×4 sans lissage (`imageSmoothingEnabled = false`) et téléchargé : un PNG net, pas une capture d'écran floue. |
 | Ligne & remplissage | `Maj` + clic trace une ligne droite depuis le dernier point posé, clic droit remplit toute la poche de matière identique sous le curseur. |
-| Défis | Quatre scènes prêtes à jouer (Débâcle, Mèche lente, Court-circuit, Jardin) avec leur objectif et sa détection de victoire, construites en code dans `challenges.ts`. |
+| Défis | Sept scènes prêtes à jouer (Débâcle, Mèche lente, Court-circuit, Puits, Désamorçage, Coup de grisou, Jardin) avec leur objectif et sa détection de victoire, construites en code dans `challenges.ts`. |
 | Familles | La barre d'outils est découpée en `<details>` repliables (`CATEGORIES` dans `materials.ts`) : une famille ouverte à la fois suffit à tenir dans le panneau. Les raccourcis 1..9 / 0 restent sur les dix classiques, indépendamment de l'ordre d'affichage. |
 | Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours), case « Gomme sélective » : la gomme ne retire que la dernière matière choisie. Clic maintenu = dépôt continu, même sans bouger la souris. |
 | Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. Ouvrir le lien recharge la scène. |
@@ -105,6 +106,8 @@ npm run deploy     # déploiement (npx wrangler login la première fois)
 | `GET /api/worlds/:id` | Un monde complet |
 | `POST /api/worlds` | Sauvegarde `{ name, width, height, data }` |
 | `DELETE /api/worlds/:id` | Supprime un monde (ouvert à tous, comme la sauvegarde) |
+
+Les deux routes d'écriture passent par le binding **Rate Limiting** de Cloudflare (`unsafe` dans `wrangler.jsonc`) : 20 requêtes par IP et par minute, `429` au-delà, aucun compteur à stocker. En dev local le binding est absent et tout passe.
 
 `data` est la grille en RLE + base64 (`src/client/sim/codec.ts`) : un monde
 320×180 pèse environ 1,3 ko.

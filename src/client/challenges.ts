@@ -5,8 +5,8 @@
  */
 import type { Engine } from "./sim/engine.ts";
 import {
-  CANDLE, GLASS, ICE, METAL, OIL, PLANT, SEED, SNOW, STONE, TNT, WATER, WOOD,
-  type MaterialId,
+  CANDLE, FIREDAMP, GLASS, ICE, METAL, OIL, PETROLEUM, PLANT, SEED, SNOW, STEAM, STONE, TNT,
+  URANIUM, WATER, WOOD, type MaterialId,
 } from "./sim/materials.ts";
 
 export interface Challenge {
@@ -25,6 +25,24 @@ function count(e: Engine, id: MaterialId): number {
 /** Sol de pierre sur toute la largeur. */
 function floor(e: Engine, y: number): void {
   for (let x = 0; x < e.width; x++) for (let d = 0; d < 4; d++) e.set(x, y + d, STONE);
+}
+
+/** Cellules d'`id` ayant au moins `least` voisines identiques (les huit alentour). */
+function clumped(e: Engine, id: MaterialId, least: number): number {
+  let n = 0;
+  for (let y = 0; y < e.height; y++) {
+    for (let x = 0; x < e.width; x++) {
+      if (e.get(x, y) !== id) continue;
+      let mass = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if ((dx || dy) && e.get(x + dx, y + dy) === id) mass++;
+        }
+      }
+      if (mass >= least) n++;
+    }
+  }
+  return n;
 }
 
 function block(e: Engine, x0: number, y0: number, x1: number, y1: number, id: MaterialId): void {
@@ -67,6 +85,35 @@ export const CHALLENGES: Challenge[] = [
       block(e, 250, 138, 254, 140, GLASS);
     },
     won: (e) => e.cells[e.index(250, 146)] === CANDLE && e.life[e.index(250, 146)] === 1,
+  },
+  {
+    name: "Puits",
+    goal: "Percer douze mètres de roche jusqu'à la nappe d'eau : seule la thermite monte assez haut (la lave plafonne à 800 °C dans la pierre).",
+    build(e) {
+      block(e, 0, 108, e.width, 178, STONE);
+      block(e, 120, 156, 200, 172, WATER);
+    },
+    won: (e) => count(e, STEAM) >= 20,
+  },
+  {
+    name: "Désamorçage",
+    goal: "Éparpiller le tas d'uranium — plus aucun grain avec trois voisins — en en gardant au moins 80. Il chauffe déjà.",
+    build(e) {
+      floor(e, 150);
+      block(e, 136, 126, 184, 150, URANIUM);
+    },
+    won: (e) => count(e, URANIUM) >= 80 && clumped(e, URANIUM, 3) === 0,
+  },
+  {
+    name: "Coup de grisou",
+    goal: "Tirer 60 cellules de grisou du pétrole (il bout à 200 °C) sans que le gaz prenne feu : il s'enflamme au moindre contact d'une flamme.",
+    build(e) {
+      floor(e, 170);
+      block(e, 60, 120, 70, 170, STONE);
+      block(e, 250, 120, 260, 170, STONE);
+      block(e, 70, 140, 250, 170, PETROLEUM);
+    },
+    won: (e) => count(e, FIREDAMP) >= 60,
   },
   {
     name: "Jardin",

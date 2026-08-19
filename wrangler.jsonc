@@ -20,8 +20,19 @@
 			"database_id": "53b73e19-0d85-4d81-8357-241913ff60d5"
 		}
 	],
-	// IA : aucun setup, juste le binding
-	"ai": {
-		"binding": "AI"
+	// Limite de débit sur l'écriture : 20 requêtes par IP et par minute.
+	// Compteur géré par Cloudflare, rien à stocker.
+	"unsafe": {
+		"bindings": [
+			{
+				"name": "RL",
+				"type": "ratelimit",
+				"namespace_id": "1",
+				"simple": {
+					"limit": 20,
+					"period": 60
+				}
+			}
+		]
 	}
 }

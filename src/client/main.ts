@@ -144,28 +144,31 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
 
 /* ----------------------------------------------------------------- annuler */
 
-// Un seul cran : une copie des quatre tableaux avant chaque geste destructeur
-// (57 ko par tableau sur une grille 320x180, donc gratuit).
-// ponytail: un seul niveau, empiler si un vrai historique manque.
-let undoState: { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array } | null = null;
+// Une copie des quatre tableaux avant chaque geste destructeur, dix crans
+// gardés (~230 ko le cran, `temp` étant en Float32 : 2,3 Mo au plus).
+// ponytail: pas de rétablir — le geste annulé est perdu.
+const UNDO_MAX = 10;
+type Snapshot = { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array };
+const undoStack: Snapshot[] = [];
 
 function snapshot(): void {
-  undoState = {
+  undoStack.push({
     cells: engine.cells.slice(),
     life: engine.life.slice(),
     temp: engine.temp.slice(),
     frozen: engine.frozen.slice(),
-  };
+  });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
 }
 
 function undo(): void {
-  if (!undoState) return;
-  engine.cells.set(undoState.cells);
-  engine.life.set(undoState.life);
-  engine.temp.set(undoState.temp);
-  engine.frozen.set(undoState.frozen);
-  undoState = null;
-  statusEl.textContent = "Annulé.";
+  const state = undoStack.pop();
+  if (!state) { statusEl.textContent = "Rien à annuler."; return; }
+  engine.cells.set(state.cells);
+  engine.life.set(state.life);
+  engine.temp.set(state.temp);
+  engine.frozen.set(state.frozen);
+  statusEl.textContent = `Annulé (${undoStack.length} cran${undoStack.length > 1 ? "s" : ""} restant${undoStack.length > 1 ? "s" : ""}).`;
 }
 
 document.querySelector<HTMLButtonElement>("#undo")!.addEventListener("click", undo);
@@ -418,8 +421,21 @@ function seed(): void {
   }
 }
 
+// Le bac est repris tel quel d'une visite à l'autre : le lien partagé passe
+// devant, puis la dernière scène, et seulement à défaut la cuvette de départ.
+// ponytail: la grille seule — température et vies repartent au repos.
+const BAC = "sandbox-rabbit:bac";
+const kept = localStorage.getItem(BAC);
 if (location.hash.length > 1) load(decodeURIComponent(location.hash.slice(1)));
+else if (kept) load(kept);
 else seed();
+undoStack.length = 0; // rien à annuler avant le premier geste
+
+// `visibilitychange` plutôt que `beforeunload` : c'est le seul que les mobiles
+// déclenchent vraiment quand l'onglet part en arrière-plan.
+addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") localStorage.setItem(BAC, encode(engine.cells, engine.frozen));
+});
 
 /* ------------------------------------------------------------ boucle rendu */
 

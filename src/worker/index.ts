@@ -1,12 +1,12 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { createStore, type World } from "./store";
 
 export interface Env {
   ASSETS: Fetcher;
   /** Présent une fois la base D1 créée et le binding décommenté dans wrangler.jsonc. */
   DB?: D1Database;
-  /** Présent une fois `"ai": { "binding": "AI" }` ajouté — pour les comportements IA. */
-  AI?: unknown;
+  /** Limite de débit Cloudflare (binding `unsafe`), absente en dev local. */
+  RL?: RateLimit;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -26,7 +26,18 @@ app.get("/api/worlds/:id", async (c) => {
   return world ? c.json(world) : c.json({ error: "introuvable" }, 404);
 });
 
+/**
+ * Écriture ouverte à tous (pas de compte dans ce bac) : la seule protection est
+ * le débit, 20 requêtes par IP et par minute. Sans le binding — `wrangler dev`
+ * local — on laisse passer.
+ */
+async function flooding(c: Context<{ Bindings: Env }>): Promise<boolean> {
+  const key = c.req.header("cf-connecting-ip") ?? "anonyme";
+  return c.env.RL ? !(await c.env.RL.limit({ key })).success : false;
+}
+
 app.post("/api/worlds", async (c) => {
+  if (await flooding(c)) return c.json({ error: "trop de requêtes" }, 429);
   const body = await c.req.json<Partial<World>>().catch(() => null);
   if (
     !body ||
@@ -51,8 +62,8 @@ app.post("/api/worlds", async (c) => {
   return c.json({ id }, 201);
 });
 
-// Suppression ouverte à tous, comme la sauvegarde : pas de compte dans ce bac.
 app.delete("/api/worlds/:id", async (c) => {
+  if (await flooding(c)) return c.json({ error: "trop de requêtes" }, 429);
   await createStore(c.env).remove(c.req.param("id"));
   return c.body(null, 204);
 });
