@@ -149,6 +149,18 @@ function count(e: Engine, id: MaterialId): number {
   const round = decode(encode(e.cells), W * H);
   assert.deepEqual([...round], [...e.cells], "encode/decode conserve la grille");
   assert.ok(encode(e.cells).length < 4000, "un monde tient dans une URL");
+  const plain = encode(e.cells);
+  assert.equal(encodeURIComponent(plain).length, plain.length, "base64url : rien à échapper dans une URL");
+
+  // Une grande étendue vide passe par l'échappe 16 bits, pas par une paire
+  // tous les 255 pixels.
+  assert.ok(encode(new Uint8Array(W * H)).length < 12, "un monde vide tient en une poignée d'octets");
+  // Format d'avant l'échappe (paires id/longueur, longueurs 1..255) : toujours lisible.
+  assert.deepEqual(
+    [...decode(btoa(String.fromCharCode(2, 3, 1, 2)), 5)],
+    [2, 2, 2, 1, 1],
+    "les mondes enregistrés avant l'échappe se relisent",
+  );
 
   // Le figé voyage dans un second bloc, et un monde d'avant reste lisible.
   e.setFrozen(20, 20, 4, true);
