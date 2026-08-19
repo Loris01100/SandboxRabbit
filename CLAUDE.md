@@ -15,10 +15,10 @@ npm run build      # typecheck puis vite build
 npm run preview    # build puis `wrangler dev` sur le bundle
 npm run deploy
 npm run cf-typegen # régénère worker-configuration.d.ts après un changement de bindings
-npm run check      # asserts sur les règles de simulation (test/sim.ts, exécuté par Node)
+npm run check      # asserts sur la simulation (test/sim.ts) et sur l'API (test/api.ts), exécutés par Node
 ```
 
-Pas de framework de test : [test/sim.ts](test/sim.ts) est un script d'`assert`, lancé directement par Node (exécution native du TypeScript, d'où les imports en `.ts` dans `src/client/sim`).
+Pas de framework de test : [test/sim.ts](test/sim.ts) et [test/api.ts](test/api.ts) sont des scripts d'`assert`, lancés directement par Node (exécution native du TypeScript, d'où les imports en `.ts` dans `src/client/sim` et `src/worker`). `test/api.ts` interroge le Worker en mémoire via `app.request()` de Hono : ni serveur, ni wrangler, et sans binding `DB` c'est le store mémoire qui répond.
 
 ## Architecture
 

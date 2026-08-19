@@ -48,6 +48,7 @@ mondes partagés.
 | Pipette | `Alt` + clic sur le bac reprend la matière sous le curseur : plus court que de rouvrir la famille dans la palette. |
 | Réglages retenus | Matière, pinceau, vitesse et vent sont relus dans `localStorage` au chargement suivant. |
 | Bac repris | La scène est écrite dans `localStorage` quand l'onglet passe en arrière-plan (`visibilitychange`, le seul événement fiable sur mobile) et rechargée au retour. Un lien partagé passe devant, la cuvette de départ n'arrive qu'à défaut. Seule la grille est gardée : températures et vies repartent au repos. |
+| Plein écran | Bouton « Plein écran » : `requestFullscreen()` sur le canvas, le CSS `pixelated` fait la mise à l'échelle et le rendu ne change pas d'une ligne. |
 | Image PNG | Le bac est réexporté ×4 sans lissage (`imageSmoothingEnabled = false`) et téléchargé : un PNG net, pas une capture d'écran floue. |
 | Ligne & remplissage | `Maj` + clic trace une ligne droite depuis le dernier point posé, clic droit remplit toute la poche de matière identique sous le curseur. |
 | Défis | Sept scènes prêtes à jouer (Débâcle, Mèche lente, Court-circuit, Puits, Désamorçage, Coup de grisou, Jardin) avec leur objectif et sa détection de victoire, construites en code dans `challenges.ts`. |
@@ -91,7 +92,7 @@ Rust sur Cloudflare passe par WebAssembly. Deux usages possibles :
 npm install
 npm run dev        # http://localhost:5173 — front + Worker dans workerd, avec HMR
 npm run typecheck  # client et worker ont chacun leur tsconfig (DOM vs runtime Workers)
-npm run check      # auto-vérification de la simulation (Node exécute test/sim.ts tel quel)
+npm run check      # auto-vérifications : simulation (test/sim.ts) puis API (test/api.ts), Node exécute le TS tel quel
 npm run build
 npm run preview    # build puis exécution du Worker en local
 npm run deploy     # déploiement (npx wrangler login la première fois)

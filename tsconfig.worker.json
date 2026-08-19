@@ -5,6 +5,8 @@
     "lib": ["ES2022"],
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // Imports en `.ts` : Node exécute test/api.ts sans build.
+    "allowImportingTsExtensions": true,
     "types": [],
     "strict": true,
     "noUnusedLocals": true,

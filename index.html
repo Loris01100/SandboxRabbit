@@ -6,6 +6,17 @@
     <title>Sandbox Rabbit — bac à sable</title>
     <meta name="description" content="Un bac à sable cellulaire : sable, eau, feu, acide, lave. Déposez, mélangez, regardez." />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🐇</text></svg>" />
+    <!-- Aperçu des liens partagés. L'image est fixe : une scène du moteur rendue
+         une fois, pas le monde partagé (il faudrait un rendu côté Worker).
+         URL absolues : les scrapeurs ne résolvent pas tous le relatif. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Sandbox Rabbit — bac à sable cellulaire" />
+    <meta property="og:description" content="Sable, eau, feu, lave, thermite, uranium : déposez, mélangez, regardez. Chaque lien porte un monde entier." />
+    <meta property="og:url" content="https://reesch.com/" />
+    <meta property="og:image" content="https://reesch.com/og.png" />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="720" />
+    <meta name="twitter:card" content="summary_large_image" />
     <script type="module" src="/src/client/main.ts"></script>
   </head>
   <body>
@@ -66,6 +77,7 @@
           <div class="buttons">
             <button id="play" type="button">Pause</button>
             <button id="step" type="button">Pas à pas</button>
+            <button id="full" type="button" title="Le bac en plein écran">Plein écran</button>
             <button id="undo" type="button" title="Annuler le dernier geste (Ctrl+Z)">Annuler</button>
             <button id="clear" type="button">Vider</button>
           </div>

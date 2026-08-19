@@ -246,6 +246,13 @@ document.querySelector<HTMLButtonElement>("#step")!.addEventListener("click", ()
   engine.step();
 });
 
+// Plein écran natif : le CSS `pixelated` fait la mise à l'échelle, le rendu ne
+// change pas d'un pixel et `getBoundingClientRect()` suit le pinceau.
+document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", () => {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void canvas.requestFullscreen();
+});
+
 document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => { snapshot(); engine.clear(); });
 
 /* -------------------------------------------------------------- mondes/API */

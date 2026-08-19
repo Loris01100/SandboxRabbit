@@ -1,4 +1,4 @@
-import type { Env } from "./index";
+import type { Env } from "./index.ts";
 
 export interface World {
   id: string;

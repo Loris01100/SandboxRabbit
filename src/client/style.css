@@ -226,6 +226,9 @@ kbd {
 }
 
 .card { display: grid; gap: 0.15rem; padding: 0.4rem; text-align: left; }
+/* Plein écran : la hauteur commande, le 16/9 de la grille garde les proportions. */
+canvas:fullscreen { height: 100vh; width: auto; aspect-ratio: 16 / 9; }
+
 .slot { position: relative; }
 .slot .del {
   position: absolute;

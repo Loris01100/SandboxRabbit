@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { createStore, type World } from "./store";
+import { createStore, type World } from "./store.ts";
 
 export interface Env {
   ASSETS: Fetcher;
