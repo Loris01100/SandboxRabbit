@@ -61,8 +61,13 @@ const recentEl = document.querySelector<HTMLDivElement>("#recent")!;
 let recent: MaterialId[] = [];
 
 function keepRecent(id: MaterialId): void {
+  // La liste est reconstruite : si le focus était dedans, il partait au body à
+  // chaque choix fait au clavier. La matière élue passe en tête, c'est donc le
+  // premier bouton qui le reprend.
+  const focused = recentEl.contains(document.activeElement);
   recent = pushRecent(recent, id, 6);
   recentEl.replaceChildren(...recent.map(swatch));
+  if (focused) recentEl.querySelector("button")?.focus();
 }
 
 // Clavier : les flèches parcourent une grille de matières. Sans ça il faut
@@ -99,6 +104,9 @@ addEventListener("keydown", (e) => {
   // ses touches lui appartiennent, sinon taper « 500 » change de matière.
   const on = e.target as HTMLElement | null;
   if (on && on !== document.body && on.closest("input, select, textarea")) return;
+  // Une modale ouverte (galerie, raccourcis) garde ses touches : sans ça
+  // Espace mettait le bac en pause pendant qu'on choisissait un monde.
+  if (document.querySelector("dialog[open]")) return;
   if (e.key === " ") { toggleRun(); e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "Z" && e.shiftKey))) { redo(); e.preventDefault(); return; }
   if (e.key === "z" && (e.ctrlKey || e.metaKey)) { undo(); e.preventDefault(); return; }
@@ -119,6 +127,12 @@ addEventListener("keydown", (e) => {
   if (!Number.isNaN(n) && SHORTCUTS[n - 1] !== undefined) select(SHORTCUTS[n - 1]);
   if (e.key === "0") select(EMPTY);
   if (e.key === "g") flipGravity();
+  // Taille du pinceau : le réglage le plus repris, et il fallait redéplier son
+  // groupe à chaque fois. L'événement rejoué borne la valeur et retient tout.
+  if (e.key === "[" || e.key === "]") {
+    brushInput.value = String(Number(brushInput.value) + (e.key === "]" ? 1 : -1));
+    brushInput.dispatchEvent(new Event("input"));
+  }
   if (e.key === "f") toolInput.value = toolInput.value === "paint" ? "freeze" : "paint";
   if (e.key === "h") { heatmapInput.checked = !heatmapInput.checked; renderer.heatmap = heatmapInput.checked; }
   if (e.key === "?" && !shortcutsEl.open) shortcutsEl.showModal();
@@ -555,13 +569,25 @@ function stored<T>(key: string, fallback: T): T {
   }
 }
 
+/**
+ * Les réglages retenus, désignés par leur `id` — les clés du blob sont donc
+ * celles d'avant (`brush`, `speed`…), les anciennes visites se relisent.
+ * Une case à cocher garde son `checked`, tout le reste sa `value`.
+ */
+const SAVED = [
+  brushInput, speedInput, windInput, ambientInput, sizeInput,
+  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput,
+];
+const isCheck = (el: Element): el is HTMLInputElement =>
+  el instanceof HTMLInputElement && el.type === "checkbox";
+
 function remember(): void {
-  write(SETTINGS, JSON.stringify({
-    current, brush: brushInput.value, speed: speedInput.value, wind: windInput.value,
-    ambient: ambientInput.value, size: sizeInput.value,
-  }));
+  const state: Record<string, string | number | boolean> = { current };
+  for (const el of SAVED) state[el.id] = isCheck(el) ? el.checked : el.value;
+  write(SETTINGS, JSON.stringify(state));
 }
-for (const el of [brushInput, speedInput, windInput, ambientInput, sizeInput]) el.addEventListener("input", remember);
+// Les deux événements : une case coche sur « change », un curseur glisse sur « input ».
+for (const el of SAVED) for (const type of ["input", "change"]) el.addEventListener(type, remember);
 paletteEl.addEventListener("click", remember);
 
 // Forme libre : le blob n'est pas versionné, chaque champ est retesté ci-dessous.
@@ -569,10 +595,18 @@ paletteEl.addEventListener("click", remember);
 const saved = stored<any>(SETTINGS, null);
 if (saved) {
   if (MATERIALS[saved.current as MaterialId]) select(saved.current as MaterialId);
-  for (const [el, value] of [[brushInput, saved.brush], [speedInput, saved.speed], [windInput, saved.wind], [ambientInput, saved.ambient], [sizeInput, saved.size]] as const) {
+  for (const el of SAVED) {
+    const value = saved[el.id];
     if (value === undefined) continue; // réglage absent d'une version précédente
-    el.value = value;
-    el.dispatchEvent(new Event("input"));
+    // L'événement est rejoué plutôt que les handlers dupliqués : c'est lui qui
+    // pousse la valeur dans le moteur (vent, ambiante) ou dans le rendu.
+    if (isCheck(el)) {
+      el.checked = Boolean(value);
+      el.dispatchEvent(new Event("change"));
+    } else {
+      el.value = String(value);
+      el.dispatchEvent(new Event("input"));
+    }
   }
 }
 
@@ -651,7 +685,10 @@ function load(data: string, width?: number): boolean {
     if (life) engine.life.set(life); else engine.life.fill(0);
     if (temp) engine.temp.set(temp); else engine.temp.fill(engine.ambient);
   } catch {
-    undo();
+    // On dépile à la main : `undo()` empilerait la grille à moitié posée dans
+    // les crans à rétablir, et un Ctrl+Y la ramènerait.
+    const before = undoStack.pop();
+    if (before) restore(before);
     statusEl.textContent = "Grille illisible.";
     return false;
   }

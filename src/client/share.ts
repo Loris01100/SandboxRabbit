@@ -11,7 +11,23 @@ import { thumbnail } from "./sim/render.ts";
 import { encode, decode } from "./sim/codec.ts";
 import { EMPTY, MATERIALS, PALETTE } from "./sim/materials.ts";
 import { count, type Challenge } from "./challenges.ts";
-import { goalText, parseGoal } from "./ui.ts";
+import { goalText, parseGoal, read, write } from "./ui.ts";
+
+/**
+ * Les mondes déposés depuis ce navigateur : `{ id: jeton }`. Le Worker rend le
+ * jeton une seule fois, à la sauvegarde, et l'exige pour supprimer — c'est ce
+ * qui remplace les comptes qu'on n'a pas. Perdu (autre machine, stockage vidé),
+ * le monde n'est plus supprimable : le ménage nocturne finira par l'emporter.
+ */
+const OWNED = "sandbox-rabbit:mondes";
+
+function owned(): Record<string, string> {
+  try {
+    return JSON.parse(read(OWNED) ?? "{}") as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
 
 export interface Deps {
   /**
@@ -138,22 +154,30 @@ function card(w: World): HTMLDivElement {
     if (objective) deps.start(challengeOf(w, objective));
   });
 
-  // Suppression : rien ne protège les mondes des autres, comme la sauvegarde
-  // n'identifie personne. ponytail: ajouter un jeton le jour où ça compte.
-  const del = document.createElement("button");
-  del.type = "button";
-  del.className = "del";
-  del.title = "Supprimer";
-  del.textContent = "×";
-  del.addEventListener("click", async () => {
-    if (!confirm(`Supprimer « ${w.name} » ?`)) return;
-    const res = await fetch(`/api/worlds/${w.id}`, { method: "DELETE" });
-    if (res.ok) slot.remove();
-    else statusEl.textContent = "Échec de la suppression.";
-  });
-
-  slot.append(button, del);
+  // Suppression : seulement les siens. Le bouton n'apparaît que si on a le
+  // jeton rendu à la sauvegarde, et le Worker le redemande de toute façon.
+  const token = owned()[w.id];
+  slot.append(button);
+  if (token) slot.append(del(w, token, slot));
   return slot;
+}
+
+function del(w: World, token: string, slot: HTMLDivElement): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "del";
+  button.title = "Supprimer";
+  button.textContent = "×";
+  button.addEventListener("click", async () => {
+    if (!confirm(`Supprimer « ${w.name} » ?`)) return;
+    const res = await fetch(`/api/worlds/${w.id}`, { method: "DELETE", headers: { "x-world-token": token } });
+    if (!res.ok) { statusEl.textContent = "Échec de la suppression."; return; }
+    slot.remove();
+    const mine = owned();
+    delete mine[w.id];
+    write(OWNED, JSON.stringify(mine));
+  });
+  return button;
 }
 
 document.querySelector<HTMLButtonElement>("#gallery-open")!.addEventListener("click", () => void openGallery());
@@ -180,7 +204,11 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
       goal: goalOp.value ? `${goalOp.value}:${goalId.value}:${goalN.value}` : null,
     }),
   });
-  statusEl.textContent = res.ok ? "Sauvegardé — visible dans la galerie." : "Échec de la sauvegarde.";
+  if (!res.ok) { statusEl.textContent = "Échec de la sauvegarde."; return; }
+  // Le jeton n'est rendu que là : gardé maintenant ou perdu pour de bon.
+  const { id, token } = (await res.json()) as { id: string; token?: string };
+  if (token) write(OWNED, JSON.stringify({ ...owned(), [id]: token }));
+  statusEl.textContent = "Sauvegardé — visible dans la galerie.";
 });
 
 // Partage : le monde entier tient dans l'URL (RLE + base64, ~1 ko). La largeur

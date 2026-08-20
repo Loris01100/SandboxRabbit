@@ -12,14 +12,24 @@ export interface World {
   views: number;
   /** Objectif si le monde est un défi : « ge:12:600 » ou « lt:5:1 ». Absent sinon. */
   goal?: string | null;
+  /**
+   * Jeton de suppression, rendu une seule fois à la sauvegarde. Il ne sort
+   * jamais de `list()` ni de `get()` : c'est tout ce qui distingue le déposant
+   * d'un visiteur, la galerie n'ayant pas de comptes.
+   */
+  token?: string | null;
 }
+
+/** Le monde tel qu'il est servi : sans son jeton. */
+const shown = ({ token: _, ...world }: World): World => world;
 
 export interface Store {
   /** Renvoie les grilles : la galerie en fait ses vignettes, ~1 ko par monde. */
   list(): Promise<World[]>;
   get(id: string): Promise<World | null>;
   save(world: World): Promise<void>;
-  remove(id: string): Promise<void>;
+  /** Supprime, mais seulement pour le bon jeton. False = ce n'est pas votre monde. */
+  remove(id: string, token: string): Promise<boolean>;
   /** Ne garde que les `keep` mondes les plus récents (ménage nocturne). */
   purge(keep: number): Promise<void>;
   /** Compte un chargement. Appelé par `GET /api/worlds/:id`, seul chemin de chargement. */
@@ -44,16 +54,20 @@ const memory = new Map<string, World>();
 function memoryStore(): Store {
   return {
     async list() {
-      return [...memory.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return [...memory.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(shown);
     },
     async get(id) {
-      return memory.get(id) ?? null;
+      const world = memory.get(id);
+      return world ? shown(world) : null;
     },
     async save(world) {
       memory.set(world.id, world);
     },
-    async remove(id) {
-      memory.delete(id);
+    async remove(id, token) {
+      const world = memory.get(id);
+      // Un monde d'avant les jetons (ou d'un autre visiteur) ne se supprime pas.
+      if (!world || !world.token || world.token !== token) return false;
+      return memory.delete(id);
     },
     async see(id) {
       const world = memory.get(id);
@@ -82,12 +96,15 @@ function d1Store(db: D1Database): Store {
     },
     async save(world) {
       await db
-        .prepare("INSERT INTO worlds (id, name, width, height, data, created_at, goal) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(world.id, world.name, world.width, world.height, world.data, world.createdAt, world.goal ?? null)
+        .prepare("INSERT INTO worlds (id, name, width, height, data, created_at, goal, token) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(world.id, world.name, world.width, world.height, world.data, world.createdAt, world.goal ?? null, world.token ?? null)
         .run();
     },
-    async remove(id) {
-      await db.prepare("DELETE FROM worlds WHERE id = ?").bind(id).run();
+    async remove(id, token) {
+      // Le jeton est dans la clause, pas comparé en JS : rien à relire, et un
+      // `token` NULL (monde d'avant) ne peut égaler aucune chaîne.
+      const { meta } = await db.prepare("DELETE FROM worlds WHERE id = ? AND token = ?").bind(id, token).run();
+      return meta.changes > 0;
     },
     async see(id) {
       await db.prepare("UPDATE worlds SET views = views + 1 WHERE id = ?").bind(id).run();

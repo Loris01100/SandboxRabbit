@@ -39,7 +39,9 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
 {
   const created = await app.request("/api/worlds", json(monde), env);
   assert.equal(created.status, 201);
-  const { id } = await created.json();
+  const { id, token } = await created.json();
+  assert.ok(token, "la sauvegarde rend le jeton de suppression, une seule fois");
+  const mien = { method: "DELETE", headers: { "x-world-token": token } };
 
   const list = await (await app.request("/api/worlds", {}, env)).json();
   const found = list.find((w: { id: string }) => w.id === id);
@@ -50,12 +52,12 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   // températures, qui pèsent un cinquième d'un monde en feu.
   {
     const vivant = { ...monde, data: "AQE=.AQE=.AQE=.AQE=" };
-    const { id: chaud } = await (await app.request("/api/worlds", json(vivant), env)).json();
+    const { id: chaud, token: sien } = await (await app.request("/api/worlds", json(vivant), env)).json();
     const liste = await (await app.request("/api/worlds", {}, env)).json();
     assert.equal(liste.find((w: { id: string }) => w.id === chaud).data, "AQE=", "la liste s'arrête au premier bloc");
     const entier = await (await app.request(`/api/worlds/${chaud}`, {}, env)).json();
     assert.equal(entier.data, vivant.data, "le monde entier, lui, garde son état vivant");
-    await app.request(`/api/worlds/${chaud}`, { method: "DELETE" }, env);
+    await app.request(`/api/worlds/${chaud}`, { method: "DELETE", headers: { "x-world-token": sien } }, env);
   }
 
   // Charger un monde compte une vue ; la liste la porte, c'est ce qui trie la galerie.
@@ -64,8 +66,16 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   await app.request(`/api/worlds/${id}`, {}, env);
   const seen = await (await app.request("/api/worlds", {}, env)).json();
   assert.equal(seen.find((w: { id: string }) => w.id === id).views, 2, "deux chargements, deux vues");
+  assert.equal(seen.find((w: { id: string }) => w.id === id).token, undefined, "le jeton ne ressort jamais de la lecture");
+  assert.equal((await app.request(`/api/worlds/${id}`, {}, env)).status, 200);
+  assert.equal(((await (await app.request(`/api/worlds/${id}`, {}, env)).json()) as { token?: string }).token, undefined, "ni du monde entier");
 
-  assert.equal((await app.request(`/api/worlds/${id}`, { method: "DELETE" }, env)).status, 204);
+  // Sans jeton, ou avec un faux : le monde reste. C'est tout ce qui protège la galerie.
+  assert.equal((await app.request(`/api/worlds/${id}`, { method: "DELETE" }, env)).status, 403);
+  assert.equal((await app.request(`/api/worlds/${id}`, { method: "DELETE", headers: { "x-world-token": "faux" } }, env)).status, 403);
+  assert.ok(await (await app.request(`/api/worlds/${id}`, {}, env)).json(), "toujours là après deux tentatives");
+
+  assert.equal((await app.request(`/api/worlds/${id}`, mien, env)).status, 204);
   const after = await (await app.request("/api/worlds", {}, env)).json();
   assert.equal(after.find((w: { id: string }) => w.id === id), undefined, "supprimé de la liste");
   assert.equal((await app.request(`/api/worlds/${id}`, {}, env)).status, 404);
@@ -74,10 +84,10 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
 // Un objectif mal formé est refusé ; bien formé, il revient avec le monde.
 {
   assert.equal((await app.request("/api/worlds", json({ ...monde, goal: "gagne !" }), env)).status, 400);
-  const { id } = await (await app.request("/api/worlds", json({ ...monde, name: "défi", goal: "ge:12:600" }), env)).json();
+  const { id, token } = await (await app.request("/api/worlds", json({ ...monde, name: "défi", goal: "ge:12:600" }), env)).json();
   const world = await (await app.request(`/api/worlds/${id}`, {}, env)).json();
   assert.equal(world.goal, "ge:12:600", "l'objectif voyage avec le monde");
-  await app.request(`/api/worlds/${id}`, { method: "DELETE" }, env);
+  await app.request(`/api/worlds/${id}`, { method: "DELETE", headers: { "x-world-token": token } }, env);
 }
 
 // Sans binding Durable Object (tests, `vite dev`), le bac partagé se dit indisponible.

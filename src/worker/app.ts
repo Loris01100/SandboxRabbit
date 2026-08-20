@@ -106,6 +106,9 @@ app.post("/api/worlds", async (c) => {
   }
 
   const id = crypto.randomUUID();
+  // Le jeton de suppression est tiré ici, pas envoyé par le client : c'est la
+  // seule preuve qu'on est bien le déposant, elle ne se devine pas.
+  const token = crypto.randomUUID();
   await createStore(c.env).save({
     id,
     name: body.name.slice(0, 60),
@@ -115,13 +118,19 @@ app.post("/api/worlds", async (c) => {
     createdAt: new Date().toISOString(),
     views: 0,
     goal: body.goal ?? null,
+    token,
   });
-  return c.json({ id }, 201);
+  // Rendu une seule fois : aucune route de lecture ne le renvoie ensuite.
+  return c.json({ id, token }, 201);
 });
 
+// Supprimer demande le jeton reçu à la sauvegarde. Sans lui la galerie était
+// ouverte au vent : un seul visiteur pouvait la vider.
 app.delete("/api/worlds/:id", async (c) => {
   if (await flooding(c)) return c.json({ error: "trop de requêtes" }, 429);
-  await createStore(c.env).remove(c.req.param("id"));
+  const token = c.req.header("x-world-token") ?? "";
+  const gone = await createStore(c.env).remove(c.req.param("id"), token);
+  if (!gone) return c.json({ error: "pas votre monde" }, 403);
   return c.body(null, 204);
 });
 

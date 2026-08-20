@@ -2,7 +2,9 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <!-- Pas de `user-scalable=no` : le zoom du navigateur reste dû aux yeux fatigués.
+         Le pincement sur le bac est déjà neutralisé par `touch-action: none` (style.css). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sandbox Rabbit — bac à sable</title>
     <meta name="description" content="Un bac à sable cellulaire : sable, eau, feu, acide, lave. Déposez, mélangez, regardez." />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🐇</text></svg>" />
@@ -204,6 +206,7 @@
         <dt><kbd>Espace</kbd></dt><dd>Mettre en pause ou reprendre</dd>
         <dt><kbd>1</kbd> … <kbd>9</kbd></dt><dd>Choisir une matière — <span id="keys-materials"></span></dd>
         <dt><kbd>0</kbd></dt><dd>Gomme</dd>
+        <dt><kbd>[</kbd> · <kbd>]</kbd></dt><dd>Pinceau plus fin · plus large</dd>
         <dt><kbd>G</kbd></dt><dd>Inverser la gravité</dd>
         <dt><kbd>F</kbd></dt><dd>Passer de Peindre à Figer</dd>
         <dt><kbd>H</kbd></dt><dd>Vue thermique</dd>
