@@ -2,13 +2,18 @@ import { EMPTY, MAGNET, MATERIALS, SWITCH, THERMITE, URANIUM } from "./materials
 import { type Engine } from "./engine.ts";
 
 /**
- * Rendu 1 cellule = 1 pixel dans un ImageData, puis mise à l'échelle par le CSS
- * (`image-rendering: pixelated`). C'est de loin le plus rapide : un seul
- * `putImageData` par frame, aucun appel de dessin par cellule.
+ * Rendu 1 cellule = 1 pixel dans un tableau de pixels, puis mise à l'échelle
+ * par le CSS (`image-rendering: pixelated`). C'est de loin le plus rapide :
+ * aucun appel de dessin par cellule.
+ *
+ * Le renderer ne connaît **pas** de canvas : il remplit `pixels`, et c'est le
+ * fil principal qui en fait un `putImageData` (world.ts). C'est ce qui permet
+ * de le faire tourner dans un Worker, où il n'y a pas de canvas — et ce qui le
+ * rend vérifiable sous Node, qui n'en a pas non plus.
  */
 export class Renderer {
-  private readonly ctx: CanvasRenderingContext2D;
-  private readonly image: ImageData;
+  /** RGBA, une cellule par pixel : de quoi faire un `ImageData` en face. */
+  readonly pixels: Uint8ClampedArray;
   private readonly buffer: Uint32Array;
   /** Couleur de base pré-calculée par matériau, au format 0xAABBGGRR. */
   private readonly palette = new Uint32Array(256);
@@ -26,15 +31,10 @@ export class Renderer {
   // TypeScript en le dépouillant, et cette syntaxe-là est la seule qu'il refuse
   // (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`) — elle mettait ce module hors de
   // portée de `node test/…`.
-  constructor(canvas: HTMLCanvasElement, engine: Engine) {
+  constructor(engine: Engine) {
     this.engine = engine;
-    canvas.width = engine.width;
-    canvas.height = engine.height;
-    const ctx = canvas.getContext("2d", { alpha: false });
-    if (!ctx) throw new Error("Canvas 2D indisponible");
-    this.ctx = ctx;
-    this.image = ctx.createImageData(engine.width, engine.height);
-    this.buffer = new Uint32Array(this.image.data.buffer);
+    this.pixels = new Uint8ClampedArray(engine.width * engine.height * 4);
+    this.buffer = new Uint32Array(this.pixels.buffer);
     for (const key of Object.keys(MATERIALS)) {
       const m = MATERIALS[Number(key)];
       const [r, g, b] = m.color;
@@ -83,7 +83,6 @@ export class Renderer {
       const shade = 0xff000000 | (b << 16) | (g << 8) | r;
       buffer[i] = lit === 0 ? shade : light(shade, lit);
     }
-    this.ctx.putImageData(this.image, 0, 0);
   }
 
   /** Bleu sous l'ambiante, puis corps noir : rouge → jaune → blanc jusqu'à 1200 °C. */
@@ -106,7 +105,6 @@ export class Renderer {
       }
       buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
     }
-    this.ctx.putImageData(this.image, 0, 0);
   }
 }
 

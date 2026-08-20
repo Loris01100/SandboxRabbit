@@ -1,18 +1,34 @@
 import "./style.css";
-import { type Clip } from "./sim/engine.ts";
-import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./sim/codec.ts";
-import { CATEGORIES, EMPTY, MAGNET, MATERIALS, SAND, SHORTCUTS, SNOW, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
+import { CATEGORIES, EMPTY, MAGNET, MATERIALS, SAND, SHORTCUTS, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
-import { panAfterZoom, pushRecent, read, ticksFor, write } from "./ui.ts";
-import { captureFrame, initShare, snapshotData } from "./share.ts";
+import { panAfterZoom, pushRecent, read, write } from "./ui.ts";
+import { captureFrame, initShare } from "./share.ts";
 import { initRoom, relay } from "./room.ts";
-import { HEIGHT, WIDTH, canvas, engine, onResize, renderer, resize, seed } from "./world.ts";
+import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, onResize, order, resize, type ClipData } from "./world.ts";
+import type { Knobs } from "./sim/sandbox.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
+/**
+ * Le bac simule dans un Worker (world.ts) : ce module ne lit plus le moteur, il
+ * lui envoie des ordres et affiche ce qui revient. D'ou les quelques miroirs
+ * ci-dessous — ce que le panneau doit savoir tout de suite, sans attendre une
+ * frame.
+ */
+const set = (k: Partial<Knobs>): void => order({ t: "set", k });
 
 let current: MaterialId = SAND;
 let brush = 5;
 let running = true;
+/** Matière qu'une source crachera : le moteur la garde aussi, le panneau la relit. */
+let emit: MaterialId = WATER;
+let gravity: 1 | -1 = 1;
+/** Dernière matière et température sous le curseur, telles que le bac les a vues. */
+let probed: [MaterialId, number] | null = null;
+/** Un rejeu occupe le bac : le pinceau et l'enregistrement se taisent. */
+let playing = false;
+/** Taille de la dernière partie enregistrée, ou null : le bac garde le film. */
+let film: { w: number; h: number } | null = null;
+let recording = false;
 
 /* ---------------------------------------------------------------- palette */
 
@@ -90,7 +106,7 @@ function select(id: MaterialId): void {
   current = id;
   keepRecent(id);
   // Une source crache la dernière matière choisie avant elle.
-  if (id !== SOURCE && id !== EMPTY) engine.emit = id;
+  if (id !== SOURCE && id !== EMPTY) { emit = id; set({ emit: id }); }
   hintEl.textContent = MATERIALS[id].hint;
   for (const b of paletteEl.querySelectorAll("button")) {
     b.setAttribute("aria-pressed", String(Number(b.dataset.id) === id));
@@ -115,10 +131,10 @@ addEventListener("keydown", (e) => {
     // Centré sur le curseur : c'est là qu'on regarde en collant.
     gesture({
       t: "clip",
-      x: last.x - (clip.width >> 1),
-      y: last.y - (clip.height >> 1),
-      w: clip.width, h: clip.height,
-      cells: encode(clip.cells, clip.frozen), life: encode(clip.life),
+      x: last.x - (clip.w >> 1),
+      y: last.y - (clip.h >> 1),
+      w: clip.w, h: clip.h,
+      cells: clip.cells, life: clip.life,
     });
     e.preventDefault();
     return;
@@ -134,7 +150,7 @@ addEventListener("keydown", (e) => {
     brushInput.dispatchEvent(new Event("input"));
   }
   if (e.key === "f") toolInput.value = toolInput.value === "paint" ? "freeze" : "paint";
-  if (e.key === "h") { heatmapInput.checked = !heatmapInput.checked; renderer.heatmap = heatmapInput.checked; }
+  if (e.key === "h") { heatmapInput.checked = !heatmapInput.checked; set({ heatmap: heatmapInput.checked }); }
   if (e.key === "?" && !shortcutsEl.open) shortcutsEl.showModal();
 });
 
@@ -155,8 +171,8 @@ document.querySelector<HTMLButtonElement>("#help")!.addEventListener("click", ()
 
 let painting = false;
 let last: { x: number; y: number } | null = null;
-/** Morceau découpé par l'outil « Copier », reposé par Ctrl+V. */
-let clip: Clip | null = null;
+/** Morceau découpé par l'outil « Copier », reposé par Ctrl+V (déjà encodé par le bac). */
+let clip: ClipData | null = null;
 let selection: { x: number; y: number } | null = null;
 
 function toCell(e: PointerEvent): { x: number; y: number } {
@@ -262,7 +278,7 @@ function span(): { gap: number; x: number; y: number } {
 // de souris vaut un pixel d'écran, quel que soit le zoom.
 canvas.addEventListener("auxclick", (e) => e.preventDefault());
 
-import { applyGesture, type Gesture } from "./gestures.ts";
+import { type Gesture } from "./gestures.ts";
 
 /**
  * Tout geste qui modifie la grille passe par ici : appliqué chez soi, puis
@@ -271,7 +287,10 @@ import { applyGesture, type Gesture } from "./gestures.ts";
  * suivant.
  */
 function gesture(g: Gesture): void {
-  applyGesture(g);
+  // Pendant un rejeu, le bac appartient à l'enregistrement : un geste de plus
+  // ferait diverger la suite de ce qu'on est en train de regarder.
+  if (playing) return;
+  order({ t: "do", g });
   relay(g);
 }
 
@@ -286,7 +305,7 @@ function dab(x: number, y: number): void {
   const kind = MATERIALS[current].kind;
   const density = kind === "liquid" || kind === "gas" ? 0.35 : 1;
   // Gomme sélective : on n'efface que la dernière matière choisie avant la gomme.
-  const only = current === EMPTY && onlyInput.checked ? engine.emit : undefined;
+  const only = current === EMPTY && onlyInput.checked ? emit : undefined;
   gesture({ t: "paint", x, y, r: brush, id: current, d: density, over: !keepInput.checked, only });
 }
 
@@ -331,7 +350,9 @@ canvas.addEventListener("pointerdown", (e) => {
   }
   const p = toCell(e);
   // Pipette : Alt+clic reprend la matière sous le curseur, sans rien modifier.
-  if (e.altKey) { select(engine.get(p.x, p.y) as MaterialId); return; }
+  // Pipette : la matière vue par la dernière frame, pas une lecture du moteur
+  // (il est sur l'autre fil). C'est la cellule sous le curseur, donc la bonne.
+  if (e.altKey) { if (probed) select(probed[0]); return; }
   if (e.button === 2) { snapshot(); gesture({ t: "fill", x: p.x, y: p.y, id: current }); return; }
   canvas.setPointerCapture(e.pointerId);
   // Les deux outils qui se tracent en glissant. « Copier » ne modifie rien, et
@@ -345,7 +366,11 @@ canvas.addEventListener("pointerdown", (e) => {
   }
   snapshot();
   // Cliquer un interrupteur (ou un aimant) déjà posé le bascule au lieu d'en reposer un.
-  const at = engine.get(p.x, p.y);
+  // ponytail: `probed` date de la dernière frame. À la souris elle est juste
+  // (le curseur y est passé avant le clic) ; au doigt, une première tape peut
+  // reposer un interrupteur au lieu de le basculer — geste sans effet, la
+  // seconde bascule.
+  const at = probed?.[0];
   if ((current === SWITCH && at === SWITCH) || (current === MAGNET && at === MAGNET)) {
     gesture({ t: "toggle", x: p.x, y: p.y });
     return;
@@ -359,12 +384,11 @@ canvas.addEventListener("pointerdown", (e) => {
 
 const probeEl = document.querySelector<HTMLSpanElement>("#probe")!;
 
-/** Matière et température sous le curseur : c'est ce qui rend la vue thermique lisible. */
-function probe(p: { x: number; y: number }): void {
-  if (!engine.inBounds(p.x, p.y)) { probeEl.textContent = "–"; return; }
-  const i = engine.index(p.x, p.y);
-  probeEl.textContent = `${MATERIALS[engine.cells[i]].name} · ${Math.round(engine.temp[i])} °C`;
-}
+/**
+ * Matière et température sous le curseur : c'est ce qui rend la vue thermique
+ * lisible. Le bac les renvoie avec chaque frame — on lui dit juste où regarder.
+ */
+const probe = (p: { x: number; y: number }): void => order({ t: "cursor", x: p.x, y: p.y });
 
 canvas.addEventListener("pointermove", (e) => {
   if (e.pointerType === "touch" && touches.has(e.pointerId)) {
@@ -408,8 +432,10 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
         rectTo(selection, last);
         statusEl.textContent = `Rectangle de ${Math.abs(last.x - selection.x) + 1} × ${Math.abs(last.y - selection.y) + 1}.`;
       } else {
-        clip = engine.copy(selection.x, selection.y, last.x, last.y);
-        statusEl.textContent = `Morceau de ${clip.width} × ${clip.height} découpé — Ctrl+V pour le reposer.`;
+        void askClip(selection.x, selection.y, last.x, last.y).then((c) => {
+          clip = c;
+          statusEl.textContent = `Morceau de ${c.w} × ${c.h} découpé — Ctrl+V pour le reposer.`;
+        });
       }
       selection = null;
       marqueeEl.hidden = true;
@@ -421,53 +447,19 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
   });
 }
 canvas.addEventListener("pointerleave", () => {
+  order({ t: "cursor", x: -1, y: -1 }); // plus de curseur, plus de sonde
   probeEl.textContent = "–";
   ringEl.hidden = true;
 });
 
 /* ----------------------------------------------------------------- annuler */
 
-// Une copie des quatre tableaux avant chaque geste destructeur, dix crans
-// gardés (~230 ko le cran, `temp` étant en Float32 : 2,3 Mo au plus).
-const UNDO_MAX = 10;
-type Snapshot = { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array };
-const undoStack: Snapshot[] = [];
-const redoStack: Snapshot[] = [];
-
-function capture(): Snapshot {
-  return {
-    cells: engine.cells.slice(),
-    life: engine.life.slice(),
-    temp: engine.temp.slice(),
-    frozen: engine.frozen.slice(),
-  };
-}
-
-function restore(state: Snapshot): void {
-  engine.cells.set(state.cells);
-  engine.life.set(state.life);
-  engine.temp.set(state.temp);
-  engine.frozen.set(state.frozen);
-}
-
-function snapshot(): void {
-  undoStack.push(capture());
-  if (undoStack.length > UNDO_MAX) undoStack.shift();
-  redoStack.length = 0; // un nouveau geste referme la branche annulée
-}
-
-/** Dépile d'un côté en empilant de l'autre : annuler et rétablir sont le même geste. */
-function jump(from: Snapshot[], to: Snapshot[], done: string, empty: string): void {
-  const state = from.pop();
-  if (!state) { statusEl.textContent = empty; return; }
-  to.push(capture());
-  restore(state);
-  const left = from.length;
-  statusEl.textContent = `${done} (${left} cran${left > 1 ? "s" : ""} restant${left > 1 ? "s" : ""}).`;
-}
-
-const undo = (): void => jump(undoStack, redoStack, "Annulé", "Rien à annuler.");
-const redo = (): void => jump(redoStack, undoStack, "Rétabli", "Rien à rétablir.");
+// Les crans (une copie des quatre tableaux) vivent dans le bac, avec les
+// tableaux qu'ils copient : ils ne traversent jamais le pont — 230 ko le cran.
+// Ici il ne reste que les ordres, et le compte revient par la barre de statut.
+const snapshot = (): void => order({ t: "edit", do: "snapshot" });
+const undo = (): void => order({ t: "edit", do: "undo" });
+const redo = (): void => order({ t: "edit", do: "redo" });
 
 document.querySelector<HTMLButtonElement>("#undo")!.addEventListener("click", undo);
 document.querySelector<HTMLButtonElement>("#redo")!.addEventListener("click", redo);
@@ -492,13 +484,14 @@ const speedInput = document.querySelector<HTMLInputElement>("#speed")!;
 const speedValue = document.querySelector<HTMLOutputElement>("#speed-value")!;
 speedInput.addEventListener("input", () => {
   speed = Number(speedInput.value) / 4;
+  set({ speed });
   speedValue.value = `×${speed.toLocaleString("fr-FR")}`;
 });
 
 const windInput = document.querySelector<HTMLInputElement>("#wind")!;
 const windValue = document.querySelector<HTMLOutputElement>("#wind-value")!;
 windInput.addEventListener("input", () => {
-  engine.wind = Number(windInput.value) / 10;
+  set({ wind: Number(windInput.value) / 10 });
   windValue.value = windInput.value;
 });
 
@@ -506,15 +499,15 @@ windInput.addEventListener("input", () => {
 const ambientInput = document.querySelector<HTMLInputElement>("#ambient")!;
 const ambientValue = document.querySelector<HTMLOutputElement>("#ambient-value")!;
 ambientInput.addEventListener("input", () => {
-  engine.ambient = Number(ambientInput.value);
+  set({ ambient: Number(ambientInput.value) });
   ambientValue.value = `${ambientInput.value} °C`;
 });
 
 // Redimensionner invalide les piles d'annulation (leurs tableaux n'ont plus la
 // bonne longueur) et remet la vue d'aplomb.
+// Redimensionner remet la vue d'aplomb. Les crans d'annulation et
+// l'enregistrement en cours, eux, sont vidés par le bac lui-même.
 onResize.push(() => {
-  undoStack.length = 0;
-  redoStack.length = 0;
   zoom = 1;
   panX = 0;
   panY = 0;
@@ -539,21 +532,12 @@ function fit(w: number): void {
   sizeInput.value = String(w);
 }
 
-// Météo : quelques gouttes par tick sur la ligne d'où vient la matière (donc
-// en bas si la gravité est inversée). L'ambiante décide de leur nature — c'est
-// ce qui donne enfin à voir le curseur de température.
+// Météo : la pluie elle-même vit dans gestures.ts, avec le tirage du moteur.
 const weatherInput = document.querySelector<HTMLInputElement>("#weather")!;
-
-function weather(): void {
-  const id = engine.ambient <= 0 ? SNOW : WATER;
-  const y = engine.gravity === 1 ? 0 : HEIGHT - 1;
-  for (let n = Math.max(2, (WIDTH / 160) | 0); n > 0; n--) {
-    engine.set(Math.floor(Math.random() * WIDTH), y, id);
-  }
-}
+weatherInput.addEventListener("change", () => set({ weather: weatherInput.checked }));
 
 const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
-heatmapInput.addEventListener("change", () => (renderer.heatmap = heatmapInput.checked));
+heatmapInput.addEventListener("change", () => set({ heatmap: heatmapInput.checked }));
 
 // Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
 // que de dupliquer les handlers ci-dessus.
@@ -612,14 +596,16 @@ if (saved) {
 
 const gravityButton = document.querySelector<HTMLButtonElement>("#gravity")!;
 function flipGravity(): void {
-  engine.gravity = engine.gravity === 1 ? -1 : 1;
-  gravityButton.textContent = engine.gravity === 1 ? "Vers le bas ↓" : "Vers le haut ↑";
+  gravity = gravity === 1 ? -1 : 1;
+  set({ gravity });
+  gravityButton.textContent = gravity === 1 ? "Vers le bas ↓" : "Vers le haut ↑";
 }
 gravityButton.addEventListener("click", flipGravity);
 
 const playButton = document.querySelector<HTMLButtonElement>("#play")!;
 function toggleRun(): void {
   running = !running;
+  set({ running });
   playButton.textContent = running ? "Pause" : "Reprendre";
 }
 playButton.addEventListener("click", toggleRun);
@@ -627,7 +613,8 @@ playButton.addEventListener("click", toggleRun);
 document.querySelector<HTMLButtonElement>("#step")!.addEventListener("click", () => {
   running = false;
   playButton.textContent = "Reprendre";
-  engine.step();
+  set({ running });
+  order({ t: "edit", do: "step" });
 });
 
 // Plein écran natif : le CSS `pixelated` fait la mise à l'échelle, le rendu ne
@@ -644,13 +631,11 @@ document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", ()
 document.querySelector<HTMLButtonElement>("#surprise")!.addEventListener("click", () => {
   const scene = SCENES[Math.floor(Math.random() * SCENES.length)];
   fit(320);
-  snapshot();
-  engine.clear();
-  scene.build(engine);
+  order({ t: "scene", name: scene.name });
   statusEl.textContent = `« ${scene.name} » — servez-vous.`;
 });
 
-document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => { snapshot(); engine.clear(); });
+document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => order({ t: "edit", do: "clear" }));
 
 /* -------------------------------------------------------------- mondes/API */
 
@@ -664,35 +649,19 @@ const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
  * La donnée vient d'ailleurs : un base64 tronqué fait jeter `atob`, et `adopt`
  * écarte les matières inconnues.
  */
-function load(data: string, width?: number): boolean {
+function load(data: string, width?: number, quiet = false): Promise<boolean> {
   if (width !== undefined) {
     fit(width);
     // `fit` refuse une largeur absente du menu : mieux vaut ne rien charger
     // qu'afficher une bouillie.
     if (width !== WIDTH) {
       statusEl.textContent = "Monde fait pour une autre taille de grille.";
-      return false;
+      return Promise.resolve(false);
     }
   }
-  snapshot();
-  const n = WIDTH * HEIGHT;
-  try {
-    engine.adopt(decode(data, n));
-    engine.frozen.set(decodeFrozen(data, n));
-    // Un monde d'avant les quatre blocs : on repart au repos, comme autrefois.
-    const life = decodeLife(data, n);
-    const temp = decodeTemp(data, n);
-    if (life) engine.life.set(life); else engine.life.fill(0);
-    if (temp) engine.temp.set(temp); else engine.temp.fill(engine.ambient);
-  } catch {
-    // On dépile à la main : `undo()` empilerait la grille à moitié posée dans
-    // les crans à rétablir, et un Ctrl+Y la ramènerait.
-    const before = undoStack.pop();
-    if (before) restore(before);
-    statusEl.textContent = "Grille illisible.";
-    return false;
-  }
-  return true;
+  // Le décodage et le cran d'annulation sont l'affaire du bac ; il répond si la
+  // grille était lisible, et dit lui-même qu'elle ne l'était pas.
+  return askLoad(data, quiet);
 }
 
 /* ------------------------------------------------------------- bac partagé */
@@ -700,12 +669,18 @@ function load(data: string, width?: number): boolean {
 // Le salon vit dans room.ts ; il lui manque juste de quoi mettre un invité en
 // pause et de quoi suivre la taille de grille de l'hôte.
 initRoom({
+  // Le geste d'un invité passe par le même point que les nôtres : sans ça il
+  // manquerait de l'enregistrement de l'hôte.
+  apply: gesture,
   role(host) {
     running = host;
     playButton.textContent = running ? "Pause" : "Reprendre";
   },
   size(w) {
     fit(w);
+  },
+  grid(data) {
+    void load(data, undefined, true);
   },
 });
 
@@ -736,9 +711,9 @@ for (const c of CHALLENGES) {
   button.addEventListener("click", () => {
     // Les scènes sont écrites en dur pour 320×180 : on y revient si besoin.
     fit(320);
-    snapshot();
-    engine.clear();
-    c.build(engine);
+    // Le bac connaît la scène par son nom : c'est lui qui la bâtit et qui
+    // surveille la victoire, la page ne garde que le chrono et le libellé.
+    order({ t: "scene", name: c.name });
     startChallenge(c);
   });
   challengesEl.append(button);
@@ -746,7 +721,15 @@ for (const c of CHALLENGES) {
 
 // La galerie sait charger un monde et lancer un défi, mais ni l'un ni l'autre
 // ne lui appartient : on les lui passe.
-initShare({ load, start: startChallenge });
+initShare({
+  load,
+  start(c, goal) {
+    // Monde-défi de la galerie : la grille est déjà posée, seul l'objectif
+    // reste à armer côté bac.
+    if (goal !== undefined) order({ t: "goal", goal });
+    startChallenge(c);
+  },
+});
 
 /* -------------------------------------------------------------------- scène */
 
@@ -757,9 +740,10 @@ initShare({ load, start: startChallenge });
 // repart chaud.
 const BAC = "sandbox-rabbit:bac";
 const kept = read(BAC);
+// `quiet` : rien à annuler avant le premier geste. À défaut des deux, le bac a
+// déjà graîné sa cuvette tout seul.
 if (location.hash.length > 1) loadHash(location.hash.slice(1));
-else if (kept) load(kept);
-else seed();
+else if (kept) void load(kept, undefined, true);
 
 /**
  * Un lien partagé : « 320~<grille> ». La largeur précède la grille, sinon un
@@ -774,15 +758,52 @@ function loadHash(raw: string): void {
     return; // « %zz » dans l'adresse : ce n'est pas un lien de partage
   }
   const cut = hash.indexOf("~");
-  if (cut > 0) load(hash.slice(cut + 1), Number(hash.slice(0, cut)));
-  else load(hash);
+  if (cut > 0) void load(hash.slice(cut + 1), Number(hash.slice(0, cut)), true);
+  else void load(hash, undefined, true);
 }
-undoStack.length = 0; // rien à annuler avant le premier geste
 
 // `visibilitychange` plutôt que `beforeunload` : c'est le seul que les mobiles
 // déclenchent vraiment quand l'onglet part en arrière-plan.
 addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") write(BAC, snapshotData());
+  // La grille du bac, telle qu'il l'a envoyée il y a moins d'un quart de
+  // seconde : rien à demander, personne ne répondrait — la page s'en va.
+  if (document.visibilityState === "hidden") write(BAC, latestGrid());
+});
+
+/* -------------------------------------------------------------------- rejeu */
+
+/**
+ * Enregistrer une partie, la regarder à nouveau. Rien n'est filmé : on garde la
+ * grille de départ, l'état du tirage au sort et les gestes horodatés en ticks
+ * (replay.ts). Une partie de dix minutes tient en quelques kilo-octets, et le
+ * rejeu retombe sur la même grille au pixel près.
+ *
+ * ponytail: en mémoire seulement — rien ne s'exporte ni ne s'importe. Ajouter
+ * un fichier ou un lien le jour où on veut échanger des parties ; ce sera un
+ * JSON venu d'ailleurs, donc à valider comme une grille de la galerie.
+ */
+
+const recButton = document.querySelector<HTMLButtonElement>("#rec")!;
+const playbackButton = document.querySelector<HTMLButtonElement>("#replay")!;
+
+playbackButton.addEventListener("click", () => {
+  if (playing) { order({ t: "play", on: false }); return; }
+  if (!film) return;
+  // Les scènes ont leur taille : un rejeu 480 dans un bac 320 se décalerait.
+  if (film.w !== WIDTH) fit(film.w);
+  // Un rejeu en pause ne se verrait pas avancer.
+  running = true;
+  set({ running });
+  playButton.textContent = "Pause";
+  order({ t: "play", on: true });
+});
+
+recButton.addEventListener("click", () => {
+  if (playing) return; // on n'enregistre pas un rejeu
+  recording = !recording;
+  order({ t: "rec", on: recording });
+  recButton.textContent = recording ? "\u25a0 Arrêter" : "Enregistrer";
+  if (recording) statusEl.textContent = "Enregistrement…";
 });
 
 /* ------------------------------------------------------------ boucle rendu */
@@ -792,46 +813,72 @@ const filledEl = document.querySelector<HTMLSpanElement>("#filled")!;
 let frames = 0;
 let lastReport = performance.now();
 
-/** Reliquat de tick quand la vitesse n'est pas entière (ralenti). */
-let pending = 0;
-let lastFrame = performance.now();
-
+/**
+ * Ce qui reste de la boucle de rendu : la simulation et le dessin sont partis
+ * dans le Worker, les pixels arrivent tout peints (world.ts). Ici on ne fait
+ * plus que ce qui regarde l'écran et la souris — d'où le gain, c'est ce fil-là
+ * qui tenait le panneau, le zoom et le pinceau.
+ */
 function frame(now: number): void {
-  const elapsed = now - lastFrame;
-  lastFrame = now;
   // Clic maintenu sans bouger : on continue de déposer sous le curseur.
   if (painting && last) paintAt(last.x, last.y);
-  if (running) {
-    // Le temps écoulé, pas le nombre de frames (math dans ui.ts).
-    const budget = ticksFor(speed, elapsed, pending);
-    pending = budget.pending;
-    for (let n = budget.ticks; n > 0; n--) {
-      if (weatherInput.checked) weather();
-      engine.step();
-    }
-  }
-  renderer.draw();
-  captureFrame(); // enregistrement en cours : la frame part aussi dans la vidéo
+  captureFrame(); // vidéo en cours : la frame y part aussi
 
   frames++;
   if (now - lastReport >= 500) {
     fpsEl.textContent = String(Math.round((frames * 1000) / (now - lastReport)));
-    let filled = 0;
-    for (let i = 0; i < engine.cells.length; i++) if (engine.cells[i] !== EMPTY) filled++;
-    filledEl.textContent = filled.toLocaleString("fr-FR");
-    if (challenge && challenge.won(engine)) {
-      const secs = Math.round((now - startedAt) / 1000);
-      const record = records[challenge.name] === undefined || secs < records[challenge.name];
-      if (record) {
-        records[challenge.name] = secs;
-        write(RECORDS, JSON.stringify(records));
-      }
-      goalEl.textContent = `${challenge.name} — réussi en ${secs} s${record ? " — nouveau record !" : best(challenge.name)}`;
-      challenge = null;
-    }
     frames = 0;
     lastReport = now;
   }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+/** Défi réussi : le bac l'a vu, la page tient le chrono et les records. */
+function win(): void {
+  if (!challenge) return;
+  const secs = Math.round((performance.now() - startedAt) / 1000);
+  const record = records[challenge.name] === undefined || secs < records[challenge.name];
+  if (record) {
+    records[challenge.name] = secs;
+    write(RECORDS, JSON.stringify(records));
+  }
+  goalEl.textContent = `${challenge.name} — réussi en ${secs} s${record ? " — nouveau record !" : best(challenge.name)}`;
+  challenge = null;
+}
+
+// Les nouvelles du bac. Tout ce que la page affichait en lisant le moteur —
+// la sonde, le compte de cellules, la barre de statut — arrive maintenant par
+// là ; la grille encodée, elle, est gardée par world.ts et lue par le salon.
+listen((news) => {
+  switch (news.t) {
+    case "frame":
+      probed = news.probe;
+      probeEl.textContent = news.probe
+        ? `${MATERIALS[news.probe[0]].name} · ${Math.round(news.probe[1])} °C`
+        : "–";
+      return;
+    case "stats":
+      filledEl.textContent = news.filled.toLocaleString("fr-FR");
+      return;
+    case "say":
+      statusEl.textContent = news.text;
+      return;
+    case "won":
+      return win();
+    case "rec": {
+      film = { w: news.w, h: news.h };
+      playbackButton.disabled = false;
+      const ko = Math.max(1, Math.round(news.size / 1024));
+      statusEl.textContent = `Enregistré : ${news.ticks} ticks, ${news.beats} événements, ~${ko} ko.`;
+      return;
+    }
+    case "play":
+      playing = news.on;
+      playbackButton.textContent = news.on ? "\u25a0 Arrêter" : "Rejouer";
+      statusEl.textContent = news.on ? "Rejeu en cours." : "Fin du rejeu.";
+      return;
+    default:
+      return; // « grid » et « reply » sont l'affaire de world.ts
+  }
+});

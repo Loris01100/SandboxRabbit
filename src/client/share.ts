@@ -6,12 +6,12 @@
  * deux gestes dont il a besoin (charger une grille, lancer un défi) plutôt que
  * d'importer main.ts, ce qui bouclerait.
  */
-import { HEIGHT, WIDTH, canvas, engine } from "./world.ts";
+import { HEIGHT, WIDTH, canvas, latestGrid } from "./world.ts";
 import { thumbnail } from "./sim/render.ts";
-import { encode, decode } from "./sim/codec.ts";
+import { decode } from "./sim/codec.ts";
 import { EMPTY, MATERIALS, PALETTE } from "./sim/materials.ts";
-import { count, type Challenge } from "./challenges.ts";
-import { goalText, parseGoal, read, write } from "./ui.ts";
+import { type Challenge } from "./challenges.ts";
+import { goalText, read, write } from "./ui.ts";
 
 /**
  * Les mondes déposés depuis ce navigateur : `{ id: jeton }`. Le Worker rend le
@@ -35,9 +35,13 @@ export interface Deps {
    * comprise). Renvoie false si elle n'a pas pu l'être — grille illisible ou
    * taille refusée : la galerie a déjà dit pourquoi, elle n'écrase pas.
    */
-  load(data: string, width?: number): boolean;
-  /** Démarre un défi : chrono et affichage du but. */
-  start(challenge: Challenge): void;
+  load(data: string, width?: number): Promise<boolean>;
+  /**
+   * Démarre un défi : chrono et affichage du but. `goal` — l'objectif encodé
+   * d'un monde de la galerie — arme en plus la condition de victoire du bac,
+   * qui est seul à pouvoir la vérifier.
+   */
+  start(challenge: Challenge, goal?: string): void;
 }
 
 let deps: Deps;
@@ -47,22 +51,12 @@ export function initShare(hooks: Deps): void {
 }
 
 /**
- * La grille **et** son état vivant : un incendie enregistré repart chaud.
- * Ça coûte ~20 caractères sur une scène au repos, ~1,8 ko en plein feu.
+ * Défi bâti sur un monde partagé : la grille est déjà chargée, `build` n'a rien
+ * à faire, et la condition de victoire est surveillée par le bac (on lui passe
+ * l'objectif encodé). Il ne reste ici qu'un libellé et un chrono.
  */
-export function snapshotData(): string {
-  return encode(engine.cells, engine.frozen, engine.life, engine.temp);
-}
-
-/** Défi bâti sur un monde partagé : la grille est déjà chargée, `build` n'a rien à faire. */
 function challengeOf(w: World, objective: string): Challenge {
-  const { op, id, n } = parseGoal(w.goal)!;
-  return {
-    name: w.name,
-    goal: objective,
-    build: () => {},
-    won: (e) => (op === "ge" ? count(e, id) >= n : count(e, id) < n),
-  };
+  return { name: w.name, goal: objective, build: () => {}, won: () => false };
 }
 
 /** Recopie la frame courante dans la vidéo en cours, s'il y en a une. */
@@ -147,11 +141,11 @@ function card(w: World): HTMLDivElement {
     // Le monde emmène sa taille : le bac s'y met, plus de carte morte.
     const done = deps.load(fresh.data ?? w.data, w.width);
     galleryEl.close();
-    if (!done) return;
+    if (!(await done)) return;
     statusEl.textContent = `« ${w.name} » chargé.`;
     // Un monde porteur d'un objectif se joue comme un défi : la scène est déjà
     // en place, il ne reste que la condition à surveiller.
-    if (objective) deps.start(challengeOf(w, objective));
+    if (objective) deps.start(challengeOf(w, objective), w.goal ?? undefined);
   });
 
   // Suppression : seulement les siens. Le bouton n'apparaît que si on a le
@@ -200,7 +194,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      name, width: WIDTH, height: HEIGHT, data: snapshotData(),
+      name, width: WIDTH, height: HEIGHT, data: latestGrid(),
       goal: goalOp.value ? `${goalOp.value}:${goalId.value}:${goalN.value}` : null,
     }),
   });
@@ -216,7 +210,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
 // bac 320 se décale d'une ligne à chaque rangée. Le `~` n'est pas échappé par
 // `encodeURIComponent`, et le codec n'en produit jamais.
 document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", async () => {
-  location.hash = encodeURIComponent(`${WIDTH}~${snapshotData()}`);
+  location.hash = encodeURIComponent(`${WIDTH}~${latestGrid()}`);
   try {
     await navigator.clipboard.writeText(location.href);
     statusEl.textContent = "Lien copié.";

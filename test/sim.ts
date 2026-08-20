@@ -7,6 +7,8 @@ import { Engine } from "../src/client/sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/client/sim/codec.ts";
 import { thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
+import { applyGesture, weather, type Gesture } from "../src/client/gestures.ts";
+import { Player, Recorder } from "../src/client/replay.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
@@ -973,6 +975,76 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(empreinte, "624b539a", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
   assert.equal(fingerprint(run(1234)), empreinte, "et rejouable : deux fois la même graine, la même grille");
   assert.notEqual(fingerprint(run(9876)), empreinte, "une autre graine donne une autre partie");
+}
+
+/**
+ * Le rejeu (replay.ts) : une partie enregistrée doit retomber sur la même
+ * grille, dans un moteur neuf semé autrement. C'est le pendant de l'empreinte
+ * ci-dessus — elle vérifie qu'un moteur est reproductible, celui-ci qu'on garde
+ * bien **tout** ce qu'il faut pour repartir en cours de partie : le tirage, le
+ * sens du balayage, la grille vivante, les réglages de scène et la pluie.
+ */
+{
+  function hash(e: Engine): string {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < e.cells.length; i++) {
+      for (const b of [e.cells[i], e.life[i], e.frozen[i], Math.round(e.temp[i]) & 255]) {
+        h = Math.imul(h ^ (b & 255), 0x01000193);
+      }
+    }
+    return (h >>> 0).toString(16);
+  }
+
+  const gestures: [number, Gesture][] = [
+    [3, { t: "paint", x: 20, y: 5, r: 4, id: WATER, d: 1, over: true }],
+    [11, { t: "rect", x: 4, y: 20, x2: 30, y2: 22, id: STONE, over: true }],
+    [11, { t: "paint", x: 40, y: 2, r: 3, id: SAND, d: 0.35, over: true }],
+    [25, { t: "frozen", x: 10, y: 21, r: 3, on: true }],
+    [40, { t: "fill", x: 50, y: 5, id: OIL }],
+    [60, { t: "paint", x: 50, y: 8, r: 2, id: FIRE, d: 1, over: false }],
+  ];
+
+  const e = new Engine(W, H, 4321);
+  e.rect(0, H - 2, W - 1, H - 1, STONE);
+  // Quelques ticks avant l'enregistrement : la parité du balayage et l'état du
+  // tirage ne sont plus ceux du constructeur, c'est tout l'intérêt.
+  for (let t = 0; t < 7; t++) e.step();
+
+  const rec = new Recorder(e, false);
+  let rain = false;
+  for (let t = 0; t < 150; t++) {
+    for (const [at, g] of gestures) {
+      if (at !== t) continue;
+      applyGesture(e, g);
+      rec.gesture(g);
+    }
+    // Réglages changés en cours de route : ils partent dans l'enregistrement
+    // sans que personne ne les lui signale (il les compare à chaque tick).
+    if (t === 30) { e.wind = 0.6; rain = true; }
+    if (t === 70) { e.gravity = -1; e.ambient = -20; }
+    // Une grille posée d'un coup (annulation, monde chargé) : là il faut le dire.
+    if (t === 90) { e.clear(); e.rect(0, 0, W - 1, 4, SAND); rec.stamp(); }
+    rec.tick(rain);
+    if (rain) weather(e);
+    e.step();
+  }
+  assert.equal(rec.rec.ticks, 150, "un tick enregistré par pas de simulation");
+
+  const empreinte = hash(e);
+  const neuf = new Engine(W, H, 9999); // graine différente exprès : le rejeu impose la sienne
+  const player = new Player(rec.rec, neuf);
+  let joues = 0;
+  while (player.step()) joues++;
+  assert.equal(joues, 150, "le rejeu joue exactement les ticks enregistrés");
+  assert.equal(hash(neuf), empreinte, "et retombe sur la même grille, au pixel près");
+
+  // Le même enregistrement rejoué deux fois : même résultat (rien ne fuit d'un rejeu à l'autre).
+  const bis = new Engine(W, H, 1);
+  const p2 = new Player(rec.rec, bis);
+  while (p2.step()) { /* jusqu'au bout */ }
+  assert.equal(hash(bis), empreinte, "rejouable autant de fois qu'on veut");
+
+  assert.throws(() => new Player(rec.rec, new Engine(W + 10, H, 1)), "un bac d'une autre taille est refusé, pas décalé");
 }
 
 console.log("ok — simulation conforme");
