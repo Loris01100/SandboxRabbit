@@ -121,7 +121,20 @@ addEventListener("keydown", (e) => {
   if (e.key === "g") flipGravity();
   if (e.key === "f") toolInput.value = toolInput.value === "paint" ? "freeze" : "paint";
   if (e.key === "h") { heatmapInput.checked = !heatmapInput.checked; renderer.heatmap = heatmapInput.checked; }
+  if (e.key === "?" && !shortcutsEl.open) shortcutsEl.showModal();
 });
+
+/* -------------------------------------------------------------- raccourcis */
+
+// Le pense-bête : les touches vivent dans index.html, sauf la ligne des
+// matières, qui se remplit depuis `SHORTCUTS` — réordonner la barre ne doit pas
+// laisser une aide qui ment.
+const shortcutsEl = document.querySelector<HTMLDialogElement>("#shortcuts")!;
+document.querySelector<HTMLSpanElement>("#keys-materials")!.textContent = SHORTCUTS
+  .map((id, n) => `${n + 1} ${MATERIALS[id].name}`)
+  .filter((_, n) => n < 9)
+  .join(" · ");
+document.querySelector<HTMLButtonElement>("#help")!.addEventListener("click", () => shortcutsEl.showModal());
 
 /* ------------------------------------------------------------------ souris */
 
@@ -138,6 +151,9 @@ function toCell(e: PointerEvent): { x: number; y: number } {
     y: Math.floor(((e.clientY - r.top) / r.height) * HEIGHT),
   };
 }
+
+/** Les outils qui se tracent en glissant : le marquee, pas le pinceau. */
+const dragging = (): boolean => toolInput.value === "copy" || toolInput.value === "rect";
 
 /** Un coup de pinceau, plus son reflet si la symétrie est cochée. */
 function paintAt(x: number, y: number): void {
@@ -247,8 +263,8 @@ function gesture(g: Gesture): void {
 /** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */
 function dab(x: number, y: number): void {
   if (toolInput.value !== "paint") {
-    // « Copier » ne touche à rien : il se contente de découper au relâchement.
-    if (toolInput.value === "copy") return;
+    // Les outils qui se tracent en glissant s'appliquent au relâchement.
+    if (dragging()) return;
     gesture({ t: "frozen", x, y, r: brush, on: toolInput.value === "freeze" });
     return;
   }
@@ -257,6 +273,15 @@ function dab(x: number, y: number): void {
   // Gomme sélective : on n'efface que la dernière matière choisie avant la gomme.
   const only = current === EMPTY && onlyInput.checked ? engine.emit : undefined;
   gesture({ t: "paint", x, y, r: brush, id: current, d: density, over: !keepInput.checked, only });
+}
+
+/** Le rectangle tracé, plus son reflet si la symétrie est cochée. */
+function rectTo(a: { x: number; y: number }, b: { x: number; y: number }): void {
+  const over = !keepInput.checked;
+  gesture({ t: "rect", x: a.x, y: a.y, x2: b.x, y2: b.y, id: current, over });
+  if (mirrorInput.checked) {
+    gesture({ t: "rect", x: WIDTH - 1 - a.x, y: a.y, x2: WIDTH - 1 - b.x, y2: b.y, id: current, over });
+  }
 }
 
 /** Trace un segment de cellules (geste rapide, ou ligne droite au Maj). */
@@ -294,9 +319,10 @@ canvas.addEventListener("pointerdown", (e) => {
   if (e.altKey) { select(engine.get(p.x, p.y) as MaterialId); return; }
   if (e.button === 2) { snapshot(); gesture({ t: "fill", x: p.x, y: p.y, id: current }); return; }
   canvas.setPointerCapture(e.pointerId);
-  // Outil « Copier » : le glissé trace un rectangle, il ne peint rien — donc
-  // pas de cran d'annulation, sinon dix rectangles effacent tout l'historique.
-  if (toolInput.value === "copy") {
+  // Les deux outils qui se tracent en glissant. « Copier » ne modifie rien, et
+  // « Rectangle » ne s'applique qu'au relâchement : le cran d'annulation est
+  // pris là-bas, sinon dix sélections videraient l'historique.
+  if (dragging()) {
     selection = p;
     showMarquee(p, p);
     last = p;
@@ -362,8 +388,14 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
   // `last` est conservé : c'est l'ancre de la ligne droite au Maj.
   canvas.addEventListener(type, (e) => {
     if (selection && last) {
-      clip = engine.copy(selection.x, selection.y, last.x, last.y);
-      statusEl.textContent = `Morceau de ${clip.width} × ${clip.height} découpé — Ctrl+V pour le reposer.`;
+      if (toolInput.value === "rect") {
+        snapshot();
+        rectTo(selection, last);
+        statusEl.textContent = `Rectangle de ${Math.abs(last.x - selection.x) + 1} × ${Math.abs(last.y - selection.y) + 1}.`;
+      } else {
+        clip = engine.copy(selection.x, selection.y, last.x, last.y);
+        statusEl.textContent = `Morceau de ${clip.width} × ${clip.height} découpé — Ctrl+V pour le reposer.`;
+      }
       selection = null;
       marqueeEl.hidden = true;
     }

@@ -44,6 +44,7 @@
           <button id="step" type="button">Pas à pas</button>
           <button id="undo" type="button" title="Annuler le dernier geste (Ctrl+Z)">↶</button>
           <button id="redo" type="button" title="Rétablir le geste annulé (Ctrl+Y)">↷</button>
+          <button id="help" type="button" title="Raccourcis clavier et souris (?)" aria-label="Raccourcis">?</button>
         </div>
 
         <details class="group" name="panneau" open>
@@ -66,6 +67,7 @@
               <option value="paint">Peindre</option>
               <option value="freeze">Figer</option>
               <option value="melt">Libérer</option>
+              <option value="rect">Rectangle</option>
               <option value="copy">Copier</option>
             </select>
           </label>
@@ -85,12 +87,10 @@
             <input id="only" type="checkbox" />
             <span>Gomme sélective : n'efface que la dernière matière choisie</span>
           </label>
+          <!-- La liste vit dans le <dialog> des raccourcis, une seule fois. -->
           <p class="hint">
-            <kbd>Maj</kbd> + clic trace une ligne droite depuis le dernier point ·
-            clic droit remplit la poche sous le curseur · <kbd>f</kbd> bascule Peindre / Figer ·
-            un clic sur un interrupteur déjà posé l'ouvre ou le ferme ·
-            outil <em>Copier</em> : glisser pour découper un rectangle, <kbd>Ctrl</kbd>+<kbd>V</kbd> pour le reposer sous le curseur ·
-            molette (ou pincement) pour zoomer, clic du milieu pour déplacer la vue
+            Les outils <em>Rectangle</em> et <em>Copier</em> se tracent en glissant.
+            Le bouton <kbd>?</kbd>, en haut du panneau, liste tous les raccourcis.
           </p>
         </details>
 
@@ -190,6 +190,33 @@
         <button type="submit">Fermer</button>
       </form>
       <div id="gallery-grid" class="gallery"></div>
+    </dialog>
+
+    <!-- Raccourcis : rien de tout ça n'était écrit dans l'interface. La ligne
+         des matières est remplie par main.ts depuis `SHORTCUTS`, pour qu'elle
+         ne mente pas le jour où l'ordre change. -->
+    <dialog id="shortcuts">
+      <form method="dialog" class="gallery-bar">
+        <h2>Raccourcis</h2>
+        <button type="submit">Fermer</button>
+      </form>
+      <dl class="keys">
+        <dt>Espace</dt><dd>Mettre en pause ou reprendre</dd>
+        <dt><span id="keys-materials">1 … 9</span></dt><dd>Choisir une matière</dd>
+        <dt>0</dt><dd>Gomme</dd>
+        <dt>G</dt><dd>Inverser la gravité</dd>
+        <dt>F</dt><dd>Passer de Peindre à Figer</dd>
+        <dt>H</dt><dd>Vue thermique</dd>
+        <dt>Ctrl + Z · Ctrl + Y</dt><dd>Annuler · Rétablir</dd>
+        <dt>Ctrl + V</dt><dd>Reposer le morceau copié, centré sur le curseur</dd>
+        <dt>Maj + clic</dt><dd>Ligne droite depuis le dernier point posé</dd>
+        <dt>Alt + clic</dt><dd>Pipette : reprendre la matière sous le curseur</dd>
+        <dt>Clic droit</dt><dd>Remplir la poche de matière sous le curseur</dd>
+        <dt>Clic sur un interrupteur ou un aimant</dt><dd>Le basculer au lieu d'en reposer un</dd>
+        <dt>Molette · Clic du milieu</dt><dd>Zoomer · Déplacer la vue (si le zoom est actif)</dd>
+        <dt>Deux doigts</dt><dd>Zoomer et déplacer la vue</dd>
+        <dt>Outils Rectangle et Copier</dt><dd>Glisser pour tracer le rectangle</dd>
+      </dl>
     </dialog>
   </body>
 </html>

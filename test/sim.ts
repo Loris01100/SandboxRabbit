@@ -755,6 +755,23 @@ function top(e: Engine, id: MaterialId): number {
   assert.ok(clip.width >= 1 && clip.height >= 1, "pas de longueur négative");
 }
 
+// Outil Rectangle : bornes dans n'importe quel ordre, débordement ramené.
+{
+  const e = engine();
+  e.rect(10, 5, 6, 2, STONE); // tracé du bas-droite vers le haut-gauche
+  assert.equal(count(e, STONE), 5 * 4, "plein, bornes comprises");
+  assert.equal(e.get(6, 2), STONE, "un coin");
+  assert.equal(e.get(10, 5), STONE, "l'autre");
+
+  e.rect(6, 2, 10, 5, SAND, false);
+  assert.equal(count(e, SAND), 0, "« ne pas écraser » préserve ce qui est là");
+
+  e.rect(-5, -5, 2, 2, WATER);
+  assert.equal(count(e, WATER), 9, "ce qui sort de la grille est ramené, pas jeté");
+  e.rect(W - 2, H - 2, W + 99, H + 99, WATER);
+  assert.equal(e.get(W - 1, H - 1), WATER, "le coin opposé aussi");
+}
+
 // Le vide reste du vide.
 {
   const e = engine();

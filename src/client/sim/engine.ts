@@ -198,6 +198,25 @@ export class Engine {
   }
 
   /**
+   * Remplit un rectangle (bornes comprises, remises dans l'ordre) — l'outil
+   * Rectangle. Le pinceau à main levée ne trace pas un mur droit, et il en faut
+   * un pour bâtir un réservoir ou un moule.
+   */
+  rect(x0: number, y0: number, x1: number, y1: number, id: MaterialId, overwrite = true): void {
+    const left = Math.max(0, Math.min(x0, x1));
+    const right = Math.min(this.width - 1, Math.max(x0, x1));
+    const top = Math.max(0, Math.min(y0, y1));
+    const bottom = Math.min(this.height - 1, Math.max(y0, y1));
+    for (let y = top; y <= bottom; y++) {
+      for (let x = left; x <= right; x++) {
+        // Même règle que le pinceau : « ne pas écraser » préserve ce qui est là.
+        if (!overwrite && id !== EMPTY && this.cells[this.index(x, y)] !== EMPTY) continue;
+        this.set(x, y, id);
+      }
+    }
+  }
+
+  /**
    * Découpe un rectangle de la grille (bornes comprises, remises dans l'ordre).
    * `life` part avec : sans lui un interrupteur collé perdrait son état et une
    * source la matière qu'elle crache. La température, elle, reste au bac.

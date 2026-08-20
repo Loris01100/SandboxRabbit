@@ -269,7 +269,8 @@ kbd {
 .cat > .palette { padding-bottom: 0.4rem; }
 
 /* Galerie : <dialog> natif, ouvert par showModal(). */
-#gallery {
+/* Les deux modales partagent leur cadre ; seule la largeur les sépare. */
+#gallery, #shortcuts {
   width: min(920px, 92vw);
   max-height: 86vh;
   padding: 1rem;
@@ -280,7 +281,19 @@ kbd {
   font: inherit;
 }
 
-#gallery::backdrop { background: light-dark(#3339, #000a); }
+#shortcuts { width: min(560px, 92vw); }
+#gallery::backdrop, #shortcuts::backdrop { background: light-dark(#3339, #000a); }
+
+/* Un raccourci par ligne : la touche à gauche, ce qu'elle fait à droite. */
+.keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.9rem;
+  margin: 0;
+  font-size: 0.86rem;
+}
+.keys dt { color: var(--accent); white-space: nowrap; }
+.keys dd { margin: 0; color: var(--muted); }
 
 .gallery-bar {
   display: flex;

@@ -58,6 +58,8 @@ mondes partagés.
 | Matières récentes | Les six dernières choisies, épinglées au-dessus des familles. La palette étant un accordéon exclusif, y revenir coûtait sinon deux clics. |
 | Météo | Une case : il pleut du haut du bac, et c'est de la neige si l'ambiante est sous zéro. La gravité inversée fait tomber la pluie du bas. |
 | Surprise | Un décor tiré au sort parmi quatre (volcan, banquise, chantier, atelier) : même mécanique que les défis, sans objectif. |
+| Rectangle | Outil « Rectangle » : le glissé remplit un rectangle de la matière choisie, symétrie et « ne pas écraser » compris. Le pinceau à main levée ne trace pas un mur droit, et il en faut un pour bâtir un réservoir ou un moule. Même marquee que « Copier », et comme lui il ne s'applique qu'au relâchement. |
+| Raccourcis | Une douzaine de touches et de clics, listés une seule fois dans un `<dialog>` natif (bouton `?` ou la touche `?`). La ligne des matières est remplie depuis `SHORTCUTS` : réordonner la barre ne peut pas laisser une aide qui ment. |
 | Copier / coller | Outil « Copier » : le glissé découpe un rectangle, `Ctrl+V` le repose centré sous le curseur. `life` part avec le morceau — sans lui un interrupteur collé perdrait son état et une source la matière qu'elle crache. |
 | Pipette | `Alt` + clic sur le bac reprend la matière sous le curseur : plus court que de rouvrir la famille dans la palette. |
 | Vidéo | `canvas.captureStream()` + `MediaRecorder`, deux API natives : le bac se filme en `.webm`. C'est la copie agrandie ×4 qui est filmée (celle du PNG), pas le canvas de 320 pixels de large. |
