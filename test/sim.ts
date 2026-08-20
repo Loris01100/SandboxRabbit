@@ -815,4 +815,57 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(count(e, EMPTY), W * H, "rien ne se crée tout seul");
 }
 
+/**
+ * Contrat d'équivalence du moteur : à graine égale, la même scène donne la même
+ * grille au tick près. C'est ce test — et non les règles prises une à une — qui
+ * dira qu'un moteur réécrit (Rust/WASM) fait bien la même chose que celui-ci :
+ * il suffit qu'il sorte la même empreinte.
+ *
+ * Il échoue aussi dès qu'une règle change l'ordre de ses tirages, même sans
+ * changer son comportement visible. C'est voulu : le jour où c'est légitime,
+ * relancer le test affiche l'empreinte à recopier ci-dessous.
+ */
+{
+  /** FNV-1a sur la matière, les vies et l'arrondi des températures. */
+  function fingerprint(e: Engine): string {
+    let h = 0x811c9dc5;
+    const eat = (b: number) => {
+      h = Math.imul(h ^ (b & 255), 0x01000193);
+    };
+    for (let i = 0; i < e.cells.length; i++) {
+      eat(e.cells[i]);
+      eat(e.life[i]);
+      eat(Math.round(e.temp[i]));
+    }
+    return (h >>> 0).toString(16);
+  }
+
+  /** Une scène qui réveille le plus de règles possible : chute, feu, eau, souffle, circuit. */
+  function scene(seed: number): Engine {
+    const e = new Engine(W, H, seed);
+    e.rect(0, H - 3, W - 1, H - 1, STONE);
+    e.rect(4, 10, 14, 20, SAND);
+    e.rect(20, 4, 30, 12, WATER);
+    e.rect(36, 24, 44, 30, WOOD);
+    e.rect(48, 8, 52, 12, TNT);
+    e.rect(2, 30, 30, 30, METAL);
+    e.set(2, 29, BATTERY);
+    e.set(40, 20, LAVA);
+    e.set(50, 20, ICE);
+    e.set(10, 2, THERMITE);
+    return e;
+  }
+
+  const run = (seed: number) => {
+    const e = scene(seed);
+    for (let t = 0; t < 300; t++) e.step();
+    return e;
+  };
+
+  const empreinte = fingerprint(run(1234));
+  assert.equal(empreinte, "624b539a", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
+  assert.equal(fingerprint(run(1234)), empreinte, "et rejouable : deux fois la même graine, la même grille");
+  assert.notEqual(fingerprint(run(9876)), empreinte, "une autre graine donne une autre partie");
+}
+
 console.log("ok — simulation conforme");

@@ -127,8 +127,12 @@ export class Engine {
   ambient = AMBIENT;
   /** Matière émise par les cellules `SOURCE` déposées ensuite. */
   emit: MaterialId = WATER;
+  /** État du tirage au sort. Voir `rand()`. */
+  private state: number;
 
-  constructor(width: number, height: number) {
+  constructor(width: number, height: number, seed = (Math.random() * 0x1_0000_0000) >>> 0) {
+    // Un xorshift32 meurt sur 0 : toute graine nulle devient 1.
+    this.state = seed >>> 0 || 1;
     this.width = width;
     this.height = height;
     const n = width * height;
@@ -139,7 +143,23 @@ export class Engine {
     this.clock = new Uint8Array(n);
     this.frozen = new Uint8Array(n);
     this.noise = new Int8Array(n);
-    for (let i = 0; i < n; i++) this.noise[i] = ((Math.random() * 255) | 0) - 128;
+    for (let i = 0; i < n; i++) this.noise[i] = ((this.rand() * 255) | 0) - 128;
+  }
+
+  /**
+   * Le seul tirage au sort du moteur : xorshift32, semé par le constructeur.
+   * `Math.random()` n'est pas reproductible, donc deux moteurs — celui-ci et
+   * un futur portage Rust/WASM — ne pourraient pas être comparés, et un bug
+   * observé ne pourrait pas être rejoué. Toute règle qui tire au sort passe
+   * par ici : un `Math.random()` de plus dans ce fichier rouvrirait le trou.
+   */
+  rand(): number {
+    let s = this.state;
+    s ^= s << 13; s >>>= 0;
+    s ^= s >>> 17;
+    s ^= s << 5; s >>>= 0;
+    this.state = s;
+    return s / 0x1_0000_0000;
   }
 
   index(x: number, y: number): number {
@@ -196,7 +216,7 @@ export class Engine {
         const dx = x - cx, dy = y - cy;
         if (dx * dx + dy * dy > r2) continue;
         if (!this.inBounds(x, y)) continue;
-        if (density < 1 && Math.random() > density) continue;
+        if (density < 1 && this.rand() > density) continue;
         const at = this.cells[this.index(x, y)];
         if (only !== undefined && at !== only) continue;
         if (!overwrite && id !== EMPTY && at !== EMPTY) continue;
@@ -349,7 +369,7 @@ export class Engine {
 
   /** Sens horizontal tiré au sort, biaisé par le vent. */
   private drift(): number {
-    return Math.random() < 0.5 + this.wind / 2 ? 1 : -1;
+    return this.rand() < 0.5 + this.wind / 2 ? 1 : -1;
   }
 
   step(): void {
@@ -440,7 +460,7 @@ export class Engine {
   private moveGas(i: number, x: number, y: number, id: MaterialId): void {
     const up = y - this.gravity;
     const dir = this.drift();
-    if (Math.random() < 0.7 && this.tryMove(i, x, up, id)) return;
+    if (this.rand() < 0.7 && this.tryMove(i, x, up, id)) return;
     if (this.tryMove(i, x + dir, up, id)) return;
     this.tryMove(i, x + dir, y, id);
   }
@@ -469,7 +489,7 @@ export class Engine {
     }
     this.ignite(x, y);
     if (this.decay(i, FIRE, SMOKE)) return;
-    if (Math.random() < 0.6) this.moveGas(i, x, y, FIRE);
+    if (this.rand() < 0.6) this.moveGas(i, x, y, FIRE);
   }
 
   private updateLava(i: number, x: number, y: number): void {
@@ -481,7 +501,7 @@ export class Engine {
         this.become(x, y, STONE);
         return;
       }
-      if (n === SAND && Math.random() < 0.01) this.become(nx, ny, LAVA);
+      if (n === SAND && this.rand() < 0.01) this.become(nx, ny, LAVA);
     }
     this.ignite(x, y, 2);
     this.updateLiquid(i, x, y, LAVA);
@@ -493,9 +513,9 @@ export class Engine {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       const chance = MATERIALS[n]?.flammable;
-      if (!chance || Math.random() > chance * boost) continue;
+      if (!chance || this.rand() > chance * boost) continue;
       // Le bois ne disparaît pas en fumée : il passe par la braise.
-      this.become(nx, ny, n === WOOD && Math.random() < 0.5 ? EMBER : FIRE);
+      this.become(nx, ny, n === WOOD && this.rand() < 0.5 ? EMBER : FIRE);
     }
   }
 
@@ -505,16 +525,16 @@ export class Engine {
       const n = this.get(nx, ny);
       const dissolvable = n === STONE || n === WOOD || n === SAND || n === PLANT
         || n === GLASS || n === ICE || n === SEED;
-      if (dissolvable && Math.random() < 0.06) {
+      if (dissolvable && this.rand() < 0.06) {
         this.become(nx, ny, EMPTY);
-        if (Math.random() < 0.5) { this.become(x, y, SMOKE); return; } // l'acide s'use
+        if (this.rand() < 0.5) { this.become(x, y, SMOKE); return; } // l'acide s'use
       }
     }
     this.updateLiquid(i, x, y, ACID);
   }
 
   private updatePlant(x: number, y: number): void {
-    if (Math.random() > 0.08) return;
+    if (this.rand() > 0.08) return;
     let drank = false;
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
@@ -522,9 +542,9 @@ export class Engine {
     }
     if (!drank) return;
     // Une pousse peut partir vers le haut ou en biais.
-    const dx = (Math.random() * 3 | 0) - 1;
+    const dx = (this.rand() * 3 | 0) - 1;
     const up = y - this.gravity;
-    if (this.get(x + dx, up) === EMPTY && Math.random() < 0.5) this.become(x + dx, up, PLANT);
+    if (this.get(x + dx, up) === EMPTY && this.rand() < 0.5) this.become(x + dx, up, PLANT);
   }
 
   /** Le TNT n'attend que la flamme ; la chaîne se propage par le feu de l'explosion. */
@@ -628,7 +648,7 @@ export class Engine {
     for (const [ox, oy] of disc(NUKE)) {
       const x = cx + ox, y = cy + oy;
       if (!this.inBounds(x, y)) continue;
-      if (this.cells[this.index(x, y)] === EMPTY && Math.random() < 0.2) this.become(x, y, FALLOUT);
+      if (this.cells[this.index(x, y)] === EMPTY && this.rand() < 0.2) this.become(x, y, FALLOUT);
     }
   }
 
@@ -672,8 +692,8 @@ export class Engine {
       const thrown = d > radius * 0.5 && range > 0
         && (this.hurl(i, x, y, ox / d, oy / d, range)
           || this.hurl(i, x, y, (ox / d) * 0.6, -this.gravity, range));
-      if (!thrown) this.become(x, y, Math.random() < 0.5 ? FIRE : EMPTY);
-      else if (Math.random() < 0.25) this.become(x, y, FIRE); // le cratère continue de brûler
+      if (!thrown) this.become(x, y, this.rand() < 0.5 ? FIRE : EMPTY);
+      else if (this.rand() < 0.25) this.become(x, y, FIRE); // le cratère continue de brûler
     }
   }
 
@@ -713,7 +733,7 @@ export class Engine {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === WATER) { this.become(nx, ny, SALTWATER); this.become(x, y, EMPTY); return; }
-      if (n === ICE && Math.random() < 0.25) { this.become(nx, ny, WATER); this.become(x, y, EMPTY); return; }
+      if (n === ICE && this.rand() < 0.25) { this.become(nx, ny, WATER); this.become(x, y, EMPTY); return; }
     }
     this.updatePowder(i, x, y, SALT);
   }
@@ -733,14 +753,14 @@ export class Engine {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === EMPTY || n === NANITE || n === GLASS || n === SOURCE) continue;
-      if (Math.random() < 0.2) { this.become(nx, ny, NANITE); break; }
+      if (this.rand() < 0.2) { this.become(nx, ny, NANITE); break; }
     }
     this.updatePowder(i, x, y, NANITE);
   }
 
   /** Générateur : crache sa matière (stockée dans `life`) dans la case libre voisine. */
   private updateSource(i: number, x: number, y: number): void {
-    if (Math.random() > 0.5) return;
+    if (this.rand() > 0.5) return;
     const id = this.life[i] || WATER;
     const dy = MATERIALS[id].kind === "gas" ? -this.gravity : this.gravity;
     if (this.get(x, y + dy) === EMPTY) this.become(x, y + dy, id);
