@@ -713,6 +713,47 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(e.get(W - 1, 0), METAL, "le bord est servi");
 }
 
+// Une cellule figée est aussi intouchable par ses voisins : c'est ce que promet
+// l'invariant, et cinq règles la repeignaient quand même (feu, acide, sel…).
+// Deux blocs de bois cerclés de feu, un figé et un témoin.
+{
+  const e = engine();
+  const cercle = (x: number, y: number) => {
+    for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) e.set(x + dx, y + dy, FIRE);
+  };
+  e.set(10, 10, WOOD);
+  e.set(30, 10, WOOD);
+  e.setFrozen(10, 10, 0, true);
+  for (let t = 0; t < 200; t++) {
+    // Le feu ne vit que 60 ticks : on le réalimente, sinon il s'éteint avant
+    // d'avoir eu ses 2 % de chance de prendre.
+    if (t % 20 === 0) { cercle(10, 10); cercle(30, 10); }
+    e.step();
+  }
+  assert.equal(e.get(10, 10), WOOD, "le bois figé ne brûle pas");
+  assert.notEqual(e.get(30, 10), WOOD, "…alors que le même bois libre y passe");
+}
+
+// Une grille venue d'ailleurs peut porter un id disparu : `MATERIALS[id].heat`
+// jetterait à chaque tick et arrêterait le bac pour de bon.
+{
+  const e = engine();
+  const venue = new Uint8Array(W * H);
+  venue[e.index(5, 5)] = 200; // aucune matière ne porte cet id
+  venue[e.index(6, 5)] = SAND;
+  e.adopt(venue);
+  assert.equal(e.get(5, 5), EMPTY, "l'id inconnu retombe sur le vide");
+  assert.equal(e.get(6, 5), SAND, "le reste passe tel quel");
+  e.step(); // ne doit pas jeter
+}
+
+// Un rectangle entièrement hors grille : les bornes sont ramenées, pas niées.
+{
+  const e = engine();
+  const clip = e.copy(W + 5, H + 5, W + 9, H + 9);
+  assert.ok(clip.width >= 1 && clip.height >= 1, "pas de longueur négative");
+}
+
 // Le vide reste du vide.
 {
   const e = engine();

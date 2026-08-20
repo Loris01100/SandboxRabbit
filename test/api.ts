@@ -29,6 +29,10 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
 {
   assert.equal((await app.request("/api/worlds", json({ name: "x" }), env)).status, 400);
   assert.equal((await app.request("/api/worlds", json({ ...monde, data: "x".repeat(200_001) }), env)).status, 413);
+  // Des dimensions fantaisistes n'atteignent pas la galerie, qui allouerait `width * height`.
+  assert.equal((await app.request("/api/worlds", json({ ...monde, width: 1e6, height: 1e6 }), env)).status, 400);
+  assert.equal((await app.request("/api/worlds", json({ ...monde, width: 0 }), env)).status, 400);
+  assert.equal((await app.request("/api/worlds", json({ ...monde, height: 12.5 }), env)).status, 400);
 }
 
 // Aller-retour complet : sauvegarde, liste, suppression.

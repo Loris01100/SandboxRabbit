@@ -28,6 +28,17 @@ export function relay(g: Gesture): void {
   if (socket?.readyState === WebSocket.OPEN && !host) socket.send(JSON.stringify({ type: "do", g }));
 }
 
+/** JSON toléré : un message illisible est ignoré, pas propagé en exception. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parse(data: string): any {
+  try {
+    const msg = JSON.parse(data);
+    return typeof msg === "object" && msg !== null ? msg : null;
+  } catch {
+    return null;
+  }
+}
+
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const roomButton = document.querySelector<HTMLButtonElement>("#room")!;
 let socket: WebSocket | null = null;
@@ -38,7 +49,9 @@ let beat = 0;
 function applyGrid(data: string, w: number, h: number): void {
   // La grille de l'hôte impose sa taille.
   if (w !== WIDTH || h !== HEIGHT) onSize(w, h);
-  engine.cells.set(decode(data, w * h));
+  // Une taille refusée (ou fantaisiste) laisserait `set()` jeter sur la longueur.
+  if (w !== WIDTH || h !== HEIGHT) return;
+  engine.adopt(decode(data, w * h));
   engine.frozen.set(decodeFrozen(data, w * h));
 }
 
@@ -47,6 +60,8 @@ function leaveRoom(): void {
   socket = null;
   host = false;
   roomButton.textContent = "Bac partagé";
+  // On redevient maître de son bac : sans ça un invité qui part reste en pause.
+  onRole(true);
 }
 
 roomButton.addEventListener("click", () => {
@@ -59,7 +74,9 @@ roomButton.addEventListener("click", () => {
   statusEl.textContent = `Connexion au salon « ${name} »…`;
 
   ws.addEventListener("message", (e) => {
-    const msg = JSON.parse(e.data as string);
+    // Le salon relaie sans lire : ce qui arrive n'est pas forcément du JSON.
+    const msg = parse(e.data as string);
+    if (!msg) return;
     if (msg.type === "role") {
       host = msg.host;
       // Un invité ne simule pas : sa grille est écrasée quatre fois par seconde.
@@ -68,16 +85,16 @@ roomButton.addEventListener("click", () => {
         ? `Salon « ${name} » — vous simulez pour tout le monde.`
         : `Salon « ${name} » — vous suivez l'hôte.`;
     }
-    if (msg.type === "grid" && !host) applyGrid(msg.data, msg.width, msg.height);
-    if (msg.type === "do" && host) applyGesture(msg.g);
+    if (msg.type === "grid" && !host && typeof msg.data === "string") applyGrid(msg.data, msg.width, msg.height);
+    if (msg.type === "do" && host && msg.g) applyGesture(msg.g);
   });
+  // Une connexion qui échoue déclenche « error » puis « close » : sans ce
+  // drapeau, « Salon quitté » effacerait aussitôt « Salon injoignable ».
+  let failed = false;
+  ws.addEventListener("error", () => (failed = true));
   ws.addEventListener("close", () => {
     leaveRoom();
-    statusEl.textContent = "Salon quitté.";
-  });
-  ws.addEventListener("error", () => {
-    leaveRoom();
-    statusEl.textContent = "Salon injoignable.";
+    statusEl.textContent = failed ? "Salon injoignable." : "Salon quitté.";
   });
 
   beat = setInterval(() => {

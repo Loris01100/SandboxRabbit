@@ -132,6 +132,17 @@ export class Engine {
     if (spawn !== undefined) this.temp[i] = spawn;
   }
 
+  /**
+   * Transformation décidée par une règle (le feu prend, l'acide ronge, le sel
+   * fond) : elle passe son tour sur une cellule figée. `set()` libère au
+   * contraire ce qu'il touche — c'est le geste du pinceau, pas de la
+   * simulation.
+   */
+  private become(x: number, y: number, id: MaterialId): void {
+    if (this.inBounds(x, y) && this.frozen[this.index(x, y)]) return;
+    this.set(x, y, id);
+  }
+
   clear(): void {
     this.cells.fill(EMPTY);
     this.life.fill(0);
@@ -169,8 +180,10 @@ export class Engine {
   copy(x0: number, y0: number, x1: number, y1: number): Clip {
     const left = Math.max(0, Math.min(x0, x1));
     const top = Math.max(0, Math.min(y0, y1));
-    const width = Math.min(this.width - 1, Math.max(x0, x1)) - left + 1;
-    const height = Math.min(this.height - 1, Math.max(y0, y1)) - top + 1;
+    // Bornes remises dans la grille : un rectangle entièrement dehors donnerait
+    // une largeur négative, et `new Uint8Array(-3)` jette.
+    const width = Math.max(1, Math.min(this.width - 1, Math.max(x0, x1)) - left + 1);
+    const height = Math.max(1, Math.min(this.height - 1, Math.max(y0, y1)) - top + 1);
     const clip: Clip = {
       width, height,
       cells: new Uint8Array(width * height),
@@ -189,6 +202,18 @@ export class Engine {
     return clip;
   }
 
+  /**
+   * Pose une grille venue d'ailleurs (monde sauvegardé, lien partagé, salon).
+   * Un id absent de `MATERIALS` — matière retirée depuis, ou octet inventé —
+   * retombe sur le vide : sans ça `MATERIALS[id].heat` jette à chaque tick et
+   * le bac s'arrête pour de bon.
+   */
+  adopt(cells: Uint8Array): void {
+    for (let i = 0; i < this.cells.length; i++) {
+      this.cells[i] = MATERIALS[cells[i]] ? cells[i] : EMPTY;
+    }
+  }
+
   /** Repose un morceau, coin haut-gauche en (cx, cy). Ce qui dépasse est ignoré. */
   paste(clip: Clip, cx: number, cy: number): void {
     for (let y = 0; y < clip.height; y++) {
@@ -196,7 +221,8 @@ export class Engine {
         if (!this.inBounds(cx + x, cy + y)) continue;
         const to = this.index(cx + x, cy + y);
         const from = y * clip.width + x;
-        this.cells[to] = clip.cells[from];
+        // Un morceau peut venir d'un pair : même filtre que `adopt`.
+        this.cells[to] = MATERIALS[clip.cells[from]] ? clip.cells[from] : EMPTY;
         this.life[to] = clip.life[from];
         this.frozen[to] = clip.frozen[from];
       }
@@ -230,7 +256,7 @@ export class Engine {
     while (stack.length > 0) {
       const i = stack.pop()!;
       if (this.cells[i] !== from || this.frozen[i]) continue;
-      this.set(i % this.width, (i / this.width) | 0, id);
+      this.become(i % this.width, (i / this.width) | 0, id);
       const cx = i % this.width;
       if (cx > 0) stack.push(i - 1);
       if (cx < this.width - 1) stack.push(i + 1);
@@ -379,8 +405,8 @@ export class Engine {
     for (const [nx, ny] of this.neighbors(x, y)) {
       const n = this.get(nx, ny);
       if (n === WATER || n === SALTWATER) {
-        this.set(nx, ny, STEAM);
-        this.set(x, y, STEAM);
+        this.become(nx, ny, STEAM);
+        this.become(x, y, STEAM);
         return;
       }
     }
@@ -393,11 +419,11 @@ export class Engine {
     for (const [nx, ny] of this.neighbors(x, y)) {
       const n = this.get(nx, ny);
       if (n === WATER || n === SALTWATER) {
-        this.set(nx, ny, STEAM);
-        this.set(x, y, STONE);
+        this.become(nx, ny, STEAM);
+        this.become(x, y, STONE);
         return;
       }
-      if (n === SAND && Math.random() < 0.01) this.set(nx, ny, LAVA);
+      if (n === SAND && Math.random() < 0.01) this.become(nx, ny, LAVA);
     }
     this.ignite(x, y, 2);
     this.updateLiquid(i, x, y, LAVA);
@@ -410,7 +436,7 @@ export class Engine {
       const chance = MATERIALS[n]?.flammable;
       if (!chance || Math.random() > chance * boost) continue;
       // Le bois ne disparaît pas en fumée : il passe par la braise.
-      this.set(nx, ny, n === WOOD && Math.random() < 0.5 ? EMBER : FIRE);
+      this.become(nx, ny, n === WOOD && Math.random() < 0.5 ? EMBER : FIRE);
     }
   }
 
@@ -420,8 +446,8 @@ export class Engine {
       const dissolvable = n === STONE || n === WOOD || n === SAND || n === PLANT
         || n === GLASS || n === ICE || n === SEED;
       if (dissolvable && Math.random() < 0.06) {
-        this.set(nx, ny, EMPTY);
-        if (Math.random() < 0.5) { this.set(x, y, SMOKE); return; } // l'acide s'use
+        this.become(nx, ny, EMPTY);
+        if (Math.random() < 0.5) { this.become(x, y, SMOKE); return; } // l'acide s'use
       }
     }
     this.updateLiquid(i, x, y, ACID);
@@ -431,13 +457,13 @@ export class Engine {
     if (Math.random() > 0.08) return;
     let drank = false;
     for (const [nx, ny] of this.neighbors(x, y)) {
-      if (this.get(nx, ny) === WATER) { this.set(nx, ny, PLANT); drank = true; break; }
+      if (this.get(nx, ny) === WATER) { this.become(nx, ny, PLANT); drank = true; break; }
     }
     if (!drank) return;
     // Une pousse peut partir vers le haut ou en biais.
     const dx = (Math.random() * 3 | 0) - 1;
     const up = y - this.gravity;
-    if (this.get(x + dx, up) === EMPTY && Math.random() < 0.5) this.set(x + dx, up, PLANT);
+    if (this.get(x + dx, up) === EMPTY && Math.random() < 0.5) this.become(x + dx, up, PLANT);
   }
 
   /** Le TNT n'attend que la flamme ; la chaîne se propage par le feu de l'explosion. */
@@ -534,7 +560,7 @@ export class Engine {
     for (const [ox, oy] of disc(NUKE)) {
       const x = cx + ox, y = cy + oy;
       if (!this.inBounds(x, y)) continue;
-      if (this.cells[this.index(x, y)] === EMPTY && Math.random() < 0.2) this.set(x, y, FALLOUT);
+      if (this.cells[this.index(x, y)] === EMPTY && Math.random() < 0.2) this.become(x, y, FALLOUT);
     }
   }
 
@@ -542,7 +568,7 @@ export class Engine {
   private updateFallout(i: number, x: number, y: number): void {
     for (const [nx, ny] of this.neighbors(x, y)) {
       const n = this.get(nx, ny);
-      if (n === PLANT || n === SEED) this.set(nx, ny, EMPTY);
+      if (n === PLANT || n === SEED) this.become(nx, ny, EMPTY);
     }
     this.updateGas(i, x, y, FALLOUT);
   }
@@ -577,8 +603,8 @@ export class Engine {
       const thrown = d > radius * 0.5 && range > 0
         && (this.hurl(i, x, y, ox / d, oy / d, range)
           || this.hurl(i, x, y, (ox / d) * 0.6, -this.gravity, range));
-      if (!thrown) this.set(x, y, Math.random() < 0.5 ? FIRE : EMPTY);
-      else if (Math.random() < 0.25) this.set(x, y, FIRE); // le cratère continue de brûler
+      if (!thrown) this.become(x, y, Math.random() < 0.5 ? FIRE : EMPTY);
+      else if (Math.random() < 0.25) this.become(x, y, FIRE); // le cratère continue de brûler
     }
   }
 
@@ -616,15 +642,15 @@ export class Engine {
   private updateSalt(i: number, x: number, y: number): void {
     for (const [nx, ny] of this.neighbors(x, y)) {
       const n = this.get(nx, ny);
-      if (n === WATER) { this.set(nx, ny, SALTWATER); this.set(x, y, EMPTY); return; }
-      if (n === ICE && Math.random() < 0.25) { this.set(nx, ny, WATER); this.set(x, y, EMPTY); return; }
+      if (n === WATER) { this.become(nx, ny, SALTWATER); this.become(x, y, EMPTY); return; }
+      if (n === ICE && Math.random() < 0.25) { this.become(nx, ny, WATER); this.become(x, y, EMPTY); return; }
     }
     this.updatePowder(i, x, y, SALT);
   }
 
   private updateSeed(i: number, x: number, y: number): void {
     for (const [nx, ny] of this.neighbors(x, y)) {
-      if (this.get(nx, ny) === WATER) { this.set(x, y, PLANT); return; }
+      if (this.get(nx, ny) === WATER) { this.become(x, y, PLANT); return; }
     }
     this.updatePowder(i, x, y, SEED);
   }
@@ -635,7 +661,7 @@ export class Engine {
     for (const [nx, ny] of this.neighbors(x, y)) {
       const n = this.get(nx, ny);
       if (n === EMPTY || n === NANITE || n === GLASS || n === SOURCE) continue;
-      if (Math.random() < 0.2) { this.set(nx, ny, NANITE); break; }
+      if (Math.random() < 0.2) { this.become(nx, ny, NANITE); break; }
     }
     this.updatePowder(i, x, y, NANITE);
   }
@@ -645,7 +671,7 @@ export class Engine {
     if (Math.random() > 0.5) return;
     const id = this.life[i] || WATER;
     const dy = MATERIALS[id].kind === "gas" ? -this.gravity : this.gravity;
-    if (this.get(x, y + dy) === EMPTY) this.set(x, y + dy, id);
+    if (this.get(x, y + dy) === EMPTY) this.become(x, y + dy, id);
   }
 
   /** Bougie : `life` sert de mèche allumée. Une fois prise, elle réalimente sa flamme. */
@@ -656,7 +682,7 @@ export class Engine {
       else if (n === WATER || n === SALTWATER) this.life[i] = 0;
     }
     const up = y - this.gravity;
-    if (this.life[i] === 1 && this.get(x, up) === EMPTY) this.set(x, up, FIRE);
+    if (this.life[i] === 1 && this.get(x, up) === EMPTY) this.become(x, up, FIRE);
   }
 
   /** Braise : plus de flamme, mais ça chauffe (via `heat`) et ça peut rallumer. */

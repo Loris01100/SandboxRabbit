@@ -81,6 +81,14 @@ app.post("/api/worlds", async (c) => {
     return c.json({ error: "corps invalide" }, 400);
   }
   if (body.data.length > 200_000) return c.json({ error: "monde trop lourd" }, 413);
+  // Des dimensions fantaisistes passeraient jusqu'à la galerie, qui allouerait
+  // `width * height` octets pour en faire une vignette.
+  if (
+    !Number.isInteger(body.width) || !Number.isInteger(body.height) ||
+    body.width < 1 || body.height < 1 || body.width * body.height > 1_000_000
+  ) {
+    return c.json({ error: "dimensions invalides" }, 400);
+  }
   // Objectif facultatif : « au moins / moins de N cellules de la matière X ».
   // Validé ici, sinon la galerie afficherait n'importe quelle chaîne.
   if (body.goal != null && !/^(ge|lt):\d{1,3}:\d{1,6}$/.test(body.goal)) {

@@ -95,6 +95,10 @@ select(current);
 
 // Raccourcis : 1..9 puis 0 pour la gomme.
 addEventListener("keydown", (e) => {
+  // Un champ a le focus (le nombre d'un objectif, un curseur, la galerie) :
+  // ses touches lui appartiennent, sinon taper « 500 » change de matière.
+  const on = e.target as HTMLElement | null;
+  if (on && on !== document.body && on.closest("input, select, textarea")) return;
   if (e.key === " ") { toggleRun(); e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "Z" && e.shiftKey))) { redo(); e.preventDefault(); return; }
   if (e.key === "z" && (e.ctrlKey || e.metaKey)) { undo(); e.preventDefault(); return; }
@@ -475,6 +479,18 @@ sizeInput.addEventListener("input", () => {
   resize(w, (w * 9) / 16);
 });
 
+/**
+ * Impose une taille au bac **sans le regraîner** : ce dont ont besoin les
+ * scènes (écrites pour 320×180), un lien partagé et l'hôte d'un salon.
+ * Une largeur qui n'est pas au menu est refusée — le lien vient d'ailleurs.
+ */
+function fit(w: number): void {
+  if (w === WIDTH) return;
+  if (![...sizeInput.options].some((o) => o.value === String(w))) return;
+  resize(w, (w * 9) / 16, true);
+  sizeInput.value = String(w);
+}
+
 // Météo : quelques gouttes par tick sur la ligne d'où vient la matière (donc
 // en bas si la gravité est inversée). L'ambiante décide de leur nature — c'est
 // ce qui donne enfin à voir le curseur de température.
@@ -495,6 +511,16 @@ heatmapInput.addEventListener("change", () => (renderer.heatmap = heatmapInput.c
 // que de dupliquer les handlers ci-dessus.
 // ponytail: un blob JSON sans version — un réglage renommé repart au défaut.
 const SETTINGS = "sandbox-rabbit:reglages";
+
+/** JSON du stockage local, toléré : abîmé, on repart du défaut. */
+function stored<T>(key: string, fallback: T): T {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? "") as T;
+  } catch {
+    return fallback;
+  }
+}
+
 function remember(): void {
   localStorage.setItem(SETTINGS, JSON.stringify({
     current, brush: brushInput.value, speed: speedInput.value, wind: windInput.value,
@@ -504,7 +530,9 @@ function remember(): void {
 for (const el of [brushInput, speedInput, windInput, ambientInput, sizeInput]) el.addEventListener("input", remember);
 paletteEl.addEventListener("click", remember);
 
-const saved = JSON.parse(localStorage.getItem(SETTINGS) ?? "null");
+// Forme libre : le blob n'est pas versionné, chaque champ est retesté ci-dessous.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const saved = stored<any>(SETTINGS, null);
 if (saved) {
   if (MATERIALS[saved.current as MaterialId]) select(saved.current as MaterialId);
   for (const [el, value] of [[brushInput, saved.brush], [speedInput, saved.speed], [windInput, saved.wind], [ambientInput, saved.ambient], [sizeInput, saved.size]] as const) {
@@ -544,7 +572,7 @@ document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", ()
 // Surprise : un décor tiré au sort, sans objectif — juste pour regarder.
 document.querySelector<HTMLButtonElement>("#surprise")!.addEventListener("click", () => {
   const scene = SCENES[Math.floor(Math.random() * SCENES.length)];
-  if (WIDTH !== 320) { resize(320, 180, true); sizeInput.value = "320"; }
+  fit(320);
   snapshot();
   engine.clear();
   scene.build(engine);
@@ -557,17 +585,25 @@ document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", (
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 
-/** Charge une grille encodée (API ou lien partagé). */
+/**
+ * Charge une grille encodée (API ou lien partagé). La donnée vient d'ailleurs :
+ * un base64 tronqué fait jeter `atob`, et `adopt` écarte les matières inconnues.
+ */
 function load(data: string): void {
   snapshot();
   const n = WIDTH * HEIGHT;
-  engine.cells.set(decode(data, n));
-  engine.frozen.set(decodeFrozen(data, n));
-  // Un monde d'avant les quatre blocs : on repart au repos, comme autrefois.
-  const life = decodeLife(data, n);
-  const temp = decodeTemp(data, n);
-  if (life) engine.life.set(life); else engine.life.fill(0);
-  if (temp) engine.temp.set(temp); else engine.temp.fill(engine.ambient);
+  try {
+    engine.adopt(decode(data, n));
+    engine.frozen.set(decodeFrozen(data, n));
+    // Un monde d'avant les quatre blocs : on repart au repos, comme autrefois.
+    const life = decodeLife(data, n);
+    const temp = decodeTemp(data, n);
+    if (life) engine.life.set(life); else engine.life.fill(0);
+    if (temp) engine.temp.set(temp); else engine.temp.fill(engine.ambient);
+  } catch {
+    undo();
+    statusEl.textContent = "Grille illisible.";
+  }
 }
 
 /* ------------------------------------------------------------- bac partagé */
@@ -579,9 +615,8 @@ initRoom({
     running = host;
     playButton.textContent = running ? "Pause" : "Reprendre";
   },
-  size(w, h) {
-    resize(w, h, true);
-    sizeInput.value = String(w);
+  size(w) {
+    fit(w);
   },
 });
 
@@ -595,7 +630,7 @@ let startedAt = 0;
 
 // Meilleur temps par défi, en secondes. ponytail: local à la machine, pas de classement.
 const RECORDS = "sandbox-rabbit:records";
-const records: Record<string, number> = JSON.parse(localStorage.getItem(RECORDS) ?? "{}");
+const records = stored<Record<string, number>>(RECORDS, {});
 const best = (name: string): string => (records[name] === undefined ? "" : ` (record : ${records[name]} s)`);
 
 /** Lance le chrono et affiche le but. Commun aux défis livrés et aux mondes-défis. */
@@ -611,7 +646,7 @@ for (const c of CHALLENGES) {
   button.textContent = c.name;
   button.addEventListener("click", () => {
     // Les scènes sont écrites en dur pour 320×180 : on y revient si besoin.
-    if (WIDTH !== 320) { resize(320, 180, true); sizeInput.value = "320"; }
+    fit(320);
     snapshot();
     engine.clear();
     c.build(engine);
@@ -632,9 +667,20 @@ initShare({ load, start: startChallenge });
 // ponytail: la grille seule — température et vies repartent au repos.
 const BAC = "sandbox-rabbit:bac";
 const kept = localStorage.getItem(BAC);
-if (location.hash.length > 1) load(decodeURIComponent(location.hash.slice(1)));
+if (location.hash.length > 1) loadHash(decodeURIComponent(location.hash.slice(1)));
 else if (kept) load(kept);
 else seed();
+
+/**
+ * Un lien partagé : « 320~<grille> ». La largeur précède la grille, sinon un
+ * monde 480 relu dans un bac 320 se décale d'une ligne à chaque rangée.
+ * Sans elle (liens d'avant), on suppose le bac tel qu'il est.
+ */
+function loadHash(hash: string): void {
+  const cut = hash.indexOf("~");
+  if (cut > 0) fit(Number(hash.slice(0, cut)));
+  load(hash.slice(cut + 1));
+}
 undoStack.length = 0; // rien à annuler avant le premier geste
 
 // `visibilitychange` plutôt que `beforeunload` : c'est le seul que les mobiles

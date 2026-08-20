@@ -53,8 +53,9 @@ Un seul Worker Cloudflare sert le site statique **et** l'API (binding `ASSETS`, 
 - `SPARK` ne se propage que dans `METAL`, et le métal traversé garde `RECOVERY` ticks de repos : sans ça l'étincelle repart en arrière et le circuit ne s'éteint jamais. Tout ce qui met un fil sous tension passe par `charge()` (étincelle, `BATTERY`, `SWITCH` fermé).
 - `SWITCH` ne devient **jamais** une étincelle : il la relaie à ses voisins (`life` = 1 quand il est fermé). S'il se changeait en `SPARK`, il redeviendrait du `METAL` à l'extinction et l'interrupteur disparaîtrait de la grille.
 - Le balayage de `step()` part du bas et alterne le sens en x selon `parity` ; `clock` empêche une cellule de bouger deux fois dans le même tick. Toucher à cet ordre introduit des dérives visibles de la matière.
-- `frozen` (1 par cellule) court-circuite tout : `step()` saute la cellule et `tryMove()` refuse de s'y déplacer. `set()` la remet à 0, donc repeindre libère.
+- `frozen` (1 par cellule) court-circuite tout : `step()` saute la cellule, `tryMove()` refuse de s'y déplacer, et `become()` — la transformation décidée par une règle (le feu prend, l'acide ronge) — passe son tour dessus. Une règle qui repeint un voisin passe par `become`, jamais par `set` : `set()` remet `frozen` à 0, c'est le geste du pinceau (repeindre libère).
 - Hors grille, `get()` renvoie `STONE` (mur implicite) — les règles n'ont pas besoin de tester les bords.
+- Une grille qui vient d'ailleurs (galerie, lien `#320~…`, salon) entre par `engine.adopt()`, qui écarte les ids absents de `MATERIALS` : sinon `MATERIALS[id].heat` jette à chaque tick et le bac s'arrête définitivement. Même filtre sur les gestes relayés (`known()` dans gestures.ts).
 - `MATERIALS` est indexé par id numérique. `CATEGORIES` fixe les familles repliables de la barre d'outils et `PALETTE` en découle (`flatMap`) ; les raccourcis clavier 1..9 / 0 vivent à part dans `SHORTCUTS`, pour que réordonner une famille ne les déplace pas.
 
 ### Ajouter un défi

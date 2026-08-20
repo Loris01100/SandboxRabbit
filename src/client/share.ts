@@ -178,9 +178,12 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
   statusEl.textContent = res.ok ? "Sauvegardé — visible dans la galerie." : "Échec de la sauvegarde.";
 });
 
-// Partage : le monde entier tient dans l'URL (RLE + base64, ~1 ko).
+// Partage : le monde entier tient dans l'URL (RLE + base64, ~1 ko). La largeur
+// de la grille passe devant (« 320~… ») : sans elle, un bac 480 relu dans un
+// bac 320 se décale d'une ligne à chaque rangée. Le `~` n'est pas échappé par
+// `encodeURIComponent`, et le codec n'en produit jamais.
 document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", async () => {
-  location.hash = encodeURIComponent(snapshotData());
+  location.hash = encodeURIComponent(`${WIDTH}~${snapshotData()}`);
   try {
     await navigator.clipboard.writeText(location.href);
     statusEl.textContent = "Lien copié.";
@@ -196,7 +199,8 @@ function download(blob: Blob, extension: string): void {
   a.href = URL.createObjectURL(blob);
   a.download = `bac-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${extension}`;
   a.click();
-  URL.revokeObjectURL(a.href);
+  // Révoquée trop tôt, l'URL annule le téléchargement chez Firefox.
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
 }
 
 /** Le bac agrandi ×4 sans lissage : un rendu à la taille de la grille est illisible. */

@@ -7,7 +7,7 @@
  */
 import { engine } from "./world.ts";
 import { decode, decodeFrozen } from "./sim/codec";
-import { type MaterialId } from "./sim/materials.ts";
+import { EMPTY, MATERIALS, type MaterialId } from "./sim/materials.ts";
 
 export type Gesture =
   | { t: "paint"; x: number; y: number; r: number; id: MaterialId; d: number; over: boolean; only?: MaterialId }
@@ -16,15 +16,20 @@ export type Gesture =
   | { t: "toggle"; x: number; y: number }
   | { t: "clip"; x: number; y: number; w: number; h: number; cells: string; life: string };
 
+/** Un id de matière inventé ferait jeter `MATERIALS[id].life` chez l'hôte. */
+const known = (id: MaterialId): MaterialId => (MATERIALS[id] ? id : EMPTY);
+
 export function applyGesture(g: Gesture): void {
   switch (g.t) {
-    case "paint": engine.paint(g.x, g.y, g.r, g.id, g.d, g.over, g.only); return;
-    case "fill": engine.fill(g.x, g.y, g.id); return;
+    case "paint": engine.paint(g.x, g.y, g.r, known(g.id), g.d, g.over, g.only); return;
+    case "fill": engine.fill(g.x, g.y, known(g.id)); return;
     case "frozen": engine.setFrozen(g.x, g.y, g.r, g.on); return;
     // Un seul message pour les deux bascules : la cellule dit laquelle c'est.
     case "toggle": engine.toggleSwitch(g.x, g.y); engine.toggleMagnet(g.x, g.y); return;
     case "clip": {
       const n = g.w * g.h;
+      // Un morceau plus grand que le bac ne vient pas d'un pair honnête.
+      if (!(n > 0) || n > engine.cells.length) return;
       engine.paste({ width: g.w, height: g.h, cells: decode(g.cells, n), frozen: decodeFrozen(g.cells, n), life: decode(g.life, n) }, g.x, g.y);
       return;
     }
