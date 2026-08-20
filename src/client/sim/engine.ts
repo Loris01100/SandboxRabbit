@@ -322,7 +322,9 @@ export class Engine {
    * le bac s'arrête pour de bon.
    */
   adopt(cells: Uint8Array): void {
-    for (let i = 0; i < this.cells.length; i++) {
+    // `cells` peut être plus court que la grille (flux RLE tronqué) : on ne
+    // pose que ce qui est décrit, le reste du bac garde sa matière d'avant.
+    for (let i = 0; i < cells.length; i++) {
       this.cells[i] = MATERIALS[cells[i]] ? cells[i] : EMPTY;
     }
   }

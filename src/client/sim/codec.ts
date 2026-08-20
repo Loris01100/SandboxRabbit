@@ -67,8 +67,8 @@ export function decodeTemp(data: string, size: number): Float32Array | null {
   const block = data.split(".")[3];
   if (!block) return null;
   const raw = unrle(block, size);
-  const temp = new Float32Array(size);
-  for (let i = 0; i < size; i++) temp[i] = raw[i] * STEP + FLOOR;
+  const temp = new Float32Array(raw.length);
+  for (let i = 0; i < raw.length; i++) temp[i] = raw[i] * STEP + FLOOR;
   return temp;
 }
 
@@ -93,6 +93,12 @@ function rle(cells: Uint8Array): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
+/**
+ * Un flux tronqué (monde corrompu, lien coupé) ne décrit qu'un préfixe de la
+ * grille : on renvoie ce préfixe tel quel plutôt qu'un tableau de la taille
+ * demandée complété de vide, pour que l'appelant (`adopt`, `.set()`) ne pose
+ * que ce qui est décrit et laisse le reste de la grille en place.
+ */
 function unrle(data: string, size: number): Uint8Array {
   const binary = atob(data.replaceAll("-", "+").replaceAll("_", "/"));
   const cells = new Uint8Array(size);
@@ -107,7 +113,7 @@ function unrle(data: string, size: number): Uint8Array {
     }
     cells.fill(id, at, Math.min(at + run, size));
     at += run;
-    if (at >= size) break;
+    if (at >= size) { at = size; break; }
   }
-  return cells;
+  return at >= size ? cells : cells.slice(0, at);
 }
