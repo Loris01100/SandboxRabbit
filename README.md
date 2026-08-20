@@ -70,14 +70,14 @@ mondes partagés.
 | Accessibilité | Les flèches parcourent les grilles de matières (sinon quarante-six tabulations), la barre de statut et le but des défis sont des `role="status"` — les changements sont annoncés au lecteur d'écran. |
 | En-têtes | Le Worker pose une CSP stricte (aucun script ni style en ligne — la pastille de couleur d'une matière est montée en CSSOM exprès), `nosniff` et `referrer-policy` sur toute réponse, et un `cache-control` d'un an sur les fichiers hashés contre `no-cache` sur le HTML. Vérifié dans test/api.ts avec un faux binding ASSETS. |
 | Réglages retenus | Matière, pinceau, vitesse, vent et ambiante sont relus dans `localStorage` au chargement suivant. |
-| Bac repris | La scène est écrite dans `localStorage` quand l'onglet passe en arrière-plan (`visibilitychange`, le seul événement fiable sur mobile) et rechargée au retour. Un lien partagé passe devant, la cuvette de départ n'arrive qu'à défaut. Seule la grille est gardée : températures et vies repartent au repos. |
+| Bac repris | La scène est écrite dans `localStorage` quand l'onglet passe en arrière-plan (`visibilitychange`, le seul événement fiable sur mobile) et rechargée au retour. Un lien partagé passe devant, la cuvette de départ n'arrive qu'à défaut. L'état vivant part avec la grille : un incendie laissé en plan repart chaud. |
 | Plein écran | Bouton « Plein écran » : `requestFullscreen()` sur le canvas, le CSS `pixelated` fait la mise à l'échelle et le rendu ne change pas d'une ligne. |
 | Image PNG | Le bac est réexporté ×4 sans lissage (`imageSmoothingEnabled = false`) et téléchargé : un PNG net, pas une capture d'écran floue. |
 | Ligne & remplissage | `Maj` + clic trace une ligne droite depuis le dernier point posé, clic droit remplit toute la poche de matière identique sous le curseur. |
 | Défis | Sept scènes prêtes à jouer (Débâcle, Mèche lente, Court-circuit, Puits, Désamorçage, Coup de grisou, Jardin) avec leur objectif et sa détection de victoire, construites en code dans `challenges.ts`. |
 | Familles | La barre d'outils est découpée en `<details>` repliables (`CATEGORIES` dans `materials.ts`) : une famille ouverte à la fois suffit à tenir dans le panneau. Les raccourcis 1..9 / 0 restent sur les dix classiques, indépendamment de l'ordre d'affichage. |
 | Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours), case « Gomme sélective » : la gomme ne retire que la dernière matière choisie. Clic maintenu = dépôt continu, même sans bouger la souris. |
-| Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. Ouvrir le lien recharge la scène. |
+| Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. La largeur de la grille passe devant (`#320~…`) : le bac du visiteur s'y met, sinon un monde 480 relu dans un bac 320 se décale d'une ligne à chaque rangée. |
 | Galerie | « Sauvegarder » envoie le monde au Worker, « Galerie » ouvre une modale (`<dialog>` natif) qui liste tous les mondes sauvegardés avec leur vignette : la grille décodée est redessinée dans un canvas hors écran, mêmes couleurs que le bac. Un clic charge la scène, la croix au survol d'une vignette supprime le monde. Une seule requête : la liste renvoie les grilles, ~1 ko chacune. |
 
 ## Stack
@@ -86,7 +86,7 @@ mondes partagés.
 | --- | --- | --- |
 | Front | TypeScript + Vite, canvas 2D | 1 cellule = 1 pixel dans un `ImageData`, un seul `putImageData` par frame. ~0,2 ms par tick sur une grille 320×180. |
 | Serveur | Worker Cloudflare + [Hono](https://hono.dev) | Un seul déploiement sert le site statique **et** l'API (`env.ASSETS`). |
-| Stockage | Map en mémoire, D1 prêt derrière la même interface | Voir `src/worker/store.ts`. |
+| Stockage | D1 en déployé, Map en mémoire en local, même interface | Voir `src/worker/store.ts`. |
 
 ### Pages ou Workers ?
 

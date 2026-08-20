@@ -5,6 +5,36 @@
  */
 import { MATERIALS, type MaterialId } from "./sim/materials.ts";
 
+/**
+ * Stockage local toléré. `localStorage` **jette** quand le site n'a pas droit
+ * aux cookies (réglage strict, page embarquée) : au premier `getItem` du
+ * chargement, c'est toute la page qui reste blanche. Ici on perd le réglage,
+ * rien d'autre. L'écriture jette aussi quand le quota est plein.
+ */
+export function read(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function write(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* pas de place, ou pas le droit : tant pis pour la mémoire */
+  }
+}
+
+export function forget(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* idem */
+  }
+}
+
 export interface Goal {
   op: "ge" | "lt";
   id: MaterialId;

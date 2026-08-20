@@ -3,7 +3,7 @@ import { type Clip } from "./sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./sim/codec";
 import { CATEGORIES, EMPTY, MAGNET, MATERIALS, SAND, SHORTCUTS, SNOW, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
-import { panAfterZoom, pushRecent } from "./ui.ts";
+import { panAfterZoom, pushRecent, read, write } from "./ui.ts";
 import { captureFrame, initShare, snapshotData } from "./share.ts";
 import { initRoom, relay } from "./room.ts";
 import { HEIGHT, WIDTH, canvas, engine, onResize, renderer, resize, seed } from "./world.ts";
@@ -292,20 +292,21 @@ canvas.addEventListener("pointerdown", (e) => {
   const p = toCell(e);
   // Pipette : Alt+clic reprend la matière sous le curseur, sans rien modifier.
   if (e.altKey) { select(engine.get(p.x, p.y) as MaterialId); return; }
-  snapshot();
-  if (e.button === 2) { gesture({ t: "fill", x: p.x, y: p.y, id: current }); return; }
-  // Cliquer un interrupteur (ou un aimant) déjà posé le bascule au lieu d'en reposer un.
-  const at = engine.get(p.x, p.y);
-  if ((current === SWITCH && at === SWITCH) || (current === MAGNET && at === MAGNET)) {
-    gesture({ t: "toggle", x: p.x, y: p.y });
-    return;
-  }
+  if (e.button === 2) { snapshot(); gesture({ t: "fill", x: p.x, y: p.y, id: current }); return; }
   canvas.setPointerCapture(e.pointerId);
-  // Outil « Copier » : le glissé trace un rectangle, il ne peint rien.
+  // Outil « Copier » : le glissé trace un rectangle, il ne peint rien — donc
+  // pas de cran d'annulation, sinon dix rectangles effacent tout l'historique.
   if (toolInput.value === "copy") {
     selection = p;
     showMarquee(p, p);
     last = p;
+    return;
+  }
+  snapshot();
+  // Cliquer un interrupteur (ou un aimant) déjà posé le bascule au lieu d'en reposer un.
+  const at = engine.get(p.x, p.y);
+  if ((current === SWITCH && at === SWITCH) || (current === MAGNET && at === MAGNET)) {
+    gesture({ t: "toggle", x: p.x, y: p.y });
     return;
   }
   painting = true;
@@ -515,14 +516,14 @@ const SETTINGS = "sandbox-rabbit:reglages";
 /** JSON du stockage local, toléré : abîmé, on repart du défaut. */
 function stored<T>(key: string, fallback: T): T {
   try {
-    return JSON.parse(localStorage.getItem(key) ?? "") as T;
+    return JSON.parse(read(key) ?? "") as T;
   } catch {
     return fallback;
   }
 }
 
 function remember(): void {
-  localStorage.setItem(SETTINGS, JSON.stringify({
+  write(SETTINGS, JSON.stringify({
     current, brush: brushInput.value, speed: speedInput.value, wind: windInput.value,
     ambient: ambientInput.value, size: sizeInput.value,
   }));
@@ -563,10 +564,13 @@ document.querySelector<HTMLButtonElement>("#step")!.addEventListener("click", ()
 });
 
 // Plein écran natif : le CSS `pixelated` fait la mise à l'échelle, le rendu ne
-// change pas d'un pixel et `getBoundingClientRect()` suit le pinceau.
+// change pas d'un pixel et `getBoundingClientRect()` suit le pinceau. C'est la
+// scène qu'on agrandit, pas le canvas seul : le cercle du pinceau et le
+// rectangle de sélection sont ses enfants, hors de l'élément plein écran le
+// navigateur ne les peint pas.
 document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", () => {
   if (document.fullscreenElement) void document.exitFullscreen();
-  else void canvas.requestFullscreen();
+  else void canvas.parentElement!.requestFullscreen();
 });
 
 // Surprise : un décor tiré au sort, sans objectif — juste pour regarder.
@@ -679,10 +683,11 @@ initShare({ load, start: startChallenge });
 
 // Le bac est repris tel quel d'une visite à l'autre : le lien partagé passe
 // devant, puis la dernière scène, et seulement à défaut la cuvette de départ.
-// ponytail: la grille seule — température et vies repartent au repos.
+// L'état vivant voyage avec (`snapshotData`) : un incendie laissé en plan
+// repart chaud.
 const BAC = "sandbox-rabbit:bac";
-const kept = localStorage.getItem(BAC);
-if (location.hash.length > 1) loadHash(decodeURIComponent(location.hash.slice(1)));
+const kept = read(BAC);
+if (location.hash.length > 1) loadHash(location.hash.slice(1));
 else if (kept) load(kept);
 else seed();
 
@@ -691,17 +696,23 @@ else seed();
  * monde 480 relu dans un bac 320 se décale d'une ligne à chaque rangée.
  * Sans elle (liens d'avant), on suppose le bac tel qu'il est.
  */
-function loadHash(hash: string): void {
+function loadHash(raw: string): void {
+  let hash: string;
+  try {
+    hash = decodeURIComponent(raw);
+  } catch {
+    return; // « %zz » dans l'adresse : ce n'est pas un lien de partage
+  }
   const cut = hash.indexOf("~");
-  if (cut > 0) fit(Number(hash.slice(0, cut)));
-  load(hash.slice(cut + 1));
+  if (cut > 0) load(hash.slice(cut + 1), Number(hash.slice(0, cut)));
+  else load(hash);
 }
 undoStack.length = 0; // rien à annuler avant le premier geste
 
 // `visibilitychange` plutôt que `beforeunload` : c'est le seul que les mobiles
 // déclenchent vraiment quand l'onglet part en arrière-plan.
 addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") localStorage.setItem(BAC, snapshotData());
+  if (document.visibilityState === "hidden") write(BAC, snapshotData());
 });
 
 /* ------------------------------------------------------------ boucle rendu */
@@ -740,7 +751,7 @@ function frame(now: number): void {
       const record = records[challenge.name] === undefined || secs < records[challenge.name];
       if (record) {
         records[challenge.name] = secs;
-        localStorage.setItem(RECORDS, JSON.stringify(records));
+        write(RECORDS, JSON.stringify(records));
       }
       goalEl.textContent = `${challenge.name} — réussi en ${secs} s${record ? " — nouveau record !" : best(challenge.name)}`;
       challenge = null;
