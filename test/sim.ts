@@ -724,10 +724,11 @@ function top(e: Engine, id: MaterialId): number {
   e.set(10, 10, WOOD);
   e.set(30, 10, WOOD);
   e.setFrozen(10, 10, 0, true);
-  for (let t = 0; t < 200; t++) {
-    // Le feu ne vit que 60 ticks : on le réalimente, sinon il s'éteint avant
-    // d'avoir eu ses 2 % de chance de prendre.
-    if (t % 20 === 0) { cercle(10, 10); cercle(30, 10); }
+  for (let t = 0; t < 300; t++) {
+    // Le bois n'a que 2 % de chance de prendre par tick et par flamme : on
+    // rallume à chaque tour, sinon le témoin survit une fois sur dix.
+    cercle(10, 10);
+    cercle(30, 10);
     e.step();
   }
   assert.equal(e.get(10, 10), WOOD, "le bois figé ne brûle pas");

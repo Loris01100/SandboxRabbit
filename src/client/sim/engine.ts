@@ -28,6 +28,30 @@ const NUKE = 16;
 const PULL = 5;
 
 /**
+ * `thermal()` lit trois propriétés par cellule et par tick : autant les sortir
+ * de `MATERIALS` une fois pour toutes. Un accès de tableau typé au lieu d'une
+ * propriété d'objet, sur 57 600 cellules × 60 fois par seconde.
+ * Les tables **dérivent** du registre : ajouter une matière ne change rien ici.
+ */
+/** `kind`, en numérique : 0 vide, 1 statique, 2 poudre, 3 liquide, 4 gaz. */
+const KINDS = { empty: 0, static: 1, powder: 2, liquid: 3, gas: 4 } as const;
+const KIND = new Uint8Array(256);
+const DENSITY = new Float32Array(256);
+const HEAT = new Float32Array(256).fill(NaN); // NaN = ne chauffe pas
+const BOIL_AT = new Float32Array(256).fill(Infinity);
+const BOIL_INTO = new Uint8Array(256);
+const FREEZE_AT = new Float32Array(256).fill(-Infinity);
+const FREEZE_INTO = new Uint8Array(256);
+for (const key of Object.keys(MATERIALS)) {
+  const m = MATERIALS[Number(key)];
+  KIND[m.id] = KINDS[m.kind];
+  DENSITY[m.id] = m.density;
+  if (m.heat !== undefined) HEAT[m.id] = m.heat;
+  if (m.boil) { BOIL_AT[m.id] = m.boil.at; BOIL_INTO[m.id] = m.boil.into; }
+  if (m.freeze) { FREEZE_AT[m.id] = m.freeze.at; FREEZE_INTO[m.id] = m.freeze.into; }
+}
+
+/**
  * Offsets d'un disque de rayon `radius`, du bord vers le centre — l'ordre dans
  * lequel le souffle doit traiter ses cellules. Mis en cache : les explosions
  * n'utilisent qu'une poignée de rayons.
@@ -78,8 +102,9 @@ export class Engine {
   readonly height: number;
   readonly cells: Uint8Array;
   readonly life: Uint8Array;
-  readonly temp: Float32Array;
-  private readonly tempNext: Float32Array;
+  /** Réassigné à chaque tick : les deux tampons de diffusion s'échangent. */
+  temp: Float32Array;
+  private tempNext: Float32Array;
   private readonly clock: Uint8Array;
   /** 1 = cellule figée : elle ne bouge plus et rien ne peut la pousser. */
   readonly frozen: Uint8Array;
@@ -265,12 +290,16 @@ export class Engine {
     }
   }
 
-  /** Une cellule pleine peut-elle prendre la place d'une autre ? */
+  /**
+   * Une cellule pleine peut-elle prendre la place d'une autre ? Appelée à
+   * chaque tentative de déplacement, soit plusieurs fois par cellule et par
+   * tick : elle lit les tables plutôt que le registre.
+   */
   private displaces(moverId: MaterialId, targetId: MaterialId): boolean {
     if (targetId === EMPTY) return true;
-    const target = MATERIALS[targetId];
-    if (target.kind === "static" || target.kind === "powder") return false;
-    return MATERIALS[moverId].density > target.density;
+    const kind = KIND[targetId];
+    if (kind === KINDS.static || kind === KINDS.powder) return false;
+    return DENSITY[moverId] > DENSITY[targetId];
   }
 
   private swap(a: number, b: number): void {
@@ -343,11 +372,11 @@ export class Engine {
       // Le métal ne fait que sortir de sa période de repos.
       case METAL: if (this.life[i] > 0) this.life[i]--; return;
     }
-    switch (MATERIALS[id].kind) {
-      case "powder": this.updatePowder(i, x, y, id); return;
-      case "liquid": this.updateLiquid(i, x, y, id); return;
-      case "gas": this.updateGas(i, x, y, id); return;
-      default: return; // static
+    switch (KIND[id]) {
+      case KINDS.powder: this.updatePowder(i, x, y, id); return;
+      case KINDS.liquid: this.updateLiquid(i, x, y, id); return;
+      case KINDS.gas: this.updateGas(i, x, y, id); return;
+      default: return; // statique
     }
   }
 
@@ -751,15 +780,20 @@ export class Engine {
    * Une seule loi remplace autant de cas particuliers : l'eau bout ou gèle, la
    * glace fond, le sable vitrifie, l'huile s'auto-enflamme.
    */
-  // ponytail: trois balayages pleins par tick (~1,3 ms en 320×180) ; si ça
-  // devient le budget limitant, fusionner les passes ou n'en faire qu'une sur deux.
+  /**
+   * Diffusion, puis changements d'état — en deux balayages au lieu de quatre :
+   * les sources de chaleur doivent toutes être posées avant que la diffusion ne
+   * lise les voisines, mais le seuil d'ébullition, lui, se teste sur la
+   * température qu'on vient de calculer. Et les deux tampons s'échangent plutôt
+   * que de se recopier (230 ko par tick en 320×180, pour rien).
+   */
   private thermal(): void {
-    const { width: w, height: h, cells, temp, tempNext } = this;
+    const { width: w, height: h, cells, temp, tempNext, ambient } = this;
     for (let i = 0; i < cells.length; i++) {
-      const heat = MATERIALS[cells[i]].heat;
+      const heat = HEAT[cells[i]];
       // Une source tire vers sa température sans l'imposer : une flamme peut
-      // encore faire fondre la glace qu'elle touche.
-      if (heat !== undefined) temp[i] += (heat - temp[i]) * 0.5;
+      // encore faire fondre la glace qu'elle touche. (NaN = ne chauffe pas.)
+      if (heat === heat) temp[i] += (heat - temp[i]) * 0.5;
     }
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -768,15 +802,15 @@ export class Engine {
         const sum =
           (y > 0 ? temp[i - w] : t) + (y < h - 1 ? temp[i + w] : t) +
           (x > 0 ? temp[i - 1] : t) + (x < w - 1 ? temp[i + 1] : t);
-        tempNext[i] = t + CONDUCTION * (sum - 4 * t) + COOLING * (this.ambient - t);
+        const next = t + CONDUCTION * (sum - 4 * t) + COOLING * (ambient - t);
+        tempNext[i] = next;
+        const id = cells[i];
+        if (next > BOIL_AT[id]) this.convert(i, BOIL_INTO[id]);
+        else if (next < FREEZE_AT[id]) this.convert(i, FREEZE_INTO[id]);
       }
     }
-    temp.set(tempNext);
-    for (let i = 0; i < cells.length; i++) {
-      const m = MATERIALS[cells[i]];
-      if (m.boil && temp[i] > m.boil.at) this.convert(i, m.boil.into);
-      else if (m.freeze && temp[i] < m.freeze.at) this.convert(i, m.freeze.into);
-    }
+    this.temp = tempNext;
+    this.tempNext = temp;
   }
 
   /** Retourne le pôle de l'aimant sous le curseur : attirer ↔ repousser. */

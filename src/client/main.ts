@@ -586,10 +586,23 @@ document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", (
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 
 /**
- * Charge une grille encodée (API ou lien partagé). La donnée vient d'ailleurs :
- * un base64 tronqué fait jeter `atob`, et `adopt` écarte les matières inconnues.
+ * Charge une grille encodée (API ou lien partagé). `width` — celle du monde —
+ * met le bac à la bonne taille au passage : sans elle, une grille 480 relue
+ * dans un bac 320 se décale d'une ligne à chaque rangée.
+ *
+ * La donnée vient d'ailleurs : un base64 tronqué fait jeter `atob`, et `adopt`
+ * écarte les matières inconnues.
  */
-function load(data: string): void {
+function load(data: string, width?: number): boolean {
+  if (width !== undefined) {
+    fit(width);
+    // `fit` refuse une largeur absente du menu : mieux vaut ne rien charger
+    // qu'afficher une bouillie.
+    if (width !== WIDTH) {
+      statusEl.textContent = "Monde fait pour une autre taille de grille.";
+      return false;
+    }
+  }
   snapshot();
   const n = WIDTH * HEIGHT;
   try {
@@ -603,7 +616,9 @@ function load(data: string): void {
   } catch {
     undo();
     statusEl.textContent = "Grille illisible.";
+    return false;
   }
+  return true;
 }
 
 /* ------------------------------------------------------------- bac partagé */

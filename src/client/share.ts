@@ -14,8 +14,12 @@ import { count, type Challenge } from "./challenges.ts";
 import { goalText, parseGoal } from "./ui.ts";
 
 export interface Deps {
-  /** Pose une grille encodée dans le bac (passe par la pile d'annulation). */
-  load(data: string): void;
+  /**
+   * Pose une grille encodée dans le bac, à sa taille (pile d'annulation
+   * comprise). Renvoie false si elle n'a pas pu l'être — grille illisible ou
+   * taille refusée : la galerie a déjà dit pourquoi, elle n'écrase pas.
+   */
+  load(data: string, width?: number): boolean;
   /** Démarre un défi : chrono et affichage du but. */
   start(challenge: Challenge): void;
 }
@@ -67,7 +71,9 @@ async function openGallery(): Promise<void> {
   galleryEl.showModal();
   galleryGrid.replaceChildren(note("Chargement…"));
   try {
-    worlds = await (await fetch("/api/worlds")).json();
+    const list = await (await fetch("/api/worlds")).json();
+    if (!Array.isArray(list)) throw new Error("liste inattendue");
+    worlds = list;
   } catch {
     galleryGrid.replaceChildren(note("API injoignable."));
     return;
@@ -113,20 +119,19 @@ function card(w: World): HTMLDivElement {
   button.append(name, date);
 
   // La grille sert deux fois : à dessiner la vignette, puis à charger le monde.
-  const usable = w.width === WIDTH && w.height === HEIGHT;
   try {
     button.prepend(thumbnail(decode(w.data, w.width * w.height), w.width, w.height));
-    if (!usable) button.title = "Taille de grille incompatible";
   } catch {
     button.title = "Monde illisible";
   }
   button.addEventListener("click", async () => {
-    if (!usable) return;
     // On charge par l'API plutôt que par la copie déjà en main : c'est ce
     // passage qui compte la vue. Injoignable, on se rabat sur la copie.
     const fresh = await fetch(`/api/worlds/${w.id}`).then((r) => r.json() as Promise<World>).catch(() => w);
-    deps.load(fresh.data ?? w.data);
+    // Le monde emmène sa taille : le bac s'y met, plus de carte morte.
+    const done = deps.load(fresh.data ?? w.data, w.width);
     galleryEl.close();
+    if (!done) return;
     statusEl.textContent = `« ${w.name} » chargé.`;
     // Un monde porteur d'un objectif se joue comme un défi : la scène est déjà
     // en place, il ne reste que la condition à surveiller.
