@@ -1,0 +1,17 @@
+# Sans ça, le `npm audit` de la CI ne fait que constater : il faut quelqu'un
+# pour remonter les versions. Une seule dépendance livrée au navigateur (hono),
+# donc une passe mensuelle suffit et ne noie personne.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      # Une PR pour tout l'outillage : vite, wrangler et tsc bougent ensemble.
+      outillage:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

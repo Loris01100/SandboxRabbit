@@ -10,6 +10,7 @@ Le README, les commentaires du code et l'UI sont en français. Écrire les nouve
 
 ```bash
 npm run bench      # chronomètre le moteur (300 ticks) sur les trois tailles de grille
+npm run loc        # taille du projet par poste (git ls-files : rien d'installé ni de généré)
 npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR
 npm run typecheck  # DEUX projets tsc : tsconfig.json (client/DOM) + tsconfig.worker.json (Worker)
 npm run build      # typecheck puis vite build
