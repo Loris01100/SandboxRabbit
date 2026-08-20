@@ -216,6 +216,20 @@ function count(e: Engine, id: MaterialId): number {
   assert.equal(count(e, STONE), 0, "la gomme efface malgré tout");
 }
 
+// Un rayon délirant coûte la grille, pas le rayon : sans ça un pair de salon
+// figeait l'onglet de l'hôte (`applyGesture` relaie le rayon tel quel).
+{
+  const e = engine();
+  const debut = Date.now();
+  e.paint(30, 20, 1e9, SAND);
+  e.setFrozen(30, 20, 1e9, true);
+  assert.ok(Date.now() - debut < 500, "un rayon d'un milliard ne fait pas boucler le moteur");
+  assert.equal(count(e, SAND), W * H, "et il peint quand même toute la grille");
+  e.paint(30, 20, NaN, WATER);
+  e.paint(30, 20, -5, WATER);
+  assert.equal(count(e, SAND), W * H, "un rayon NaN ou négatif ne peint rien");
+}
+
 // Le mercure passe sous l'eau : c'est le plus dense.
 {
   const e = engine();

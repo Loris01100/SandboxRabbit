@@ -204,6 +204,22 @@ export class Engine {
   }
 
   /**
+   * Le carré englobant d'un disque, ramené dans la grille : les boucles en
+   * disque n'ont alors plus à tester les bords, et surtout leur coût est celui
+   * de la grille, jamais celui du rayon demandé. Un rayon monstrueux venu d'un
+   * pair de salon (`applyGesture`) figeait sinon l'onglet de l'hôte sur une
+   * boucle en (2r+1)².
+   */
+  private disc(cx: number, cy: number, radius: number): [number, number, number, number] {
+    // Un rayon négatif ou NaN laisse les bornes croisées : la boucle ne tourne pas, comme avant.
+    const r = Math.min(radius, this.width + this.height);
+    return [
+      Math.max(0, Math.ceil(cx - r)), Math.min(this.width - 1, Math.floor(cx + r)),
+      Math.max(0, Math.ceil(cy - r)), Math.min(this.height - 1, Math.floor(cy + r)),
+    ];
+  }
+
+  /**
    * Dépose un disque de matière (pinceau).
    * `overwrite = false` : on ne peint que le vide, la matière déjà là est
    * préservée. La gomme, elle, efface toujours.
@@ -211,11 +227,11 @@ export class Engine {
    */
   paint(cx: number, cy: number, radius: number, id: MaterialId, density = 1, overwrite = true, only?: MaterialId): void {
     const r2 = radius * radius;
-    for (let y = cy - radius; y <= cy + radius; y++) {
-      for (let x = cx - radius; x <= cx + radius; x++) {
+    const [x0, x1, y0, y1] = this.disc(cx, cy, radius);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
         const dx = x - cx, dy = y - cy;
         if (dx * dx + dy * dy > r2) continue;
-        if (!this.inBounds(x, y)) continue;
         if (density < 1 && this.rand() > density) continue;
         const at = this.cells[this.index(x, y)];
         if (only !== undefined && at !== only) continue;
@@ -304,10 +320,11 @@ export class Engine {
   /** Fige (ou libère) un disque : la matière garde son identité mais ne bouge plus. */
   setFrozen(cx: number, cy: number, radius: number, on: boolean): void {
     const r2 = radius * radius;
-    for (let y = cy - radius; y <= cy + radius; y++) {
-      for (let x = cx - radius; x <= cx + radius; x++) {
+    const [x0, x1, y0, y1] = this.disc(cx, cy, radius);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
         const dx = x - cx, dy = y - cy;
-        if (dx * dx + dy * dy > r2 || !this.inBounds(x, y)) continue;
+        if (dx * dx + dy * dy > r2) continue;
         const i = this.index(x, y);
         if (this.cells[i] !== EMPTY) this.frozen[i] = on ? 1 : 0;
       }
