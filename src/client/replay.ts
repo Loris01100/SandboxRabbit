@@ -76,10 +76,14 @@ function snap(e: Engine): { grid: string; clock: string } {
   return { grid, clock };
 }
 
-/** Pose une grille encodée dans le moteur, comme au chargement d'un monde. */
-function put(e: Engine, grid: string, clock: string, ambient: number): void {
+/**
+ * Pose une grille encodée dans le moteur, comme au chargement d'un monde.
+ * `clock` n'existe que pour un rejeu : un monde de la galerie n'en a pas, et la
+ * grille se pose alors sur l'horloge en place (null).
+ */
+export function put(e: Engine, grid: string, clock: string | null, ambient: number): void {
   const n = e.cells.length;
-  e.clock.set(decode(clock, n));
+  if (clock !== null) e.clock.set(decode(clock, n));
   e.adopt(decode(grid, n));
   e.frozen.set(decodeFrozen(grid, n));
   e.life.set(decodeLife(grid, n) ?? new Uint8Array(n));

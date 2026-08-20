@@ -2,32 +2,43 @@
  * Le bac partagé, côté navigateur. En face, un Durable Object qui ne fait que
  * relayer (src/worker/room.ts). L'hôte est le seul à simuler : il diffuse sa
  * grille quatre fois par seconde **dès qu'il n'est pas seul**, les invités lui
- * envoient leurs gestes et
- * affichent ce qu'ils reçoivent — un seul simulateur, donc rien à réconcilier.
+ * envoient leurs gestes et affichent ce qu'ils reçoivent — un seul simulateur,
+ * donc rien à réconcilier.
  * ponytail: pas d'identité ni de verrou, qui entre peint. Et l'instantané ne
  * porte que matière et figé : la vue thermique d'un invité reste muette.
  *
+ * La grille diffusée n'est pas encodée ici : c'est le bac qui l'envoie tout
+ * encodée (nouvelle « grid »), quatre fois par seconde, et seulement pendant
+ * qu'un salon est ouvert — le réglage `room` le lui dit.
+ *
  * Ce module ne connaît ni le bouton Pause ni le sélecteur de taille : il les
- * demande par deux rappels, sinon il faudrait importer main.ts et boucler.
+ * demande par des rappels, sinon il faudrait importer main.ts et boucler.
  */
-import { HEIGHT, WIDTH, engine, resize } from "./world.ts";
-import { decode, decodeFrozen, encode } from "./sim/codec.ts";
-import { applyGesture, type Gesture } from "./gestures.ts";
+import { HEIGHT, WIDTH, listen, order } from "./world.ts";
+import type { Gesture } from "./gestures.ts";
 
 /** Appelé quand on devient hôte (true) ou invité (false) : un invité ne simule pas. */
 let onRole: (host: boolean) => void = () => {};
+/** Appelé quand l'hôte impose sa taille de grille. */
+let onSize: (w: number, h: number) => void = () => {};
+/** Pose la grille de l'hôte dans le bac, sans cran d'annulation (4 par seconde). */
+let onGrid: (data: string) => void = () => {};
 /**
  * Applique le geste d'un invité. C'est main.ts qui le fait, pas ce module : le
  * geste d'un pair doit emprunter le même chemin que ceux de l'hôte, sinon il
  * manque à l'enregistrement de la partie (replay.ts).
  */
-let onApply: (g: Gesture) => void = (g) => applyGesture(engine, g);
-/** Appelé quand l'hôte impose sa taille de grille. */
-let onSize: (w: number, h: number) => void = (w, h) => resize(w, h, true);
+let onApply: (g: Gesture) => void = () => {};
 
-export function initRoom(hooks: { role(host: boolean): void; size(w: number, h: number): void; apply(g: Gesture): void }): void {
+export function initRoom(hooks: {
+  role(host: boolean): void;
+  size(w: number, h: number): void;
+  grid(data: string): void;
+  apply(g: Gesture): void;
+}): void {
   onRole = hooks.role;
   onSize = hooks.size;
+  onGrid = hooks.grid;
   onApply = hooks.apply;
 }
 
@@ -54,15 +65,20 @@ let host = false;
 let beat = 0;
 /** Connectés au salon, compté par le Durable Object. Seul, l'hôte ne diffuse rien. */
 let peers = 1;
+/** La dernière grille courte (matière + figé) envoyée par le bac. */
+let mine = "";
 
-/** Grille reçue de l'hôte : posée sans passer par la pile d'annulation (4 par seconde). */
+listen((news) => {
+  if (news.t === "grid" && news.room !== undefined) mine = news.room;
+});
+
+/** Grille reçue de l'hôte : posée sans passer par la pile d'annulation. */
 function applyGrid(data: string, w: number, h: number): void {
   // La grille de l'hôte impose sa taille.
   if (w !== WIDTH || h !== HEIGHT) onSize(w, h);
-  // Une taille refusée (ou fantaisiste) laisserait `set()` jeter sur la longueur.
+  // Une taille refusée (ou fantaisiste) laisserait le bac poser une bouillie.
   if (w !== WIDTH || h !== HEIGHT) return;
-  engine.adopt(decode(data, w * h));
-  engine.frozen.set(decodeFrozen(data, w * h));
+  onGrid(data);
 }
 
 function leaveRoom(): void {
@@ -70,6 +86,8 @@ function leaveRoom(): void {
   socket = null;
   host = false;
   peers = 1;
+  mine = "";
+  order({ t: "set", k: { room: false } }); // le bac cesse d'encoder pour personne
   roomButton.textContent = "Bac partagé";
   // On redevient maître de son bac : sans ça un invité qui part reste en pause.
   onRole(true);
@@ -81,6 +99,7 @@ roomButton.addEventListener("click", () => {
   if (!name) return;
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/room/${encodeURIComponent(name)}`);
   socket = ws;
+  order({ t: "set", k: { room: true } });
   roomButton.textContent = "Quitter le salon";
   statusEl.textContent = `Connexion au salon « ${name} »…`;
 
@@ -110,9 +129,9 @@ roomButton.addEventListener("click", () => {
   });
 
   beat = setInterval(() => {
-    // Personne en face : ni encodage, ni téléversement, ni réveil du salon.
-    if (host && peers > 1 && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "grid", width: WIDTH, height: HEIGHT, data: encode(engine.cells, engine.frozen) }));
+    // Personne en face : ni téléversement, ni réveil du salon.
+    if (host && peers > 1 && mine && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "grid", width: WIDTH, height: HEIGHT, data: mine }));
     }
   }, 250);
 });
