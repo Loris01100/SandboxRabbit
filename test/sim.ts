@@ -8,7 +8,7 @@ import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/cli
 import { thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import {
-  MATERIALS,
+  MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
   CEMENT, FILINGS, MAGNET, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
@@ -827,6 +827,99 @@ function top(e: Engine, id: MaterialId): number {
   const e = engine();
   for (let t = 0; t < 10; t++) e.step();
   assert.equal(count(e, EMPTY), W * H, "rien ne se crée tout seul");
+}
+
+// Le registre est la seule source : ces asserts sont ce qui accueille la
+// prochaine matière ajoutée. Un `life` à 300 déborderait l'octet, un `boil.into`
+// inconnu ferait jeter `MATERIALS[id]` à chaque tick.
+{
+  for (const [key, m] of Object.entries(MATERIALS)) {
+    const où = `${m.name} (${key})`;
+    assert.equal(Number(key), m.id, `${où} : la clé du registre est son id`);
+    assert.ok((m.life ?? 0) <= 250, `${où} : \`life\` tient dans un octet`);
+    assert.equal(m.color.length, 3, `${où} : trois canaux`);
+    for (const c of m.color) {
+      assert.ok(Number.isInteger(c) && c >= 0 && c <= 255, `${où} : canal hors de 0..255`);
+    }
+    for (const [quoi, phase] of [["boil", m.boil], ["freeze", m.freeze]] as const) {
+      if (!phase) continue;
+      assert.ok(MATERIALS[phase.into], `${où} : \`${quoi}.into\` est une matière connue`);
+      assert.notEqual(phase.into, m.id, `${où} : \`${quoi}\` ne boucle pas sur elle-même`);
+    }
+  }
+
+  const vues = new Set<MaterialId>();
+  for (const cat of CATEGORIES) {
+    for (const id of cat.ids) {
+      assert.ok(MATERIALS[id], `${cat.name} : une matière inconnue dans la barre d'outils`);
+      assert.ok(!vues.has(id), `${MATERIALS[id]?.name} figure dans deux familles`);
+      vues.add(id);
+    }
+  }
+  assert.equal(PALETTE.length, vues.size, "la palette est la mise bout à bout des familles");
+  assert.equal(SHORTCUTS.length, 10, "les raccourcis vont de 1 à 9 puis 0");
+  for (const id of SHORTCUTS) assert.ok(MATERIALS[id], "un raccourci pointe une matière inconnue");
+}
+
+// `thermal()` échange ses tampons : `engine.temp` est un autre tableau après le
+// tick. Garder la référence d'un tick sur l'autre donnerait la grille d'avant.
+{
+  const e = engine();
+  const avant = e.temp;
+  e.step();
+  assert.ok(e.temp !== avant, "`temp` est réassigné, pas recopié");
+  assert.equal(e.temp.length, avant.length, "et les deux tampons ont la même taille");
+}
+
+// `clock` empêche une cellule de bouger deux fois dans le même tick : un grain
+// tombe d'exactement une case par tick, quelle que soit la hauteur de chute.
+{
+  const e = engine();
+  e.set(10, 0, SAND);
+  for (let t = 1; t <= 8; t++) {
+    e.step();
+    assert.equal(e.get(10, t), SAND, `au tick ${t} le grain est à la ligne ${t}, pas plus bas`);
+  }
+}
+
+// Hors grille, `get()` répond `STONE` : c'est ce mur implicite qui dispense
+// une quinzaine de règles de tester les bords.
+{
+  const e = engine();
+  for (const [x, y] of [[-1, 0], [0, -1], [W, 0], [0, H]] as const) {
+    assert.equal(e.get(x, y), STONE, `hors grille en (${x},${y}) : un mur`);
+  }
+}
+
+// L'emballement de l'uranium doit rester réversible : un tas déjà chaud qu'on
+// éparpille se calme. C'est la seule parade du joueur — la rendre définitive
+// ferait du nucléaire une bombe à retardement qu'on ne peut que regarder.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) for (let y = 30; y < H; y++) e.set(x, y, STONE);
+  for (let x = 26; x < 34; x++) for (let y = 22; y < 30; y++) e.set(x, y, URANIUM);
+  for (let t = 0; t < 60; t++) e.step(); // le tas s'emballe (MELTDOWN en vaut 120)
+  assert.ok(count(e, URANIUM) > 0, "le tas est encore là, mais compte ses ticks");
+
+  // On casse le tas : il n'en reste qu'une rangée posée au sol, un grain sur
+  // trois. Les gardés ne sont pas repeints (`set` remettrait `life` à zéro) —
+  // ce sont bien des grains déjà emballés. Une rangée, parce qu'une pile de
+  // colonnes s'éboule et se reconstitue en tas.
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (e.get(x, y) === URANIUM && (y !== 29 || x % 3)) e.set(x, y, EMPTY);
+    }
+  }
+  const chaud = e.life.some((v, i) => e.cells[i] === URANIUM && v > 0);
+  assert.ok(chaud, "les grains gardés sont bien ceux qui s'étaient emballés");
+
+  const reste = count(e, URANIUM);
+  for (let t = 0; t < 400; t++) e.step();
+  assert.equal(count(e, URANIUM), reste, "éparpillé, il ne saute plus");
+  assert.ok(
+    !e.life.some((v, i) => e.cells[i] === URANIUM && v > 0),
+    "et l'emballement est redescendu à zéro : la parade est réversible",
+  );
 }
 
 /**

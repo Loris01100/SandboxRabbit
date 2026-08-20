@@ -71,4 +71,4 @@ Une entrée dans `CHALLENGES` ([src/client/challenges.ts](src/client/challenges.
 
 ### Ajouter une matière
 
-Une entrée dans `MATERIALS` + son id dans une famille de `CATEGORIES` ([materials.ts](src/client/sim/materials.ts)) — l'omettre partout est valide : la matière n'est alors obtenue qu'en jeu. Si son `kind` (`powder` / `liquid` / `gas` / `static`) ne suffit pas, ajouter un `case` dans `Engine.update`.
+Une entrée dans `MATERIALS` + son id dans une famille de `CATEGORIES` ([materials.ts](src/client/sim/materials.ts)) — l'omettre partout est valide : la matière n'est alors obtenue qu'en jeu. Le registre est relu par un assert de [test/sim.ts](test/sim.ts) (clé = `id`, `life` ≤ 250, couleur en trois canaux 0..255, `boil.into`/`freeze.into` connus et non bouclés, pas de matière dans deux familles) : c'est lui qui accueille l'entrée suivante, pas une relecture. Si son `kind` (`powder` / `liquid` / `gas` / `static`) ne suffit pas, ajouter un `case` dans `Engine.update`.
