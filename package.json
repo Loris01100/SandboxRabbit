@@ -8,7 +8,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "check": "node test/sim.ts && node test/ui.ts && node test/api.ts",
     "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "npm run build && npm run check && wrangler deploy",
     "cf-typegen": "wrangler types",
     "bench": "node test/bench.ts",
     "loc": "node test/loc.ts"

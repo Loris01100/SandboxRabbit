@@ -16,12 +16,19 @@ import { applyGesture, type Gesture } from "./gestures.ts";
 
 /** Appelé quand on devient hôte (true) ou invité (false) : un invité ne simule pas. */
 let onRole: (host: boolean) => void = () => {};
+/**
+ * Applique le geste d'un invité. C'est main.ts qui le fait, pas ce module : le
+ * geste d'un pair doit emprunter le même chemin que ceux de l'hôte, sinon il
+ * manque à l'enregistrement de la partie (replay.ts).
+ */
+let onApply: (g: Gesture) => void = (g) => applyGesture(engine, g);
 /** Appelé quand l'hôte impose sa taille de grille. */
 let onSize: (w: number, h: number) => void = (w, h) => resize(w, h, true);
 
-export function initRoom(hooks: { role(host: boolean): void; size(w: number, h: number): void }): void {
+export function initRoom(hooks: { role(host: boolean): void; size(w: number, h: number): void; apply(g: Gesture): void }): void {
   onRole = hooks.role;
   onSize = hooks.size;
+  onApply = hooks.apply;
 }
 
 /** Relaie un geste à l'hôte. Sans salon, ou quand on est l'hôte, ne fait rien. */
@@ -91,7 +98,7 @@ roomButton.addEventListener("click", () => {
     }
     if (msg.type === "peers" && typeof msg.n === "number") peers = msg.n;
     if (msg.type === "grid" && !host && typeof msg.data === "string") applyGrid(msg.data, msg.width, msg.height);
-    if (msg.type === "do" && host && msg.g) applyGesture(msg.g);
+    if (msg.type === "do" && host && msg.g) onApply(msg.g);
   });
   // Une connexion qui échoue déclenche « error » puis « close » : sans ce
   // drapeau, « Salon quitté » effacerait aussitôt « Salon injoignable ».

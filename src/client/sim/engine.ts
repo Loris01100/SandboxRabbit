@@ -113,7 +113,8 @@ export class Engine {
   /** Réassigné à chaque tick : les deux tampons de diffusion s'échangent. */
   temp: Float32Array;
   private tempNext: Float32Array;
-  private readonly clock: Uint8Array;
+  /** Publique pour le rejeu : sans elle, une partie ne repart pas au même tick. */
+  readonly clock: Uint8Array;
   /** 1 = cellule figée : elle ne bouge plus et rien ne peut la pousser. */
   readonly frozen: Uint8Array;
   private parity = 0;
@@ -160,6 +161,30 @@ export class Engine {
     s ^= s << 5; s >>>= 0;
     this.state = s;
     return s / 0x1_0000_0000;
+  }
+
+  /**
+   * De quoi repartir d'un point précis de la partie : l'état du tirage et le
+   * sens du balayage. C'est le strict complément des tableaux (`cells`,
+   * `life`, `temp`, `frozen`) pour rejouer une suite de ticks à l'identique —
+   * un rejeu qui oublierait le sens du balayage ferait dériver la matière du
+   * mauvais côté dès le premier tick.
+   */
+  get seed(): number {
+    return this.state;
+  }
+
+  set seed(value: number) {
+    this.state = value >>> 0 || 1;
+  }
+
+  get scan(): number {
+    return this.parity;
+  }
+
+  /** À poser avec `clock` : les deux ensemble disent qui a déjà bougé. */
+  set scan(value: number) {
+    this.parity = value & 1;
   }
 
   index(x: number, y: number): number {

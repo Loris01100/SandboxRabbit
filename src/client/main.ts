@@ -1,7 +1,7 @@
 import "./style.css";
 import { type Clip } from "./sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./sim/codec.ts";
-import { CATEGORIES, EMPTY, MAGNET, MATERIALS, SAND, SHORTCUTS, SNOW, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
+import { CATEGORIES, EMPTY, MAGNET, MATERIALS, SAND, SHORTCUTS, SOURCE, SWITCH, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { panAfterZoom, pushRecent, read, ticksFor, write } from "./ui.ts";
 import { captureFrame, initShare, snapshotData } from "./share.ts";
@@ -13,6 +13,11 @@ import "./theme.ts"; // jour / nuit : se branche tout seul
 let current: MaterialId = SAND;
 let brush = 5;
 let running = true;
+/** Enregistrement en cours, dernière partie enregistrée, rejeu en cours (section « rejeu »).
+ *  Déclarés ici parce que `load()` et `snapshot()` les lisent dès le chargement du module. */
+let rec: Recorder | null = null;
+let film: Recording | null = null;
+let player: Player | null = null;
 
 /* ---------------------------------------------------------------- palette */
 
@@ -262,7 +267,8 @@ function span(): { gap: number; x: number; y: number } {
 // de souris vaut un pixel d'écran, quel que soit le zoom.
 canvas.addEventListener("auxclick", (e) => e.preventDefault());
 
-import { applyGesture, type Gesture } from "./gestures.ts";
+import { applyGesture, weather, type Gesture } from "./gestures.ts";
+import { Player, Recorder, type Recording } from "./replay.ts";
 
 /**
  * Tout geste qui modifie la grille passe par ici : appliqué chez soi, puis
@@ -271,8 +277,20 @@ import { applyGesture, type Gesture } from "./gestures.ts";
  * suivant.
  */
 function gesture(g: Gesture): void {
-  applyGesture(g);
+  // Pendant un rejeu, le bac appartient à l'enregistrement : un geste de plus
+  // ferait diverger la suite de ce qu'on est en train de regarder.
+  if (player) return;
+  applyGesture(engine, g);
+  rec?.gesture(g);
   relay(g);
+}
+
+/** Un tick de simulation, météo comprise — le seul endroit qui appelle `step()`. */
+function tick(): void {
+  const rain = weatherInput.checked;
+  rec?.tick(rain); // avant le pas : c'est l'état de la scène qui va servir
+  if (rain) weather(engine);
+  engine.step();
 }
 
 /** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */
@@ -444,13 +462,16 @@ function capture(): Snapshot {
 }
 
 function restore(state: Snapshot): void {
+  // La grille change sans geste : l'enregistrement la garde en entier.
   engine.cells.set(state.cells);
   engine.life.set(state.life);
   engine.temp.set(state.temp);
   engine.frozen.set(state.frozen);
+  rec?.stamp();
 }
 
 function snapshot(): void {
+  if (player) return;
   undoStack.push(capture());
   if (undoStack.length > UNDO_MAX) undoStack.shift();
   redoStack.length = 0; // un nouveau geste referme la branche annulée
@@ -513,6 +534,9 @@ ambientInput.addEventListener("input", () => {
 // Redimensionner invalide les piles d'annulation (leurs tableaux n'ont plus la
 // bonne longueur) et remet la vue d'aplomb.
 onResize.push(() => {
+  // Le moteur est neuf et la grille a changé de longueur : l'enregistrement en
+  // cours ne décrit plus rien de rejouable.
+  if (rec) { rec = null; recButton.textContent = "Enregistrer"; statusEl.textContent = "Enregistrement abandonné : le bac a changé de taille."; }
   undoStack.length = 0;
   redoStack.length = 0;
   zoom = 1;
@@ -539,18 +563,8 @@ function fit(w: number): void {
   sizeInput.value = String(w);
 }
 
-// Météo : quelques gouttes par tick sur la ligne d'où vient la matière (donc
-// en bas si la gravité est inversée). L'ambiante décide de leur nature — c'est
-// ce qui donne enfin à voir le curseur de température.
+// Météo : la pluie elle-même vit dans gestures.ts, avec le tirage du moteur.
 const weatherInput = document.querySelector<HTMLInputElement>("#weather")!;
-
-function weather(): void {
-  const id = engine.ambient <= 0 ? SNOW : WATER;
-  const y = engine.gravity === 1 ? 0 : HEIGHT - 1;
-  for (let n = Math.max(2, (WIDTH / 160) | 0); n > 0; n--) {
-    engine.set(Math.floor(Math.random() * WIDTH), y, id);
-  }
-}
 
 const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
 heatmapInput.addEventListener("change", () => (renderer.heatmap = heatmapInput.checked));
@@ -627,7 +641,7 @@ playButton.addEventListener("click", toggleRun);
 document.querySelector<HTMLButtonElement>("#step")!.addEventListener("click", () => {
   running = false;
   playButton.textContent = "Reprendre";
-  engine.step();
+  tick();
 });
 
 // Plein écran natif : le CSS `pixelated` fait la mise à l'échelle, le rendu ne
@@ -647,10 +661,11 @@ document.querySelector<HTMLButtonElement>("#surprise")!.addEventListener("click"
   snapshot();
   engine.clear();
   scene.build(engine);
+  rec?.stamp();
   statusEl.textContent = `« ${scene.name} » — servez-vous.`;
 });
 
-document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => { snapshot(); engine.clear(); });
+document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => { snapshot(); engine.clear(); rec?.stamp(); });
 
 /* -------------------------------------------------------------- mondes/API */
 
@@ -692,6 +707,7 @@ function load(data: string, width?: number): boolean {
     statusEl.textContent = "Grille illisible.";
     return false;
   }
+  rec?.stamp();
   return true;
 }
 
@@ -700,6 +716,9 @@ function load(data: string, width?: number): boolean {
 // Le salon vit dans room.ts ; il lui manque juste de quoi mettre un invité en
 // pause et de quoi suivre la taille de grille de l'hôte.
 initRoom({
+  // Le geste d'un invité passe par le même point que les nôtres : sans ça il
+  // manquerait de l'enregistrement de l'hôte.
+  apply: gesture,
   role(host) {
     running = host;
     playButton.textContent = running ? "Pause" : "Reprendre";
@@ -739,6 +758,7 @@ for (const c of CHALLENGES) {
     snapshot();
     engine.clear();
     c.build(engine);
+    rec?.stamp();
     startChallenge(c);
   });
   challengesEl.append(button);
@@ -785,6 +805,65 @@ addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") write(BAC, snapshotData());
 });
 
+/* -------------------------------------------------------------------- rejeu */
+
+/**
+ * Enregistrer une partie, la regarder à nouveau. Rien n'est filmé : on garde la
+ * grille de départ, l'état du tirage au sort et les gestes horodatés en ticks
+ * (replay.ts). Une partie de dix minutes tient en quelques kilo-octets, et le
+ * rejeu retombe sur la même grille au pixel près.
+ *
+ * ponytail: en mémoire seulement — rien ne s'exporte ni ne s'importe. Ajouter
+ * un fichier ou un lien le jour où on veut échanger des parties ; ce sera un
+ * JSON venu d'ailleurs, donc à valider comme une grille de la galerie.
+ */
+
+const recButton = document.querySelector<HTMLButtonElement>("#rec")!;
+const playbackButton = document.querySelector<HTMLButtonElement>("#replay")!;
+
+function endPlayback(): void {
+  player = null;
+  playbackButton.textContent = "Rejouer";
+  statusEl.textContent = "Fin du rejeu.";
+}
+
+playbackButton.addEventListener("click", () => {
+  if (player) { endPlayback(); return; }
+  if (!film) return;
+  // Un rejeu pendant un enregistrement remplirait celui-ci d'une partie qui
+  // n'est pas la sienne : on n'en garde qu'un des deux en l'air.
+  if (rec) { statusEl.textContent = "Enregistrement en cours : arrêtez-le d'abord."; return; }
+  // Les scènes ont leur taille : un rejeu 480 dans un bac 320 se décalerait.
+  if (film.w !== WIDTH) fit(film.w);
+  if (film.w !== WIDTH || film.h !== HEIGHT) {
+    statusEl.textContent = "Rejeu fait pour une autre taille de grille.";
+    return;
+  }
+  snapshot(); // le bac d'avant reste annulable
+  player = new Player(film, engine);
+  // Un rejeu en pause ne se verrait pas avancer.
+  running = true;
+  playButton.textContent = "Pause";
+  playbackButton.textContent = "■ Arrêter";
+  statusEl.textContent = `Rejeu — ${film.ticks} ticks.`;
+});
+
+recButton.addEventListener("click", () => {
+  if (rec) {
+    const ko = Math.max(1, Math.round(rec.size / 1024));
+    film = rec.rec;
+    rec = null;
+    recButton.textContent = "Enregistrer";
+    playbackButton.disabled = false;
+    statusEl.textContent = `Enregistré : ${film.ticks} ticks, ${film.beats.length} événements, ~${ko} ko.`;
+    return;
+  }
+  if (player) return; // on n'enregistre pas un rejeu
+  rec = new Recorder(engine, weatherInput.checked);
+  recButton.textContent = "■ Arrêter";
+  statusEl.textContent = "Enregistrement…";
+});
+
 /* ------------------------------------------------------------ boucle rendu */
 
 const fpsEl = document.querySelector<HTMLSpanElement>("#fps")!;
@@ -806,8 +885,9 @@ function frame(now: number): void {
     const budget = ticksFor(speed, elapsed, pending);
     pending = budget.pending;
     for (let n = budget.ticks; n > 0; n--) {
-      if (weatherInput.checked) weather();
-      engine.step();
+      // Un rejeu remplace la simulation : c'est lui qui avance le bac.
+      if (player) { if (!player.step()) { endPlayback(); break; } }
+      else tick();
     }
   }
   renderer.draw();
