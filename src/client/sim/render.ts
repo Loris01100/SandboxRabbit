@@ -117,17 +117,26 @@ function clamp(v: number): number {
  * grille et mis à l'échelle par le CSS, comme le bac lui-même.
  */
 export function thumbnail(cells: Uint8Array, width: number, height: number): HTMLCanvasElement {
+  // Une carte de galerie fait 170 px de large. Rendre un monde 640×360 pixel à
+  // pixel, c'est cinquante canvas de 230 400 pixels que le navigateur garde en
+  // mémoire pour les montrer deux fois plus petits : on n'échantillonne qu'une
+  // cellule sur `pas`. Au-dessous de 320 de large, rien ne change.
+  const pas = Math.max(1, Math.ceil(width / 320));
+  const w = Math.ceil(width / pas);
+  const h = Math.ceil(height / pas);
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = w;
+  canvas.height = h;
   const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) return canvas;
-  const image = ctx.createImageData(width, height);
+  const image = ctx.createImageData(w, h);
   const buffer = new Uint32Array(image.data.buffer);
-  for (let i = 0; i < cells.length; i++) {
-    // Un monde sauvegardé peut contenir un id disparu depuis : on retombe sur le vide.
-    const [r, g, b] = (MATERIALS[cells[i]] ?? MATERIALS[EMPTY]).color;
-    buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Un monde sauvegardé peut contenir un id disparu depuis : on retombe sur le vide.
+      const [r, g, b] = (MATERIALS[cells[y * pas * width + x * pas]] ?? MATERIALS[EMPTY]).color;
+      buffer[y * w + x] = 0xff000000 | (b << 16) | (g << 8) | r;
+    }
   }
   ctx.putImageData(image, 0, 0);
   return canvas;

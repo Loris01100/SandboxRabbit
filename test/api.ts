@@ -46,6 +46,18 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   assert.ok(found, "le monde sauvegardé apparaît dans la liste");
   assert.equal(found.data, monde.data, "la liste porte la grille : la galerie n'a qu'une requête à faire");
 
+  // …mais seulement le bloc matière : la vignette n'a que faire des vies et des
+  // températures, qui pèsent un cinquième d'un monde en feu.
+  {
+    const vivant = { ...monde, data: "AQE=.AQE=.AQE=.AQE=" };
+    const { id: chaud } = await (await app.request("/api/worlds", json(vivant), env)).json();
+    const liste = await (await app.request("/api/worlds", {}, env)).json();
+    assert.equal(liste.find((w: { id: string }) => w.id === chaud).data, "AQE=", "la liste s'arrête au premier bloc");
+    const entier = await (await app.request(`/api/worlds/${chaud}`, {}, env)).json();
+    assert.equal(entier.data, vivant.data, "le monde entier, lui, garde son état vivant");
+    await app.request(`/api/worlds/${chaud}`, { method: "DELETE" }, env);
+  }
+
   // Charger un monde compte une vue ; la liste la porte, c'est ce qui trie la galerie.
   assert.equal(found.views, 0, "un monde neuf n'a pas de vue");
   await app.request(`/api/worlds/${id}`, {}, env);

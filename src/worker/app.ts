@@ -47,7 +47,17 @@ app.get("/api/health", (c) =>
   }),
 );
 
-app.get("/api/worlds", async (c) => c.json(await createStore(c.env).list()));
+/**
+ * La galerie fait ses vignettes avec ce que renvoie cette route : elle n'a
+ * besoin que de la matière, pas de l'état vivant. On coupe donc `data` à son
+ * premier bloc (voir le codec) — sur cinquante mondes en feu, c'est un cinquième
+ * de la réponse en moins, jeté à l'arrivée sinon. Le monde entier s'obtient par
+ * `/api/worlds/:id`, par lequel passe déjà tout chargement.
+ */
+app.get("/api/worlds", async (c) => {
+  const worlds = await createStore(c.env).list();
+  return c.json(worlds.map((w) => ({ ...w, data: w.data.split(".")[0] })));
+});
 
 // Charger un monde compte une vue : c'est par ici que passe la galerie.
 app.get("/api/worlds/:id", async (c) => {

@@ -3,7 +3,7 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { goalText, panAfterZoom, parseGoal, pushRecent } from "../src/client/ui.ts";
+import { goalText, panAfterZoom, parseGoal, pushRecent, ticksFor } from "../src/client/ui.ts";
 import { SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 
 // Objectifs : ce qui vient d'un autre visiteur ne passe pas sans contrôle.
@@ -45,6 +45,25 @@ import { SAND, STONE, WATER } from "../src/client/sim/materials.ts";
   const out = panAfterZoom(500, edge, size, 0, 1, 4);
   const back = panAfterZoom(500, edge + out, size * 4, out, 4, 1);
   assert.ok(Math.abs(back) < 1e-9, "revenir à ×1 remet le décalage à zéro");
+}
+
+// Cadence : la vitesse est par 60e de seconde, pas par frame.
+{
+  assert.equal(ticksFor(1, 1000 / 60, 0).ticks, 1, "60 Hz, ×1 : un tick par frame");
+  assert.equal(ticksFor(4, 1000 / 60, 0).ticks, 4, "60 Hz, ×4 : quatre ticks");
+
+  // 120 Hz : un tick une frame sur deux, soit la même vitesse qu'à 60 Hz.
+  let pending = 0, ticks = 0;
+  for (let f = 0; f < 120; f++) {
+    const step = ticksFor(1, 1000 / 120, pending);
+    pending = step.pending;
+    ticks += step.ticks;
+  }
+  assert.equal(ticks, 60, "120 frames à 120 Hz = une seconde = 60 ticks");
+
+  // Un onglet revenu au premier plan ne rattrape pas dix secondes d'un coup.
+  assert.ok(ticksFor(4, 10_000, 0).ticks <= 8, "le rattrapage est plafonné");
+  assert.equal(ticksFor(1, -5, 0).ticks, 0, "une horloge qui recule ne simule rien");
 }
 
 console.log("ok — panneau conforme");

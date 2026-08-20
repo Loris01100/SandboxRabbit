@@ -65,6 +65,20 @@ export function pushRecent(list: readonly MaterialId[], id: MaterialId, max: num
 }
 
 /**
+ * Combien de ticks simuler pour une frame, et le reliquat à reporter.
+ *
+ * La vitesse est exprimée par 60e de seconde, pas par frame : sinon un écran
+ * 120 Hz — la plupart des téléphones récents — fait tourner la simulation deux
+ * fois trop vite, pour deux fois le courant. `ms` est plafonné, sinon un onglet
+ * revenu au premier plan rattraperait sa sieste d'un coup ; `max` borne le
+ * rattrapage d'une frame qui traîne.
+ */
+export function ticksFor(speed: number, ms: number, pending: number, max = 8): { ticks: number; pending: number } {
+  const budget = pending + speed * (Math.min(Math.max(ms, 0), 100) / (1000 / 60));
+  return { ticks: Math.min(Math.floor(budget), max), pending: budget % 1 };
+}
+
+/**
  * Décalage à appliquer après un zoom pour que le point sous le curseur ne
  * bouge pas. `edge` et `size` décrivent la boîte **affichée** (déjà
  * transformée) ; la boîte d'origine s'en déduit : `edge - pan`, `size / zoom`.

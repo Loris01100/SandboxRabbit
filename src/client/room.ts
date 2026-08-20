@@ -1,7 +1,8 @@
 /**
  * Le bac partagé, côté navigateur. En face, un Durable Object qui ne fait que
  * relayer (src/worker/room.ts). L'hôte est le seul à simuler : il diffuse sa
- * grille quatre fois par seconde, les invités lui envoient leurs gestes et
+ * grille quatre fois par seconde **dès qu'il n'est pas seul**, les invités lui
+ * envoient leurs gestes et
  * affichent ce qu'ils reçoivent — un seul simulateur, donc rien à réconcilier.
  * ponytail: pas d'identité ni de verrou, qui entre peint. Et l'instantané ne
  * porte que matière et figé : la vue thermique d'un invité reste muette.
@@ -44,6 +45,8 @@ const roomButton = document.querySelector<HTMLButtonElement>("#room")!;
 let socket: WebSocket | null = null;
 let host = false;
 let beat = 0;
+/** Connectés au salon, compté par le Durable Object. Seul, l'hôte ne diffuse rien. */
+let peers = 1;
 
 /** Grille reçue de l'hôte : posée sans passer par la pile d'annulation (4 par seconde). */
 function applyGrid(data: string, w: number, h: number): void {
@@ -59,6 +62,7 @@ function leaveRoom(): void {
   clearInterval(beat);
   socket = null;
   host = false;
+  peers = 1;
   roomButton.textContent = "Bac partagé";
   // On redevient maître de son bac : sans ça un invité qui part reste en pause.
   onRole(true);
@@ -85,6 +89,7 @@ roomButton.addEventListener("click", () => {
         ? `Salon « ${name} » — vous simulez pour tout le monde.`
         : `Salon « ${name} » — vous suivez l'hôte.`;
     }
+    if (msg.type === "peers" && typeof msg.n === "number") peers = msg.n;
     if (msg.type === "grid" && !host && typeof msg.data === "string") applyGrid(msg.data, msg.width, msg.height);
     if (msg.type === "do" && host && msg.g) applyGesture(msg.g);
   });
@@ -98,7 +103,8 @@ roomButton.addEventListener("click", () => {
   });
 
   beat = setInterval(() => {
-    if (host && ws.readyState === WebSocket.OPEN) {
+    // Personne en face : ni encodage, ni téléversement, ni réveil du salon.
+    if (host && peers > 1 && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "grid", width: WIDTH, height: HEIGHT, data: encode(engine.cells, engine.frozen) }));
     }
   }, 250);

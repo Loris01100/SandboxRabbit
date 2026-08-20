@@ -25,9 +25,11 @@ export class Room extends DurableObject {
     const [client, server] = Object.values(new WebSocketPair());
     // API « hibernation » : le DO peut dormir sans fermer les sockets.
     this.ctx.acceptWebSocket(server);
-    const host = this.ctx.getWebSockets().length === 1;
+    const all = this.ctx.getWebSockets();
+    const host = all.length === 1;
     server.serializeAttachment({ host });
     server.send(JSON.stringify({ type: "role", host }));
+    this.announce(all);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -42,6 +44,16 @@ export class Room extends DurableObject {
     this.promote(ws);
   }
 
+  /**
+   * Combien de monde dans le salon. L'hôte s'en sert pour se taire quand il est
+   * seul : sans ça il téléverse sa grille quatre fois par seconde pour personne,
+   * et réveille ce Durable Object autant de fois.
+   */
+  private announce(left: WebSocket[]): void {
+    const message = JSON.stringify({ type: "peers", n: left.length });
+    for (const ws of left) ws.send(message);
+  }
+
   webSocketError(ws: WebSocket): void {
     this.promote(ws);
   }
@@ -52,6 +64,7 @@ export class Room extends DurableObject {
    */
   private promote(gone: WebSocket): void {
     const left = this.ctx.getWebSockets().filter((ws) => ws !== gone);
+    this.announce(left);
     if (left.some((ws) => (ws.deserializeAttachment() as { host: boolean } | null)?.host)) return;
     const next = left[0];
     if (!next) return;

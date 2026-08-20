@@ -3,7 +3,7 @@ import { type Clip } from "./sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./sim/codec";
 import { CATEGORIES, EMPTY, MAGNET, MATERIALS, SAND, SHORTCUTS, SNOW, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
-import { panAfterZoom, pushRecent, read, write } from "./ui.ts";
+import { panAfterZoom, pushRecent, read, ticksFor, write } from "./ui.ts";
 import { captureFrame, initShare, snapshotData } from "./share.ts";
 import { initRoom, relay } from "./room.ts";
 import { HEIGHT, WIDTH, canvas, engine, onResize, renderer, resize, seed } from "./world.ts";
@@ -439,7 +439,7 @@ const onlyInput = document.querySelector<HTMLInputElement>("#only")!;
 const mirrorInput = document.querySelector<HTMLInputElement>("#mirror")!;
 const toolInput = document.querySelector<HTMLSelectElement>("#tool")!;
 
-/** Ticks de simulation par frame : 0,25 (ralenti) à 4 (accéléré). */
+/** Ticks de simulation par 60e de seconde : 0,25 (ralenti) à 4 (accéléré). */
 let speed = 1;
 const speedInput = document.querySelector<HTMLInputElement>("#speed")!;
 const speedValue = document.querySelector<HTMLOutputElement>("#speed-value")!;
@@ -724,18 +724,21 @@ let lastReport = performance.now();
 
 /** Reliquat de tick quand la vitesse n'est pas entière (ralenti). */
 let pending = 0;
+let lastFrame = performance.now();
 
 function frame(now: number): void {
+  const elapsed = now - lastFrame;
+  lastFrame = now;
   // Clic maintenu sans bouger : on continue de déposer sous le curseur.
   if (painting && last) paintAt(last.x, last.y);
   if (running) {
-    pending += speed;
-    // Plafonné : si une frame traîne, on saute des ticks plutôt que de s'enliser.
-    for (let n = Math.min(Math.floor(pending), 8); n > 0; n--) {
+    // Le temps écoulé, pas le nombre de frames (math dans ui.ts).
+    const budget = ticksFor(speed, elapsed, pending);
+    pending = budget.pending;
+    for (let n = budget.ticks; n > 0; n--) {
       if (weatherInput.checked) weather();
       engine.step();
     }
-    pending %= 1;
   }
   renderer.draw();
   captureFrame(); // enregistrement en cours : la frame part aussi dans la vidéo
