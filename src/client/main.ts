@@ -130,9 +130,10 @@ addEventListener("keydown", (e) => {
 // matières, qui se remplit depuis `SHORTCUTS` — réordonner la barre ne doit pas
 // laisser une aide qui ment.
 const shortcutsEl = document.querySelector<HTMLDialogElement>("#shortcuts")!;
+// Les neuf premières : la dixième est la gomme, qui a sa propre ligne (touche 0).
 document.querySelector<HTMLSpanElement>("#keys-materials")!.textContent = SHORTCUTS
+  .slice(0, 9)
   .map((id, n) => `${n + 1} ${MATERIALS[id].name}`)
-  .filter((_, n) => n < 9)
   .join(" · ");
 document.querySelector<HTMLButtonElement>("#help")!.addEventListener("click", () => shortcutsEl.showModal());
 

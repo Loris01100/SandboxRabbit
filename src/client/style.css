@@ -284,16 +284,31 @@ kbd {
 #shortcuts { width: min(560px, 92vw); }
 #gallery::backdrop, #shortcuts::backdrop { background: light-dark(#3339, #000a); }
 
-/* Un raccourci par ligne : la touche à gauche, ce qu'elle fait à droite. */
+/* Un raccourci par ligne : la touche à gauche, ce qu'elle fait à droite.
+   `max-content` sur la colonne des touches, et surtout aucune liste longue
+   dedans — c'est la colonne de gauche qui décide de la largeur du tableau. */
 .keys {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.35rem 0.9rem;
+  grid-template-columns: max-content 1fr;
+  column-gap: 1.2rem;
   margin: 0;
   font-size: 0.86rem;
 }
-.keys dt { color: var(--accent); white-space: nowrap; }
-.keys dd { margin: 0; color: var(--muted); }
+
+/* Le filet passe d'une colonne à l'autre : les deux cellules d'une ligne ont
+   le même rembourrage, donc les bases de texte s'alignent toutes seules. */
+.keys dt,
+.keys dd {
+  margin: 0;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.keys dt:first-of-type,
+.keys dd:first-of-type { border-top: none; }
+.keys dt { white-space: nowrap; }
+.keys dd { color: var(--muted); }
+.keys em { color: var(--text); font-style: normal; }
 
 .gallery-bar {
   display: flex;
