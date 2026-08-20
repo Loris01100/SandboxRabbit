@@ -11,7 +11,7 @@
  * demande par deux rappels, sinon il faudrait importer main.ts et boucler.
  */
 import { HEIGHT, WIDTH, engine, resize } from "./world.ts";
-import { decode, decodeFrozen, encode } from "./sim/codec";
+import { decode, decodeFrozen, encode } from "./sim/codec.ts";
 import { applyGesture, type Gesture } from "./gestures.ts";
 
 /** Appelé quand on devient hôte (true) ou invité (false) : un invité ne simule pas. */

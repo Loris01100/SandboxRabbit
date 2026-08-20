@@ -1,5 +1,5 @@
-import { EMPTY, MAGNET, MATERIALS, SWITCH, THERMITE, URANIUM } from "./materials";
-import { type Engine } from "./engine";
+import { EMPTY, MAGNET, MATERIALS, SWITCH, THERMITE, URANIUM } from "./materials.ts";
+import { type Engine } from "./engine.ts";
 
 /**
  * Rendu 1 cellule = 1 pixel dans un ImageData, puis mise à l'échelle par le CSS
@@ -15,10 +15,19 @@ export class Renderer {
   /** Grain par matériau, sorti du registre comme la couleur : une lecture de
    *  tableau typé par pixel et par frame, au lieu d'une propriété d'objet. */
   private readonly grain = new Uint8Array(256);
+  /** 1 pour les quatre matières dont `life` change l'aspect. Voir `draw()`. */
+  private readonly glows = new Uint8Array(256);
   /** Affiche `temp` au lieu de la matière. */
   heatmap = false;
 
-  constructor(canvas: HTMLCanvasElement, private readonly engine: Engine) {
+  private readonly engine: Engine;
+
+  // Champ déclaré à la main plutôt qu'en paramètre-propriété : Node exécute le
+  // TypeScript en le dépouillant, et cette syntaxe-là est la seule qu'il refuse
+  // (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`) — elle mettait ce module hors de
+  // portée de `node test/…`.
+  constructor(canvas: HTMLCanvasElement, engine: Engine) {
+    this.engine = engine;
     canvas.width = engine.width;
     canvas.height = engine.height;
     const ctx = canvas.getContext("2d", { alpha: false });
@@ -32,30 +41,39 @@ export class Renderer {
       this.palette[m.id] = 0xff000000 | (b << 16) | (g << 8) | r;
       this.grain[m.id] = m.noise;
     }
+    for (const id of [SWITCH, MAGNET, THERMITE, URANIUM]) this.glows[id] = 1;
   }
 
   draw(): void {
     if (this.heatmap) { this.drawHeat(); return; }
     const { cells, noise, frozen, life, width, temp, ambient } = this.engine;
-    const { buffer, palette, grain } = this;
+    const { buffer, palette, grain, glows } = this;
+    // Le seuil de lumière est le même pour tout le bac : il n'a rien à faire
+    // dans une boucle de 230 000 tours.
+    const warm = ambient + GLOW;
     for (let i = 0; i < cells.length; i++) {
       const id = cells[i];
       const base = palette[id];
       // Lumière : `temp` est déjà diffusé par le moteur, donc l'air autour
       // d'une flamme est chaud — c'est un halo tout prêt, sans flou à calculer.
-      const lit = temp[i] > ambient + GLOW ? Math.min(1, (temp[i] - ambient - GLOW) / 400) : 0;
+      const t = temp[i];
+      const lit = t > warm ? Math.min(1, (t - warm) / 400) : 0;
       if (id === EMPTY) {
         buffer[i] = lit === 0 ? base : light(base, lit);
         continue;
       }
+      // Quatre matières seulement s'éclairent selon leur `life` — l'interrupteur
+      // fermé et l'aimant inversé (qui n'ont pas de couleur propre pour ça), la
+      // thermite allumée, l'uranium qui s'emballe et pâlit avant de sauter. Une
+      // table dit lesquelles : ailleurs, `life` n'est même pas lu.
+      const glow = glows[id] === 0 ? 0
+        : id === URANIUM ? life[i] >> 1
+        : id === THERMITE ? (life[i] > 0 ? 110 : 0)
+        : life[i] === 1 ? 55
+        : 0;
       // Le bruit par cellule décale les 3 canaux d'un même delta : la teinte
-      // reste identique, seule la luminosité varie.
-      // Une cellule figée est tramée en damier, pour la distinguer au premier coup d'œil.
-      // Deux états n'ont pas de couleur propre et doivent pourtant se voir :
-      // l'interrupteur fermé et la thermite allumée s'éclairent.
-      // L'uranium pâlit à mesure qu'il s'emballe : on voit venir le coup sans la vue thermique.
-      // Un aimant au pôle inversé (il repousse) s'éclaire de la même façon qu'un interrupteur fermé.
-    const glow = (id === SWITCH || id === MAGNET) && life[i] === 1 ? 55 : id === THERMITE && life[i] > 0 ? 110 : id === URANIUM ? life[i] >> 1 : 0;
+      // reste identique, seule la luminosité varie. Une cellule figée est
+      // tramée en damier, pour la distinguer au premier coup d'œil.
       const d = frozen[i]
         ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
         : glow || (noise[i] * grain[id]) >> 7;

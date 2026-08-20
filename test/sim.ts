@@ -5,8 +5,10 @@
 import assert from "node:assert/strict";
 import { Engine } from "../src/client/sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/client/sim/codec.ts";
+import { thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import {
+  MATERIALS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
   CEMENT, FILINGS, MAGNET, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
@@ -770,6 +772,40 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(count(e, WATER), 9, "ce qui sort de la grille est ramené, pas jeté");
   e.rect(W - 2, H - 2, W + 99, H + 99, WATER);
   assert.equal(e.get(W - 1, H - 1), WATER, "le coin opposé aussi");
+}
+
+// Vignettes de la galerie. `render.ts` se charge enfin sous Node (plus de
+// paramètre-propriété, plus d'import sans extension) : on peut vérifier ce
+// qu'il peint, et surtout qu'un grand monde est sous-échantillonné — une carte
+// fait 170 px, pas 640.
+{
+  let peint: { w: number; h: number; data: Uint8ClampedArray } | null = null;
+  const faux = {
+    width: 0, height: 0,
+    getContext: () => ({
+      createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+      putImageData: (image: { data: Uint8ClampedArray }) => {
+        peint = { w: faux.width, h: faux.height, data: image.data };
+      },
+    }),
+  };
+  (globalThis as { document?: unknown }).document = { createElement: () => faux };
+
+  const pixel = (x: number) => [...(peint!.data.slice(x * 4, x * 4 + 3))];
+
+  const petit = new Uint8Array(320 * 180);
+  petit[0] = FIRE;
+  thumbnail(petit, 320, 180);
+  assert.deepEqual([peint!.w, peint!.h], [320, 180], "320 de large : rendu tel quel");
+  assert.deepEqual(pixel(0), MATERIALS[FIRE].color, "et la couleur est celle du registre, canaux dans l'ordre");
+
+  const grand = new Uint8Array(640 * 360);
+  grand[0] = FIRE;
+  grand[2] = WATER; // une cellule sur deux est échantillonnée : celle-ci est la seconde
+  thumbnail(grand, 640, 360);
+  assert.deepEqual([peint!.w, peint!.h], [320, 180], "640 de large : moitié moins de pixels dans chaque sens");
+  assert.deepEqual(pixel(0), MATERIALS[FIRE].color, "le pas part bien de la première cellule");
+  assert.deepEqual(pixel(1), MATERIALS[WATER].color, "et avance de deux en deux");
 }
 
 // Le vide reste du vide.

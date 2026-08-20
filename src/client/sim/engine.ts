@@ -4,6 +4,14 @@ import {
   STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
+/**
+ * Les quatre voisines d'une cellule, en offsets. C'était un générateur : lisible,
+ * mais une quinzaine de règles l'appellent pour **chaque** cellule et chaque
+ * tick, et un générateur alloue son itérateur à chaque appel.
+ */
+const NX = new Int8Array([0, 0, -1, 1]);
+const NY = new Int8Array([-1, 1, 0, 0]);
+
 /** Température de l'air au repos, en °C. */
 export const AMBIENT = 20;
 /** Part de la différence avec les voisins échangée par tick. */
@@ -450,7 +458,8 @@ export class Engine {
 
   private updateFire(i: number, x: number, y: number): void {
     // L'eau tue la flamme, et se change en vapeur.
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === WATER || n === SALTWATER) {
         this.become(nx, ny, STEAM);
@@ -464,7 +473,8 @@ export class Engine {
   }
 
   private updateLava(i: number, x: number, y: number): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === WATER || n === SALTWATER) {
         this.become(nx, ny, STEAM);
@@ -479,7 +489,8 @@ export class Engine {
 
   /** Met le feu aux voisins inflammables. */
   private ignite(x: number, y: number, boost = 1): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       const chance = MATERIALS[n]?.flammable;
       if (!chance || Math.random() > chance * boost) continue;
@@ -489,7 +500,8 @@ export class Engine {
   }
 
   private updateAcid(i: number, x: number, y: number): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       const dissolvable = n === STONE || n === WOOD || n === SAND || n === PLANT
         || n === GLASS || n === ICE || n === SEED;
@@ -504,7 +516,8 @@ export class Engine {
   private updatePlant(x: number, y: number): void {
     if (Math.random() > 0.08) return;
     let drank = false;
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       if (this.get(nx, ny) === WATER) { this.become(nx, ny, PLANT); drank = true; break; }
     }
     if (!drank) return;
@@ -516,7 +529,8 @@ export class Engine {
 
   /** Le TNT n'attend que la flamme ; la chaîne se propage par le feu de l'explosion. */
   private updateTnt(x: number, y: number): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === FIRE || n === LAVA) { this.explode(x, y); return; }
     }
@@ -528,7 +542,8 @@ export class Engine {
    * détonne. Posée à la main, elle est inoffensive.
    */
   private updateNitro(i: number, x: number, y: number): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === FIRE || n === LAVA) { this.explode(x, y, 5); return; }
     }
@@ -550,7 +565,8 @@ export class Engine {
    */
   private updateC4(i: number, x: number, y: number): void {
     if (this.life[i] === 1) { this.explode(x, y, 9); return; }
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       if (this.get(nx, ny) === SPARK) { this.explode(x, y, 9); return; }
     }
   }
@@ -578,7 +594,8 @@ export class Engine {
       this.updatePowder(i, x, y, THERMITE);
       return;
     }
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       const lit = n === THERMITE && this.life[this.index(nx, ny)] > 0;
       if (n === FIRE || n === LAVA || n === SPARK || lit) { this.life[i] = BURN; return; }
@@ -594,7 +611,10 @@ export class Engine {
    */
   private updateUranium(i: number, x: number, y: number): void {
     let mass = 0;
-    for (const [nx, ny] of this.neighbors(x, y)) if (this.get(nx, ny) === URANIUM) mass++;
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
+      if (this.get(nx, ny) === URANIUM) mass++;
+    }
     if (mass >= CRITICAL) {
       if (++this.life[i] >= MELTDOWN) { this.nuke(x, y); return; }
     } else if (this.life[i] > 0) this.life[i]--;
@@ -614,7 +634,8 @@ export class Engine {
 
   /** Les retombées : un gaz ordinaire, sauf que rien de vivant n'y tient. */
   private updateFallout(i: number, x: number, y: number): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === PLANT || n === SEED) this.become(nx, ny, EMPTY);
     }
@@ -688,7 +709,8 @@ export class Engine {
 
   /** Le sel se dissout dans l'eau et fait fondre la glace. */
   private updateSalt(i: number, x: number, y: number): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === WATER) { this.become(nx, ny, SALTWATER); this.become(x, y, EMPTY); return; }
       if (n === ICE && Math.random() < 0.25) { this.become(nx, ny, WATER); this.become(x, y, EMPTY); return; }
@@ -697,7 +719,8 @@ export class Engine {
   }
 
   private updateSeed(i: number, x: number, y: number): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       if (this.get(nx, ny) === WATER) { this.become(x, y, PLANT); return; }
     }
     this.updatePowder(i, x, y, SEED);
@@ -706,7 +729,8 @@ export class Engine {
   /** Gelée grise : dévore un voisin, se réplique, puis meurt de vieillesse. */
   private updateNanite(i: number, x: number, y: number): void {
     if (this.decay(i, NANITE, EMPTY)) return;
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === EMPTY || n === NANITE || n === GLASS || n === SOURCE) continue;
       if (Math.random() < 0.2) { this.become(nx, ny, NANITE); break; }
@@ -724,7 +748,8 @@ export class Engine {
 
   /** Bougie : `life` sert de mèche allumée. Une fois prise, elle réalimente sa flamme. */
   private updateCandle(i: number, x: number, y: number): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === FIRE || n === LAVA || n === EMBER || n === SPARK) this.life[i] = 1;
       else if (n === WATER || n === SALTWATER) this.life[i] = 0;
@@ -753,7 +778,10 @@ export class Engine {
   private updateBattery(i: number, x: number, y: number): void {
     if (this.life[i] > 0) { this.life[i]--; return; }
     this.life[i] = PULSE;
-    for (const [nx, ny] of this.neighbors(x, y)) this.charge(nx, ny);
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
+      this.charge(nx, ny);
+    }
   }
 
   /**
@@ -764,9 +792,15 @@ export class Engine {
   private updateSwitch(i: number, x: number, y: number): void {
     if (this.life[i] !== 1) return;
     let live = false;
-    for (const [nx, ny] of this.neighbors(x, y)) if (this.get(nx, ny) === SPARK) live = true;
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
+      if (this.get(nx, ny) === SPARK) live = true;
+    }
     if (!live) return;
-    for (const [nx, ny] of this.neighbors(x, y)) this.charge(nx, ny);
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
+      this.charge(nx, ny);
+    }
   }
 
   /** Ouvre / ferme l'interrupteur sous le curseur (clic sur un interrupteur déjà posé). */
@@ -782,7 +816,8 @@ export class Engine {
    * aussitôt en arrière et le circuit ne s'éteint jamais.
    */
   private updateSpark(i: number, x: number, y: number): void {
-    for (const [nx, ny] of this.neighbors(x, y)) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
       if (!this.inBounds(nx, ny)) continue;
       const n = this.cells[this.index(nx, ny)];
       if (n === TNT) this.explode(nx, ny);
@@ -866,10 +901,4 @@ export class Engine {
     this.life[i] = MATERIALS[into].life ?? 0;
   }
 
-  private *neighbors(x: number, y: number): Generator<[number, number]> {
-    yield [x, y - 1];
-    yield [x, y + 1];
-    yield [x - 1, y];
-    yield [x + 1, y];
-  }
 }

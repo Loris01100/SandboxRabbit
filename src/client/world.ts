@@ -7,7 +7,7 @@
  * s'inscrit dans `onResize`, ce qui évite à ce module de connaître le panneau.
  */
 import { Engine } from "./sim/engine.ts";
-import { Renderer } from "./sim/render";
+import { Renderer } from "./sim/render.ts";
 import { SAND, STONE, WATER } from "./sim/materials.ts";
 
 export const canvas = document.querySelector<HTMLCanvasElement>("#world")!;

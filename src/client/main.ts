@@ -1,6 +1,6 @@
 import "./style.css";
 import { type Clip } from "./sim/engine.ts";
-import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./sim/codec";
+import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./sim/codec.ts";
 import { CATEGORIES, EMPTY, MAGNET, MATERIALS, SAND, SHORTCUTS, SNOW, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { panAfterZoom, pushRecent, read, ticksFor, write } from "./ui.ts";

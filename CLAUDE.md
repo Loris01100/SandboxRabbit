@@ -19,7 +19,7 @@ npm run cf-typegen # régénère worker-configuration.d.ts après un changement 
 npm run check      # asserts sur la simulation (test/sim.ts), le panneau (test/ui.ts) et l'API (test/api.ts), exécutés par Node
 ```
 
-Pas de framework de test : [test/sim.ts](test/sim.ts), [test/ui.ts](test/ui.ts) et [test/api.ts](test/api.ts) sont des scripts d'`assert`, lancés directement par Node (exécution native du TypeScript, d'où les imports en `.ts` dans `src/client/sim` et `src/worker`). `test/api.ts` interroge le Worker en mémoire via `app.request()` de Hono : ni serveur, ni wrangler, et sans binding `DB` c'est le store mémoire qui répond.
+Pas de framework de test : [test/sim.ts](test/sim.ts), [test/ui.ts](test/ui.ts) et [test/api.ts](test/api.ts) sont des scripts d'`assert`, lancés directement par Node (exécution native du TypeScript, d'où les imports en `.ts` partout dans `src/client` et `src/worker`). Node **dépouille** le TypeScript, il ne le compile pas : un import sans extension ou un paramètre-propriété (`constructor(private readonly x: T)`) met le module hors de portée des tests — c'est ce qui a longtemps gardé `render.ts` invérifiable. `test/api.ts` interroge le Worker en mémoire via `app.request()` de Hono : ni serveur, ni wrangler, et sans binding `DB` c'est le store mémoire qui répond.
 
 ## Architecture
 
@@ -52,6 +52,7 @@ Un seul Worker Cloudflare sert le site statique **et** l'API (binding `ASSETS`, 
 - La pierre fond au-delà de 1400 °C. C'est calibré : une nappe de lave ne chauffe la roche voisine qu'à ~800 °C, donc seule la thermite (2800 °C) peut creuser. Baisser ce seuil ferait fondre le décor de toutes les scènes de lave.
 - `SPARK` ne se propage que dans `METAL`, et le métal traversé garde `RECOVERY` ticks de repos : sans ça l'étincelle repart en arrière et le circuit ne s'éteint jamais. Tout ce qui met un fil sous tension passe par `charge()` (étincelle, `BATTERY`, `SWITCH` fermé).
 - `SWITCH` ne devient **jamais** une étincelle : il la relaie à ses voisins (`life` = 1 quand il est fermé). S'il se changeait en `SPARK`, il redeviendrait du `METAL` à l'extinction et l'interrupteur disparaîtrait de la grille.
+- Les quatre voisines s'obtiennent par les offsets `NX`/`NY` — c'était un générateur, et une quinzaine de règles l'appellent pour chaque cellule et chaque tick : un itérateur alloué par appel coûtait 30 % du tick sur une scène qui réagit (feu, TNT, circuits).
 - Le balayage de `step()` part du bas et alterne le sens en x selon `parity` ; `clock` empêche une cellule de bouger deux fois dans le même tick. Toucher à cet ordre introduit des dérives visibles de la matière.
 - `frozen` (1 par cellule) court-circuite tout : `step()` saute la cellule, `tryMove()` refuse de s'y déplacer, et `become()` — la transformation décidée par une règle (le feu prend, l'acide ronge) — passe son tour dessus. Une règle qui repeint un voisin passe par `become`, jamais par `set` : `set()` remet `frozen` à 0, c'est le geste du pinceau (repeindre libère).
 - Hors grille, `get()` renvoie `STONE` (mur implicite) — les règles n'ont pas besoin de tester les bords.

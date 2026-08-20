@@ -6,7 +6,7 @@
  * DOM — ni au panneau, ni au pinceau.
  */
 import { engine } from "./world.ts";
-import { decode, decodeFrozen } from "./sim/codec";
+import { decode, decodeFrozen } from "./sim/codec.ts";
 import { EMPTY, MATERIALS, type MaterialId } from "./sim/materials.ts";
 
 export type Gesture =

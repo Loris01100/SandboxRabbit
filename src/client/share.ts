@@ -7,8 +7,8 @@
  * d'importer main.ts, ce qui bouclerait.
  */
 import { HEIGHT, WIDTH, canvas, engine } from "./world.ts";
-import { thumbnail } from "./sim/render";
-import { encode, decode } from "./sim/codec";
+import { thumbnail } from "./sim/render.ts";
+import { encode, decode } from "./sim/codec.ts";
 import { EMPTY, MATERIALS, PALETTE } from "./sim/materials.ts";
 import { count, type Challenge } from "./challenges.ts";
 import { goalText, parseGoal } from "./ui.ts";
