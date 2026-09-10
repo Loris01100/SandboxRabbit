@@ -8,9 +8,9 @@ inflammable, explosifs, froid, vivant, électricité, gaz, outils) : `sable / ea
 pierre / bois / huile / goudron / alcool / acide / lave / plante / feu / glace /
 neige / azote liquide / sel / eau salée / poudre / TNT / nitroglycérine / C4 /
 mine / thermite / uranium / grisou / retombées / pétrole / graine / nanites / verre / verre fondu / mercure /
-cire / bougie / boue / braise / métal / pile / interrupteur / étincelle /
-ciment / limaille / aimant / source / fumée`, pinceau réglable, vue thermique, pause & pas à pas, galerie de
-mondes partagés.
+cire / cire fondue / bougie / boue / braise / métal / pile / interrupteur / étincelle /
+ciment / limaille / aimant / source / fumée / vapeur`, pinceau réglable, vue thermique, pause & pas à pas, galerie de
+mondes partagés, bac multijoueur.
 
 ### Ce qui se passe quand on mélange
 
@@ -35,7 +35,7 @@ mondes partagés.
 | Boue | Liquide lent et lourd qui engloutit, et sèche en sable au-dessus de 60 °C. |
 | Braise | Le bois brûlé passe une fois sur deux par la braise au lieu de disparaître : le foyer continue de chauffer (350 °C) et de rallumer bien après la flamme. |
 | Électricité | L'étincelle ne circule que dans le métal, à la vitesse d'un tick. Elle enflamme et fait sauter le TNT à l'autre bout du fil. Le métal traversé se repose 8 ticks, sinon l'étincelle rebondirait sans fin. |
-| Pile & interrupteur | La pile envoie une étincelle dans le métal voisin toutes les 24 frames, sans fin. L'interrupteur relaie l'étincelle quand il est fermé (il s'éclaircit) et coupe le circuit quand il est ouvert : cliquer dessus, avec l'interrupteur sélectionné, le bascule. De quoi câbler un vrai circuit plutôt qu'une étincelle lâchée à la main. |
+| Pile & interrupteur | La pile envoie une étincelle dans le métal voisin tous les 24 ticks, sans fin. L'interrupteur relaie l'étincelle quand il est fermé (il s'éclaircit) et coupe le circuit quand il est ouvert : cliquer dessus, avec l'interrupteur sélectionné, le bascule. De quoi câbler un vrai circuit plutôt qu'une étincelle lâchée à la main. |
 | Goudron | Huile lourde, `spread` 0 : elle coule à peine et brûle longtemps. |
 | Alcool | Le plus léger des liquides : il flotte sur tout, s'enflamme d'un rien (0,9) et s'évapore dès 40 °C. |
 | Verre fondu | Le verre refond au-dessus de 700 °C, coule, puis se fige sous 600 : sable → verre → verre fondu → verre, sans une ligne de règle dans le moteur. |
@@ -47,13 +47,13 @@ mondes partagés.
 | Ciment | Liquide qui prend en pierre à 60 °C : on le coule dans un moule et on le chauffe. Bâtir devient un geste de simulation, pas un coup de pinceau. Zéro ligne dans le moteur, juste un `boil`. |
 | Aimant & limaille | Un clic sur un aimant posé inverse son pôle : il repousse au lieu d'attirer, et le parcours du disque s'inverse avec lui (attirer part du centre, repousser du bord — comme le souffle). La seule règle de déplacement qui **ignore la gravité** : l'aimant tire d'un cran vers lui toute limaille dans un rayon de 5, du centre vers le bord (l'inverse du souffle) pour que les grains proches se collent d'abord. Un chapelet d'aimants fait remonter un tas de limaille le long d'un mur. |
 | Figer | L'outil « Figer » (touche `f`) immobilise la matière sous le pinceau : elle garde son identité et sa couleur (tramée en damier), mais aucune règle ne s'applique plus et rien ne peut la pousser. « Libérer » la rend à la gravité, repeindre par-dessus aussi. De quoi bâtir une structure en sable ou suspendre une cascade. |
-| Annuler / rétablir | `Ctrl+Z` et `Ctrl+Y` (ou `Ctrl+Maj+Z`) : dix crans, chacun revenant à l'état d'avant un geste (coup de pinceau, remplissage, « Vider », chargement d'un monde ou d'un défi). Une copie des quatre tableaux de la grille, ~230 ko le cran. Les deux piles se dépilent l'une dans l'autre — un même `jump()` sert aux deux sens — et un nouveau geste referme la branche annulée. |
-| Sonde | La barre du haut affiche la matière et la température sous le curseur : sans elle, la vue thermique n'est qu'un dégradé. |
+| Annuler / rétablir | `Ctrl+Z` et `Ctrl+Y` (ou `Ctrl+Maj+Z`) : dix crans, chacun revenant à l'état d'avant un geste (coup de pinceau, remplissage, « Vider », chargement d'un monde ou d'un défi). Une copie des quatre tableaux de la grille, ~400 ko le cran en 320×180. Les deux piles se dépilent l'une dans l'autre — un même `jump()` sert aux deux sens — et un nouveau geste referme la branche annulée. |
+| Sonde | La barre du haut affiche la matière et la température sous le curseur : sans elle, la vue thermique n'est qu'un dégradé. S'y ajoutent le nombre de cellules pleines et les images par seconde réellement posées — celles que livre le Worker de simulation, pas le rythme de l'écran. |
 | Symétrie | Une case à cocher : chaque coup de pinceau est aussi peint en miroir horizontal. Les moules, arches et cuvettes se font d'une main. |
 | Chrono des défis | Le temps de la réussite s'affiche et le meilleur reste dans `localStorage`, par défi. Horloge murale : la pause compte, c'est un chrono de joueur, pas de simulation. |
 | Figé sauvegardé | La sérialisation porte deux blocs séparés par un point : la matière, puis le figé quand il y en a. Un monde partagé garde donc ses structures suspendues, et un monde d'avant (sans point) reste lisible. |
 | État sauvegardé | La sérialisation porte jusqu'à quatre blocs : matière, figé, `life`, puis la température ramenée à un octet par pas de 8 °C. Un incendie enregistré repart chaud, une mèche allumée reste allumée. Coût : ~20 caractères sur une scène au repos, ~1,8 ko en plein feu. Les mondes d'avant, à un ou deux blocs, se relisent tels quels. |
-| Lien court | Le RLE est en base64 **url** (`-`, `_`, sans `=`) : les trois seuls caractères qu'`encodeURIComponent` échappe à trois caractères pièce. Et une longueur de 0 sert d'échappe vers un compte sur 16 bits, sinon un ciel vide coûtait une paire tous les 255 pixels. La scène de départ passe de 1388 à 646 caractères d'URL. |
+| Lien court | Le RLE est en base64 **url** (`-`, `_`, sans `=`) : les trois seuls caractères qu'`encodeURIComponent` échappe à trois caractères pièce. Et une longueur de 0 sert d'échappe vers un compte sur 16 bits, sinon un ciel vide coûtait une paire tous les 255 pixels. La scène de départ tient en ~520 caractères d'URL, état vivant compris. |
 | Aperçu du pinceau | Un cercle à la taille réelle suit le curseur — un `<div>` posé au-dessus du bac, en pixels d'écran : rien dans le rendu, et il suit le zoom sans le savoir. |
 | Matières récentes | Les six dernières choisies, épinglées au-dessus des familles. La palette étant un accordéon exclusif, y revenir coûtait sinon deux clics. |
 | Météo | Une case : il pleut du haut du bac, et c'est de la neige si l'ambiante est sous zéro. La gravité inversée fait tomber la pluie du bas. |
@@ -72,8 +72,10 @@ mondes partagés.
 | Galerie triée | Un `<select>` bascule entre « plus récents » et « plus vus ». Le tri se fait sur la liste déjà en main (plafonnée à 50 mondes), pas d'aller-retour au Worker. Charger un monde passe par `GET /api/worlds/:id`, seul endroit qui incrémente `views`. |
 | Accessibilité | Les flèches parcourent les grilles de matières (sinon quarante-six tabulations), la barre de statut et le but des défis sont des `role="status"` — les changements sont annoncés au lecteur d'écran. |
 | En-têtes | Le Worker pose une CSP stricte (aucun script ni style en ligne — la pastille de couleur d'une matière est montée en CSSOM exprès), `nosniff` et `referrer-policy` sur toute réponse, et un `cache-control` d'un an sur les fichiers hashés contre `no-cache` sur le HTML. Vérifié dans test/api.ts avec un faux binding ASSETS. |
-| Réglages retenus | Matière, pinceau, vitesse, vent et ambiante sont relus dans `localStorage` au chargement suivant. |
+| Réglages retenus | Matière, pinceau, outil, vitesse, vent, ambiante, taille de grille, zoom et les cases du panneau (symétrie, ne pas remplacer, gomme sélective, météo, vue thermique) sont relus dans `localStorage` au chargement suivant. |
 | Bac repris | La scène est écrite dans `localStorage` quand l'onglet passe en arrière-plan (`visibilitychange`, le seul événement fiable sur mobile) et rechargée au retour. Un lien partagé passe devant, la cuvette de départ n'arrive qu'à défaut. L'état vivant part avec la grille : un incendie laissé en plan repart chaud. |
+| Simulation à part | Le moteur tourne dans un Web Worker : la page ne fait que poser les pixels reçus, un `putImageData` par rafraîchissement d'écran. Une explosion en 640×360 ne fige plus le panneau, le zoom ni le pinceau. La page envoie des ordres, le Worker renvoie des nouvelles (`sim/sandbox.ts`), et un onglet en arrière-plan ralentit la simulation au lieu de la faire rattraper d'un coup. |
+| Jour / nuit | Bouton ☀ / 🌙 : un seul `color-scheme` sur la page, le CSS n'emploie que `light-dark()` et les contrôles natifs suivent. Sans choix enregistré, c'est le réglage du système qui décide, et la page le suit s'il change. |
 | Plein écran | Bouton « Plein écran » : `requestFullscreen()` sur le canvas, le CSS `pixelated` fait la mise à l'échelle et le rendu ne change pas d'une ligne. |
 | Image PNG | Le bac est réexporté ×4 sans lissage (`imageSmoothingEnabled = false`) et téléchargé : un PNG net, pas une capture d'écran floue. |
 | Ligne & remplissage | `Maj` + clic trace une ligne droite depuis le dernier point posé, clic droit remplit toute la poche de matière identique sous le curseur. |
@@ -81,15 +83,17 @@ mondes partagés.
 | Familles | La barre d'outils est découpée en `<details>` repliables (`CATEGORIES` dans `materials.ts`) : une famille ouverte à la fois suffit à tenir dans le panneau. Les raccourcis 1..9 / 0 restent sur les dix classiques, indépendamment de l'ordre d'affichage. |
 | Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours), case « Gomme sélective » : la gomme ne retire que la dernière matière choisie. Clic maintenu = dépôt continu, même sans bouger la souris. |
 | Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. La largeur de la grille passe devant (`#320~…`) : le bac du visiteur s'y met, sinon un monde 480 relu dans un bac 320 se décale d'une ligne à chaque rangée. |
-| Galerie | « Sauvegarder » envoie le monde au Worker, « Galerie » ouvre une modale (`<dialog>` natif) qui liste tous les mondes sauvegardés avec leur vignette : la grille décodée est redessinée dans un canvas hors écran, mêmes couleurs que le bac. Un clic charge la scène, la croix au survol d'une vignette supprime le monde. Une seule requête : la liste renvoie les grilles, ~1 ko chacune. |
+| Galerie | « Sauvegarder » envoie le monde au Worker, « Galerie » ouvre une modale (`<dialog>` natif) qui liste tous les mondes sauvegardés avec leur vignette : la grille décodée est redessinée dans un canvas hors écran, mêmes couleurs que le bac. Un clic charge la scène. La croix au survol d'une vignette supprime le monde, mais seulement sur ceux qu'on a soi-même sauvegardés : le Worker rend un jeton de suppression à la sauvegarde, le navigateur le garde dans `localStorage` et le présente au `DELETE`. Une seule requête : la liste renvoie les grilles coupées à leur bloc matière, quelques centaines d'octets chacune. |
 
 ## Stack
 
 | Morceau | Choix | Pourquoi |
 | --- | --- | --- |
-| Front | TypeScript + Vite, canvas 2D | 1 cellule = 1 pixel dans un `ImageData`, un seul `putImageData` par frame. ~0,2 ms par tick sur une grille 320×180. |
+| Front | TypeScript + Vite, canvas 2D, aucun framework | 1 cellule = 1 pixel dans un `ImageData`, un seul `putImageData` par frame. Budget de bundle en CI : 80 Kio de JS + CSS. |
+| Simulation | Web Worker | Le moteur ne partage pas le fil de la page. Coût du tick : `npm run bench`, la CI échoue au-delà de 4 ms en 320×180. |
 | Serveur | Worker Cloudflare + [Hono](https://hono.dev) | Un seul déploiement sert le site statique **et** l'API (`env.ASSETS`). |
 | Stockage | D1 en déployé, Map en mémoire en local, même interface | Voir `src/worker/store.ts`. |
+| Temps réel | Durable Object + WebSocket (hibernation) | Un salon = un DO qui relaie sans simuler. Voir `src/worker/room.ts`. |
 
 ### Pages ou Workers ?
 
@@ -115,13 +119,16 @@ Rust sur Cloudflare passe par WebAssembly. Deux usages possibles :
 ## Commandes
 
 ```bash
-npm install
-npm run dev        # http://localhost:5173 — front + Worker dans workerd, avec HMR
+npm install        # Node ≥ 24 (exécution native du TypeScript)
+npm run dev        # http://localhost:5173 — front + Worker dans workerd, avec HMR, store en mémoire
 npm run typecheck  # client et worker ont chacun leur tsconfig (DOM vs runtime Workers)
-npm run check      # auto-vérifications : simulation (test/sim.ts) puis API (test/api.ts), Node exécute le TS tel quel
-npm run build
+npm run check      # auto-vérifications : simulation, panneau, API, protocole du bac (test/*.ts, Node exécute le TS tel quel)
+npm run bench      # coût du tick sur trois tailles de grille ; échoue au-delà de 4 ms en 320×180
+npm run loc        # taille du projet par poste
+npm run build      # typecheck puis vite build
 npm run preview    # build puis exécution du Worker en local
-npm run deploy     # déploiement (npx wrangler login la première fois)
+npm run cf-typegen # régénère worker-configuration.d.ts après un changement de bindings
+npm run deploy     # build, check puis wrangler deploy (npx wrangler login la première fois)
 ```
 
 ## API
@@ -129,30 +136,38 @@ npm run deploy     # déploiement (npx wrangler login la première fois)
 | Route | Effet |
 | --- | --- |
 | `GET /api/health` | État + backend de stockage actif |
-| `GET /api/worlds` | Liste des mondes, grille comprise (50 max) |
-| `GET /api/worlds/:id` | Un monde complet |
-| `POST /api/worlds` | Sauvegarde `{ name, width, height, data }` |
-| `DELETE /api/worlds/:id` | Supprime un monde (ouvert à tous, comme la sauvegarde) |
+| `GET /api/worlds` | Liste des 50 mondes les plus récents, grille coupée à son bloc matière (de quoi faire les vignettes) |
+| `GET /api/worlds/:id` | Un monde complet ; compte une vue |
+| `POST /api/worlds` | Sauvegarde `{ name, width, height, data, goal? }`, répond `201 { id, token }` |
+| `DELETE /api/worlds/:id` | Supprime un monde, avec l'en-tête `x-world-token` reçu à la sauvegarde (`403` sinon) |
+| `GET /api/room/:id` | Ouvre une WebSocket vers le salon partagé `:id` |
 
-Les deux routes d'écriture passent par le binding **Rate Limiting** de Cloudflare (`unsafe` dans `wrangler.jsonc`) : 20 requêtes par IP et par minute, `429` au-delà, aucun compteur à stocker. En dev local le binding est absent et tout passe.
+Le jeton de suppression est tiré par le Worker et rendu **une seule fois**, par le `POST` : aucune route de lecture ne le renvoie. Les mondes d'avant les jetons ne se suppriment plus que par le ménage nocturne.
 
-`data` est la grille en RLE + base64 (`src/client/sim/codec.ts`) : un monde
-320×180 pèse environ 1,3 ko.
+Les deux routes d'écriture et l'ouverture d'un salon passent par le binding **Rate Limiting** de Cloudflare (`unsafe` dans `wrangler.jsonc`) : 20 requêtes par IP et par minute, `429` au-delà, aucun compteur à stocker. En dev local le binding est absent et tout passe.
 
-## Étapes suivantes
+`data` est la grille en RLE + base64 url (`src/client/sim/codec.ts`), état
+vivant compris : un monde 320×180 pèse de quelques centaines d'octets au repos
+à un ou deux kilo-octets en plein feu. Plafond : 200 000 caractères.
 
-**Base de données (D1)**
+## Base de données (D1)
+
+D1 est branché : le binding `DB` est déclaré dans `wrangler.jsonc`, et
+`createStore()` l'utilise dès qu'il existe (en déployé). En local (`npm run dev`,
+tests), c'est une `Map` en mémoire qui répond, sans rien partager.
+
+Le schéma évolue par fichiers numérotés dans `migrations/` — un nouveau fichier
+par changement, jamais de retouche d'un ancien :
 
 ```bash
-npx wrangler d1 create sandbox-rabbit           # récupérer le database_id
-# décommenter la section d1_databases de wrangler.jsonc, y coller l'id
-npx wrangler d1 migrations apply sandbox-rabbit --local
-npx wrangler d1 migrations apply sandbox-rabbit --remote
-npm run cf-typegen
+npx wrangler d1 migrations apply sandbox-rabbit --remote   # après chaque nouvelle migration
 ```
 
-`createStore()` bascule tout seul sur D1 dès que le binding existe : rien
-d'autre à changer.
+Pour repartir d'une base neuve (autre compte Cloudflare) : `npx wrangler d1
+create sandbox-rabbit`, reporter le `database_id` dans `wrangler.jsonc`, appliquer
+les migrations, puis `npm run cf-typegen`.
+
+## Pistes
 
 **Comportements IA**
 
@@ -164,8 +179,18 @@ Deux pistes distinctes, à ne pas confondre :
 - *IA générative côté Worker* — ajouter `"ai": { "binding": "AI" }` dans
   `wrangler.jsonc` donne accès à Workers AI depuis le Worker : générer une
   carte à partir d'une description, commenter ce que fait le joueur, etc.
-  Le binding est déjà déclaré (optionnel) dans `Env`.
+  Il faudrait alors déclarer le binding (optionnel, `AI?: Ai`) dans l'interface
+  `Env` de `src/worker/app.ts`.
 
-**Nouvelle matière** : une entrée dans `MATERIALS` + son id dans une famille de
-`CATEGORIES`. Si son comportement n'est pas couvert par `kind` (`powder` /
-`liquid` / `gas` / `static`), lui ajouter un `case` dans `Engine.update`.
+## Contribuer
+
+Les consignes de développement — architecture, invariants du moteur, recettes
+(ajouter une matière, un défi, une route…), tests et budgets de la CI — sont
+dans [AGENTS.md](AGENTS.md) et [docs/agents/](docs/agents/). Elles servent aux
+agents IA comme aux humains.
+
+**Nouvelle matière**, en bref : une entrée dans `MATERIALS` + son id dans une
+famille de `CATEGORIES`. Si son comportement n'est pas couvert par `kind`
+(`powder` / `liquid` / `gas` / `static`), lui ajouter un `case` dans
+`Engine.update`. La marche complète est dans
+[docs/agents/recettes.md](docs/agents/recettes.md).
