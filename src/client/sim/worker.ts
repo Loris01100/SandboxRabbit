@@ -28,12 +28,25 @@ worker.onmessage = (e) => {
   bac?.order(order);
 };
 
-/** ~60 Hz. Le vrai rythme, c'est le temps écoulé : le bac fait ses comptes avec. */
+const PERIOD = 1000 / 60;
+/** L'heure à laquelle la prochaine frame est due. */
+let due = performance.now();
+
+/**
+ * ~60 Hz. Le vrai rythme, c'est le temps écoulé : le bac fait ses comptes avec.
+ * On vise une échéance fixe plutôt qu'un délai après le travail : attendre
+ * 16,7 ms *après* une frame qui en coûte 10 ne livrait que ~37 images par
+ * seconde. En retard de plus d'une frame (onglet en veille, tick trop lourd), on
+ * repart de maintenant au lieu d'enchaîner des frames pour rattraper.
+ */
 function loop(): void {
   const now = performance.now();
   const elapsed = now - last;
   last = now;
   bac?.frame(elapsed);
-  setTimeout(loop, 1000 / 60);
+  due += PERIOD;
+  const after = performance.now();
+  if (due < after - PERIOD) due = after;
+  setTimeout(loop, Math.max(0, due - after));
 }
 loop();

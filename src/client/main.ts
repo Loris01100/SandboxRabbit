@@ -4,7 +4,7 @@ import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { panAfterZoom, pushRecent, read, write } from "./ui.ts";
 import { captureFrame, initShare } from "./share.ts";
 import { initRoom, relay } from "./room.ts";
-import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, onResize, order, resize, type ClipData } from "./world.ts";
+import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, onResize, order, present, resize, type ClipData } from "./world.ts";
 import type { Knobs } from "./sim/sandbox.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
@@ -822,9 +822,12 @@ let lastReport = performance.now();
 function frame(now: number): void {
   // Clic maintenu sans bouger : on continue de déposer sous le curseur.
   if (painting && last) paintAt(last.x, last.y);
+  // On ne compte que les images neuves venues du bac : cette boucle-ci tourne
+  // à 60 Hz quoi qu'il arrive (elle ne fait presque rien), la compter
+  // affichait 60 fps même quand le Worker n'en livrait que 30.
+  if (present()) frames++;
   captureFrame(); // vidéo en cours : la frame y part aussi
 
-  frames++;
   if (now - lastReport >= 500) {
     fpsEl.textContent = String(Math.round((frames * 1000) / (now - lastReport)));
     frames = 0;

@@ -71,16 +71,32 @@ export function askClip(x: number, y: number, x2: number, y2: number): Promise<C
   });
 }
 
+/** La dernière image reçue du bac, pas encore posée sur le canvas. */
+let pending: Extract<News, { t: "frame" }> | null = null;
+
+/**
+ * Pose la dernière image reçue, s'il en est arrivé une depuis l'appel
+ * précédent. Appelé par la boucle `requestAnimationFrame` de la page : on
+ * dessine au rythme de l'écran, et deux images arrivées entre deux
+ * rafraîchissements ne coûtent qu'un `putImageData`. Renvoie `true` quand une
+ * image neuve a été posée — c'est ce que compte l'affichage des fps.
+ */
+export function present(): boolean {
+  if (!pending) return false;
+  const { pixels, w, h } = pending;
+  pending = null;
+  // Le canvas suit la taille de la grille : c'est le CSS (`pixelated`) qui
+  // met à l'échelle, un seul `putImageData` par frame comme avant.
+  if (canvas.width !== w) { canvas.width = w; canvas.height = h; }
+  // Le tableau vient d'un clone structuré : TypeScript lui donne un
+  // `ArrayBufferLike`, `ImageData` veut un `ArrayBuffer` — c'en est un.
+  ctx.putImageData(new ImageData(pixels as Uint8ClampedArray<ArrayBuffer>, w, h), 0, 0);
+  return true;
+}
+
 sim.addEventListener("message", (e: MessageEvent<News>) => {
   const news = e.data;
-  if (news.t === "frame") {
-    // Le canvas suit la taille de la grille : c'est le CSS (`pixelated`) qui
-    // met à l'échelle, un seul `putImageData` par frame comme avant.
-    if (canvas.width !== news.w) { canvas.width = news.w; canvas.height = news.h; }
-    // Le tableau vient d'un clone structuré : TypeScript lui donne un
-    // `ArrayBufferLike`, `ImageData` veut un `ArrayBuffer` — c'en est un.
-    ctx.putImageData(new ImageData(news.pixels as Uint8ClampedArray<ArrayBuffer>, news.w, news.h), 0, 0);
-  }
+  if (news.t === "frame") pending = news;
   if (news.t === "grid") latest = news.full;
   if (news.t === "reply") {
     waiting.get(news.ask)?.(news.value);
