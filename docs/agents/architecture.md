@@ -87,6 +87,11 @@ souris (main.ts)
 Poster `order({t:"do"})` ailleurs que dans `gesture()` : le geste n'atteint pas
 l'hôte d'un salon et un invité le voit effacé par l'instantané suivant.
 
+Une créature de taille fixe (le lapin) passe par le même `paint`, mais
+`placesCreature()` de main.ts n'en envoie qu'un par clic (ni trait ni dépôt
+continu), et `paint()` côté moteur en pose une entière quel que soit le rayon
+reçu : un pair de salon ne peut pas en semer un disque.
+
 ## Salon partagé (bac multijoueur)
 
 - Serveur : [src/worker/room.ts](../../src/worker/room.ts), un Durable Object par

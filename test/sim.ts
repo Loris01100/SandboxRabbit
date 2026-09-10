@@ -13,7 +13,7 @@ import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
-  CEMENT, FILINGS, MAGNET, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
+  CEMENT, FILINGS, MAGNET, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
 const W = 60, H = 40;
@@ -643,6 +643,133 @@ function count(e: Engine, id: MaterialId): number {
   for (let x = 20; x < 30; x++) e.set(x, 19, FALLOUT);
   for (let t = 0; t < 30; t++) e.step();
   assert.equal(count(e, PLANT), 0, "les retombées tuent la plante");
+}
+
+// Le lapin. Graines fixes : ses règles tirent beaucoup au sort, et un test qui
+// échoue une fois sur mille ne dirait rien.
+{
+  /** Un sol de pierre en y = 38, et rien d'autre. */
+  const pré = (seed: number): Engine => {
+    const e = new Engine(W, H, seed);
+    for (let x = 0; x < W; x++) e.set(x, 38, STONE);
+    return e;
+  };
+  /** Colonne du cœur du (premier) lapin. */
+  const où = (e: Engine): number => e.cells.indexOf(RABBIT) % W;
+  /** Toutes les cellules de lapin : neuf par lapin entier. */
+  const corps = (e: Engine): number =>
+    count(e, RABBIT) + count(e, RABBIT_BODY) + count(e, RABBIT_EYE) + count(e, RABBIT_TAIL);
+  // Posé au sol (y = 38), le cœur est en y = 36 : les pattes sont une rangée plus bas.
+  const SOL = 36;
+
+  // Taille fixe : un coup de pinceau pose un lapin entier, quel que soit le rayon.
+  const pose = pré(10);
+  pose.paint(30, SOL, 12, RABBIT);
+  assert.equal(count(pose, RABBIT), 1, "un coup de pinceau, un lapin");
+  assert.equal(corps(pose), 9, "de neuf cellules");
+  assert.equal(count(pose, RABBIT_EYE), 1, "avec un œil");
+  pose.paint(30, SOL, 12, RABBIT);
+  assert.equal(count(pose, RABBIT), 1, "pas de second lapin là où il n'y a pas la place");
+  pose.rect(0, 0, 20, 20, RABBIT);
+  assert.equal(count(pose, RABBIT), 2, "un rectangle de lapin en pose un seul, au milieu");
+
+  // Il tombe d'un bloc et atterrit entier.
+  const chute = pré(11);
+  chute.paint(30, 5, 1, RABBIT);
+  for (let t = 0; t < 60; t++) chute.step();
+  assert.equal(corps(chute), 9, "la chute ne le démembre pas");
+  assert.equal((chute.cells.indexOf(RABBIT) / W) | 0, SOL, "il est posé sur le sol");
+
+  // Il broute la prairie sous ses pattes.
+  const repas = pré(12);
+  for (let x = 10; x < 51; x++) repas.set(x, 37, PLANT);
+  repas.paint(30, SOL - 1, 1, RABBIT);
+  for (let t = 0; t < 400; t++) repas.step();
+  assert.ok(count(repas, PLANT) < 41, `le lapin mange les plantes (${count(repas, PLANT)} restent sur 41)`);
+  assert.equal(count(repas, RABBIT), 1, "et il est toujours là");
+
+  // Sans rien à manger, il meurt de faim (~1000 ticks en moyenne).
+  const disette = pré(13);
+  disette.paint(30, SOL, 1, RABBIT);
+  for (let t = 0; t < 400; t++) disette.step();
+  assert.equal(corps(disette), 9, "il tient un moment le ventre vide");
+  for (let t = 0; t < 2600; t++) disette.step();
+  assert.equal(corps(disette), 0, "puis il meurt de faim, et tout son corps avec lui");
+
+  // Il fuit la chaleur vers le côté le plus frais, et s'arrête dès qu'il est
+  // au frais : il ne court pas jusqu'au bord. La source est à quatre cellules
+  // du cœur, assez près pour que sa case de départ passe au-dessus de 45 °C.
+  const brasier = pré(14);
+  brasier.paint(30, SOL, 1, RABBIT);
+  for (let t = 0; t < 150; t++) {
+    for (let x = 24; x < 27; x++) brasier.temp[brasier.index(x, SOL)] = 400;
+    brasier.step();
+  }
+  const refuge = brasier.cells.indexOf(RABBIT);
+  assert.equal(corps(brasier), 9, "il n'a pas cuit");
+  assert.ok(brasier.temp[brasier.index(30, SOL)] > 45, "sa case de départ est devenue trop chaude");
+  assert.ok(où(brasier) >= 32, `il s'est éloigné de la chaleur (x = ${où(brasier)}, parti de 30)`);
+  assert.ok(brasier.temp[refuge] < 45, `et il s'est posé au frais (${Math.round(brasier.temp[refuge])} °C)`);
+
+  // Plus dense que l'eau, il coule d'un bloc — l'eau déplacée remonte — et il se noie.
+  const mare = pré(15);
+  for (let y = 26; y < 38; y++) { mare.set(18, y, STONE); mare.set(33, y, STONE); }
+  for (let x = 19; x < 33; x++) for (let y = 29; y < 38; y++) mare.set(x, y, WATER);
+  const eau = count(mare, WATER);
+  mare.paint(25, 20, 1, RABBIT);
+  let fond = false;
+  for (let t = 0; t < 400; t++) {
+    mare.step();
+    if (mare.cells.indexOf(RABBIT) >= 0) fond ||= ((mare.cells.indexOf(RABBIT) / W) | 0) === SOL;
+  }
+  assert.ok(fond, "il a coulé jusqu'au fond");
+  assert.equal(corps(mare), 0, "et il s'y est noyé");
+  assert.ok(count(mare, WATER) >= eau - 2, `l'eau qu'il a traversée n'a pas disparu (${count(mare, WATER)} sur ${eau})`);
+
+  // Deux lapins repus dans un enclos : un petit, de la même taille qu'eux.
+  const enclos = pré(16);
+  for (let y = 26; y < 38; y++) { enclos.set(14, y, STONE); enclos.set(45, y, STONE); }
+  enclos.paint(24, SOL, 1, RABBIT);
+  enclos.paint(30, SOL, 1, RABBIT);
+  for (let t = 0; t < 200; t++) enclos.step();
+  assert.ok(count(enclos, RABBIT) >= 3, `deux lapins repus se reproduisent (${count(enclos, RABBIT)})`);
+  assert.equal(corps(enclos), 9 * count(enclos, RABBIT), "et chaque petit a un corps entier");
+
+  // Seul, il ne se reproduit pas.
+  const seul = pré(17);
+  seul.paint(30, SOL, 1, RABBIT);
+  for (let t = 0; t < 200; t++) seul.step();
+  assert.equal(count(seul, RABBIT), 1, "un lapin seul reste seul");
+
+  // Une patte arrachée : il n'y survit pas, et rien ne traîne derrière lui.
+  const blessé = pré(18);
+  blessé.paint(30, SOL, 1, RABBIT);
+  blessé.set(28, SOL + 1, EMPTY);
+  for (let t = 0; t < 3; t++) blessé.step();
+  assert.equal(corps(blessé), 0, "un corps incomplet disparaît en entier");
+
+  // Un cœur posé seul (`set()`) se refait un corps s'il a la place.
+  const cœur = pré(19);
+  cœur.set(30, SOL, RABBIT);
+  cœur.step();
+  assert.equal(corps(cœur), 9, "le cœur seul se refait un corps");
+
+  // Grille sans état vivant (monde ancien, invité promu hôte d'un salon) : les
+  // lapins n'en dépendent pas, ni pour leur corps ni pour leur satiété.
+  const ancien = pré(20);
+  ancien.paint(20, SOL, 1, RABBIT);
+  ancien.paint(40, SOL, 1, RABBIT);
+  ancien.life.fill(0);
+  for (let t = 0; t < 20; t++) ancien.step();
+  assert.equal(corps(ancien), 18, "sans `life`, les lapins restent entiers");
+
+  // Le froid le fige d'un bloc : un lapin de glace, pas un glaçon et huit trous.
+  const hiver = pré(21);
+  hiver.ambient = -40;
+  hiver.paint(30, SOL, 1, RABBIT);
+  for (let t = 0; t < 300; t++) hiver.step();
+  assert.equal(corps(hiver), 0, "à -40 °C il ne tient pas");
+  assert.equal(count(hiver, ICE), 9, "il est pris dans la glace, en entier");
 }
 
 /** Ligne la plus haute où l'on trouve `id` (H si absent). */

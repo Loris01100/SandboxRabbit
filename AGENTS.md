@@ -4,7 +4,7 @@ Guide pour les agents IA (Claude Code, Codex, Cursor, Copilot, Gemini…) qui
 travaillent sur ce dépôt. Ce fichier est le point d'entrée ; les guides
 détaillés sont dans [docs/agents/](docs/agents/).
 
-**Sandbox Rabbit** est un bac à sable cellulaire (« falling sand ») : ~46
+**Sandbox Rabbit** est un bac à sable cellulaire (« falling sand ») : ~47
 matières, chaleur, explosifs, électricité, défis, galerie de mondes partagés et
 bac multijoueur. Client TypeScript sans framework (canvas 2D, simulation dans
 un Web Worker), servi par **un seul** Worker Cloudflare (Hono) qui héberge
@@ -82,15 +82,18 @@ aucun test précis.
 
 - Tout tirage au sort du moteur (et de la météo) passe par `engine.rand()`,
   **jamais** `Math.random()`.
-- Déplacements via `tryMove()`, `y + this.gravity` et `drift()`. Seule
-  exception : `MAGNET`.
+- Déplacements via `tryMove()`, `y + this.gravity` et `drift()`. Exceptions :
+  `MAGNET`, et le lapin qui bouge ses neuf cellules d'un bloc (`relocate()`).
 - Une règle transforme un voisin avec `become()`, pas `set()` (qui libère le
   figé).
 - Ne pas lire `MATERIALS[id].xxx` dans le chemin chaud : utiliser les tables
   dérivées (`KIND`, `DENSITY`, `HEAT`…) ou en ajouter une.
 - `life` est un octet (≤ 250) aux usages multiples selon la matière : ne pas le
   réinitialiser à l'aveugle.
-- Changement d'état = `boil` / `freeze` dans `MATERIALS`, pas de règle.
+- Changement d'état = `boil` / `freeze` dans `MATERIALS`, pas de règle — sauf
+  pour une créature, qui change en entier.
+- Le corps d'une créature ne garde rien dans `life` : le salon ne le transmet
+  pas.
 - `engine.temp` est réassigné à chaque tick : ne pas en garder de référence.
 - Ne pas toucher à l'ordre du balayage, à `clock`, ni à l'ordre bord → centre
   d'`explode()`.

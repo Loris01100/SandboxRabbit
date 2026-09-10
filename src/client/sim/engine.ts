@@ -1,6 +1,6 @@
 import {
   ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FALLOUT, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
-  FILINGS, MAGNET, MINE, NANITE, NITRO, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM,
+  FILINGS, MAGNET, MINE, MUD, NANITE, NITRO, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM,
   STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
@@ -35,6 +35,72 @@ const NUKE = 16;
 /** Portée de l'aimant, en cellules. */
 const PULL = 5;
 
+/*
+ * Le lapin : neuf cellules de taille fixe, que son cœur (`RABBIT`) déplace d'un
+ * bloc. De profil, tourné vers la droite, en offsets depuis le cœur ◆ :
+ *
+ *     . . █ .      oreille
+ *     . . █ ●      tête, œil
+ *     ░ █ ◆ █      queue, dos, cœur, museau
+ *     █ . █ .      pattes
+ *
+ * Tourné vers la gauche, on inverse les `dx`. Le cœur d'abord.
+ * ponytail: la forme ne suit pas la gravité — retournée, le lapin tombe vers le
+ * plafond en gardant les oreilles en haut, et y marche sur la tête. À revoir si
+ * la gravité inversée devient autre chose qu'un gag.
+ */
+const RABBIT_DX = new Int8Array([0, 0, 0, 1, -2, -1, 1, -2, 0]);
+const RABBIT_DY = new Int8Array([0, -2, -1, -1, 0, 0, 0, 1, 1]);
+const RABBIT_ID = new Uint8Array([
+  RABBIT, RABBIT_BODY, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, RABBIT_BODY, RABBIT_BODY, RABBIT_BODY, RABBIT_BODY,
+]);
+const RABBIT_SIZE = RABBIT_ID.length;
+/** Où il broute : devant la tête et le museau, sous le ventre et sous les pattes. */
+const MOUTH_DX = new Int8Array([2, 2, 1, -1, 0, -2]);
+const MOUTH_DY = new Int8Array([-1, 0, 1, 1, 2, 2]);
+
+/*
+ * `life` du cœur est la satiété : 200 posé au pinceau, elle baisse d'un cran
+ * avec une chance `HUNGER` par tick (~1000 ticks, un quart de minute, sans
+ * manger) et il meurt à zéro. Il ne cherche à manger que sous `HUNGRY`, et ne
+ * se reproduit que repu. Les autres cellules du corps n'ont pas d'état.
+ */
+/** Satiété d'un lapin posé au pinceau. */
+const FED = MATERIALS[RABBIT].life!;
+/** Chance, par tick, de perdre un cran de satiété. */
+const HUNGER = 0.2;
+/** Sous ce seuil, le lapin cherche une plante des yeux. */
+const HUNGRY = 150;
+/** Ce que rapporte une bouchée de plante. */
+const MEAL = 50;
+/** Satiété à partir de laquelle deux voisins font un petit… */
+const BREED = 180;
+/** …ce qui coûte ce prix au parent : il lui faut deux repas pour recommencer. */
+const LITTER_COST = 80;
+/** Satiété du nouveau-né : sous `BREED`, sinon la portée repart aussitôt. */
+const NEWBORN = 120;
+/** Chance, par tick et à deux voisins repus, d'avoir un petit. */
+const LITTER = 0.05;
+/** Au-delà de cette température (°C), le lapin fuit vers le côté le plus frais. */
+const FLEE = 45;
+/** Portée du regard vers une plante, en cellules de chaque côté. */
+const SIGHT = 8;
+/** Chance, par tick, de faire un pas : en fuite, vers une plante vue, au hasard. */
+const PACE_FLEE = 0.6;
+const PACE_SEEK = 0.3;
+const PACE_WANDER = 0.08;
+/** Chance, par tick sous l'eau, de se noyer. */
+const DROWN = 0.03;
+/** Chance, en flânant, de faire demi-tour (sinon il marche droit devant lui). */
+const TURN = 0.2;
+/**
+ * Cuisson et gel. Pas de `boil` / `freeze` ici : `thermal()` ne changerait que
+ * le cœur, et le reste du corps disparaîtrait avec lui. Le lapin entier doit
+ * passer d'un coup, en feu ou en glace — c'est donc une règle.
+ */
+const COOK = 110;
+const FROST = -25;
+
 /**
  * `thermal()` lit trois propriétés par cellule et par tick : autant les sortir
  * de `MATERIALS` une fois pour toutes. Un accès de tableau typé au lieu d'une
@@ -57,6 +123,12 @@ for (const key of Object.keys(MATERIALS)) {
   if (m.heat !== undefined) HEAT[m.id] = m.heat;
   if (m.boil) { BOIL_AT[m.id] = m.boil.at; BOIL_INTO[m.id] = m.boil.into; }
   if (m.freeze) { FREEZE_AT[m.id] = m.freeze.at; FREEZE_INTO[m.id] = m.freeze.into; }
+}
+/** 1 = matière de créature (le pinceau en pose une entière) ou cellule de son corps. */
+const CREATURE = new Uint8Array(256);
+for (const key of Object.keys(MATERIALS)) {
+  const m = MATERIALS[Number(key)];
+  if (m.creature || m.part !== undefined) CREATURE[m.id] = 1;
 }
 
 /**
@@ -130,6 +202,11 @@ export class Engine {
   emit: MaterialId = WATER;
   /** État du tirage au sort. Voir `rand()`. */
   private state: number;
+  /** Cases de départ et d'arrivée d'un lapin qui bouge, et ce qu'il déplace : alloués une fois. */
+  private readonly moveFrom = new Int32Array(RABBIT_SIZE);
+  private readonly moveTo = new Int32Array(RABBIT_SIZE);
+  private readonly carryId = new Uint8Array(RABBIT_SIZE);
+  private readonly carryLife = new Uint8Array(RABBIT_SIZE);
 
   constructor(width: number, height: number, seed = (Math.random() * 0x1_0000_0000) >>> 0) {
     // Un xorshift32 meurt sur 0 : toute graine nulle devient 1.
@@ -251,6 +328,8 @@ export class Engine {
    * `only` : ne touche que les cellules de cette matière (gomme sélective).
    */
   paint(cx: number, cy: number, radius: number, id: MaterialId, density = 1, overwrite = true, only?: MaterialId): void {
+    // Une créature a sa taille : un coup de pinceau en pose une, quel que soit le rayon.
+    if (CREATURE[id]) { this.spawnRabbit(Math.round(cx), Math.round(cy), 1, overwrite); return; }
     const r2 = radius * radius;
     const [x0, x1, y0, y1] = this.disc(cx, cy, radius);
     for (let y = y0; y <= y1; y++) {
@@ -272,6 +351,8 @@ export class Engine {
    * un pour bâtir un réservoir ou un moule.
    */
   rect(x0: number, y0: number, x1: number, y1: number, id: MaterialId, overwrite = true): void {
+    // Un rectangle de cœurs sans place pour leurs corps mourrait aussitôt : un lapin, au milieu.
+    if (CREATURE[id]) { this.spawnRabbit(Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2), 1, overwrite); return; }
     const left = Math.max(0, Math.min(x0, x1));
     const right = Math.min(this.width - 1, Math.max(x0, x1));
     const top = Math.max(0, Math.min(y0, y1));
@@ -367,7 +448,7 @@ export class Engine {
     if (!this.inBounds(x, y)) return;
     const start = this.index(x, y);
     const from = this.cells[start];
-    if (from === id) return;
+    if (from === id || CREATURE[id]) return; // une poche ne se remplit pas de lapins
     const stack = [start];
     while (stack.length > 0) {
       const i = stack.pop()!;
@@ -460,6 +541,8 @@ export class Engine {
       case EMBER: this.updateEmber(i, x, y); return;
       case SPARK: this.updateSpark(i, x, y); return;
       case MAGNET: this.updateMagnet(i, x, y); return;
+      case RABBIT: this.updateRabbit(i, x, y); return;
+      case RABBIT_BODY: case RABBIT_EYE: case RABBIT_TAIL: this.updateRabbitPart(x, y, id); return;
       // Le métal ne fait que sortir de sa période de repos.
       case METAL: if (this.life[i] > 0) this.life[i]--; return;
     }
@@ -568,7 +651,7 @@ export class Engine {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       const dissolvable = n === STONE || n === WOOD || n === SAND || n === PLANT
-        || n === GLASS || n === ICE || n === SEED;
+        || n === GLASS || n === ICE || n === SEED || CREATURE[n] === 1;
       if (dissolvable && this.rand() < 0.06) {
         this.become(nx, ny, EMPTY);
         if (this.rand() < 0.5) { this.become(x, y, SMOKE); return; } // l'acide s'use
@@ -701,7 +784,7 @@ export class Engine {
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
-      if (n === PLANT || n === SEED) this.become(nx, ny, EMPTY);
+      if (n === PLANT || n === SEED || CREATURE[n] === 1) this.become(nx, ny, EMPTY);
     }
     this.updateGas(i, x, y, FALLOUT);
   }
@@ -957,6 +1040,239 @@ export class Engine {
       if (this.cells[at] !== FILINGS || this.frozen[at]) continue;
       this.tryMove(at, x + dx + push * Math.sign(dx), y + dy + push * Math.sign(dy), FILINGS);
     }
+  }
+
+  /**
+   * Pose un lapin entier, cœur en (x, y), tourné vers `f`, si toutes ses cases
+   * sont libres (ou liquides et gazeuses si `over`). Un cœur déjà là — posé
+   * seul par `set()` — garde sa place et sa satiété. Renvoie l'index du cœur,
+   * -1 faute de place : un lapin ne s'incruste pas dans la pierre.
+   */
+  spawnRabbit(x: number, y: number, f: number, over = false): number {
+    for (let k = 0; k < RABBIT_SIZE; k++) {
+      const px = x + f * RABBIT_DX[k], py = y + RABBIT_DY[k];
+      if (!this.inBounds(px, py)) return -1;
+      const j = this.index(px, py);
+      if (this.frozen[j]) return -1;
+      const n = this.cells[j];
+      if (n === EMPTY || (k === 0 && n === RABBIT)) continue;
+      if (over && (KIND[n] === KINDS.liquid || KIND[n] === KINDS.gas)) continue;
+      return -1;
+    }
+    for (let k = 0; k < RABBIT_SIZE; k++) {
+      const px = x + f * RABBIT_DX[k], py = y + RABBIT_DY[k];
+      if (k === 0 && this.cells[this.index(px, py)] === RABBIT) continue;
+      this.become(px, py, RABBIT_ID[k]);
+    }
+    return this.index(x, y);
+  }
+
+  /** Nombre de cellules du lapin de cœur (x, y) à leur place pour le sens `f`, cœur compris. */
+  private intact(x: number, y: number, f: number): number {
+    let n = 0;
+    for (let k = 0; k < RABBIT_SIZE; k++) {
+      if (this.get(x + f * RABBIT_DX[k], y + RABBIT_DY[k]) === RABBIT_ID[k]) n++;
+    }
+    return n;
+  }
+
+  /** Change tout le corps (ce qu'il en reste) en `into` : mort, cuisson, gel. */
+  private kill(x: number, y: number, f: number, into: MaterialId): void {
+    for (let k = 0; k < RABBIT_SIZE; k++) {
+      const px = x + f * RABBIT_DX[k], py = y + RABBIT_DY[k];
+      if (this.get(px, py) === RABBIT_ID[k]) this.become(px, py, into);
+    }
+  }
+
+  /**
+   * Lapin : une poignée de règles fixes, pas d'apprentissage. Le cœur vérifie
+   * son corps, puis : cuisson, gel, noyade, faim, chute, et — posé — manger,
+   * se reproduire, fuir la chaleur, chercher une plante ou flâner.
+   */
+  private updateRabbit(i: number, x: number, y: number): void {
+    // Le sens se lit sur le corps lui-même : aucun état de plus à garder.
+    const right = this.intact(x, y, 1);
+    const left = right === RABBIT_SIZE ? 0 : this.intact(x, y, -1);
+    const f = right >= left ? 1 : -1;
+    const whole = Math.max(right, left);
+    if (whole === 1) {
+      // Un cœur sans corps — posé par `set()`, ou venu d'une grille sans état
+      // vivant qui a perdu le reste — se le refait s'il a la place.
+      if (this.spawnRabbit(x, y, this.rand() < 0.5 ? 1 : -1) < 0) this.become(x, y, EMPTY);
+      return;
+    }
+    if (whole < RABBIT_SIZE) {
+      // Un morceau arraché (souffle, acide, nanites, gomme) : il n'y survit
+      // pas. S'il a pris feu, le reste brûle avec.
+      let burning = false;
+      for (let k = 1; k < RABBIT_SIZE; k++) {
+        if (this.get(x + f * RABBIT_DX[k], y + RABBIT_DY[k]) === FIRE) burning = true;
+      }
+      this.kill(x, y, f, burning ? FIRE : EMPTY);
+      return;
+    }
+
+    const t = this.temp[i];
+    if (t > COOK) { this.kill(x, y, f, FIRE); return; }
+    if (t < FROST) { this.kill(x, y, f, ICE); return; }
+    // De l'eau par-dessus les oreilles : il se noie (plus dense qu'elle, il coule).
+    const above = this.get(x, y - 3);
+    if ((above === WATER || above === SALTWATER || above === MUD) && this.rand() < DROWN) {
+      this.kill(x, y, f, EMPTY);
+      return;
+    }
+    // Un lapin venu d'une grille sans état vivant arrive à satiété nulle : sans
+    // ce repli, il mourrait de faim au premier tick.
+    if (this.life[i] === 0) this.life[i] = FED;
+    if (this.rand() < HUNGER && --this.life[i] === 0) { this.kill(x, y, f, EMPTY); return; }
+    // Chute d'un bloc. Lui seul peut entrer dans un liquide plus léger : il y coule.
+    if (this.relocate(x, y, f, x, y + this.gravity, f, true)) return;
+
+    if (this.life[i] <= 250 - MEAL) {
+      for (let k = 0; k < MOUTH_DX.length; k++) {
+        const mx = x + f * MOUTH_DX[k], my = y + MOUTH_DY[k];
+        if (this.get(mx, my) === PLANT) {
+          this.become(mx, my, EMPTY);
+          this.life[i] += MEAL;
+          return; // manger prend le tour
+        }
+      }
+    }
+    if (this.life[i] >= BREED && this.rand() < LITTER && this.mate(x, y)) {
+      // Le petit naît derrière lui, sinon par-dessus (il retombera).
+      let baby = this.spawnRabbit(x - 4 * f, y, f);
+      if (baby < 0) baby = this.spawnRabbit(x, y - 4, f);
+      if (baby >= 0) {
+        this.life[baby] = NEWBORN;
+        this.life[i] -= LITTER_COST;
+        return;
+      }
+    }
+
+    // Où aller. La chaleur passe avant la faim : `temp` est déjà diffusé, donc
+    // l'air se réchauffe avant que la flamme n'arrive — le lapin la sent venir.
+    // On compare les deux cases qui encadrent le corps, pas ses propres cellules.
+    let dir = 0, pace = PACE_WANDER;
+    if (t > FLEE) {
+      const outLeft = x + (f === 1 ? -3 : -2), outRight = x + (f === 1 ? 2 : 3);
+      const hotLeft = this.inBounds(outLeft, y) ? this.temp[this.index(outLeft, y)] : Infinity;
+      const hotRight = this.inBounds(outRight, y) ? this.temp[this.index(outRight, y)] : Infinity;
+      dir = hotLeft < hotRight ? -1 : 1;
+      pace = PACE_FLEE;
+    } else if (this.life[i] < HUNGRY) {
+      dir = this.sniff(x, y, f);
+      if (dir !== 0) pace = PACE_SEEK;
+    }
+    if (this.rand() > pace) return;
+    // En flânant, il va surtout droit devant : tiré à pile ou face à chaque
+    // pas, il se retournait sans cesse sur place.
+    if (dir === 0) dir = this.rand() < TURN ? -f : f;
+    // Un pas, sinon une marche à grimper — en se tournant du côté où il va.
+    // Seulement vers du vide ou un gaz : il n'entre pas dans l'eau de lui-même.
+    if (this.relocate(x, y, f, x + dir, y, dir, false)) return;
+    if (this.relocate(x, y, f, x + dir, y - this.gravity, dir, false)) return;
+    if (dir !== f) this.relocate(x, y, f, x, y, dir, false); // bloqué : il se retourne
+  }
+
+  /**
+   * Déplace le lapin entier du cœur (x, y) tourné vers `f` au cœur (nx, ny)
+   * tourné vers `nf` — pas, marche, chute ou demi-tour. C'est, avec l'aimant,
+   * la seule entorse à `tryMove()` : neuf cellules bougent ensemble ou pas du
+   * tout. Chaque case d'arrivée doit être la sienne, vide, un gaz, ou — `wet`,
+   * en tombant — un liquide plus léger que lui. Ce qu'il déplace reprend les
+   * cases qu'il quitte : la matière est conservée, comme dans `hurl()`.
+   */
+  private relocate(x: number, y: number, f: number, nx: number, ny: number, nf: number, wet: boolean): boolean {
+    const { moveFrom: from, moveTo: to, cells, life, frozen } = this;
+    for (let k = 0; k < RABBIT_SIZE; k++) {
+      const tx = nx + nf * RABBIT_DX[k], ty = ny + RABBIT_DY[k];
+      if (!this.inBounds(tx, ty)) return false;
+      from[k] = this.index(x + f * RABBIT_DX[k], y + RABBIT_DY[k]); // corps intact : dans la grille
+      to[k] = this.index(tx, ty);
+      if (frozen[from[k]]) return false; // une patte figée tient tout le lapin
+    }
+    let carried = 0;
+    for (let k = 0; k < RABBIT_SIZE; k++) {
+      const j = to[k];
+      if (frozen[j]) return false;
+      const n = cells[j];
+      if (n === EMPTY || this.owns(j)) continue;
+      const kind = KIND[n];
+      if (kind !== KINDS.gas && !(wet && kind === KINDS.liquid && DENSITY[n] < DENSITY[RABBIT])) return false;
+      this.carryId[carried] = n;
+      this.carryLife[carried] = life[j];
+      carried++;
+    }
+    const fed = life[from[0]];
+    for (let k = 0; k < RABBIT_SIZE; k++) { cells[from[k]] = EMPTY; life[from[k]] = 0; }
+    for (let k = 0; k < RABBIT_SIZE; k++) {
+      const j = to[k];
+      cells[j] = RABBIT_ID[k];
+      life[j] = 0;
+      this.clock[j] = this.parity; // il a bougé ce tick, ses cellules aussi
+    }
+    life[to[0]] = fed;
+    for (let k = 0; k < RABBIT_SIZE && carried > 0; k++) {
+      const j = from[k];
+      if (cells[j] !== EMPTY) continue;
+      carried--;
+      cells[j] = this.carryId[carried];
+      life[j] = this.carryLife[carried];
+      this.clock[j] = this.parity;
+    }
+    return true;
+  }
+
+  /** La case `j` fait-elle partie du corps en train de bouger (`moveFrom`) ? */
+  private owns(j: number): boolean {
+    for (let k = 0; k < RABBIT_SIZE; k++) if (this.moveFrom[k] === j) return true;
+    return false;
+  }
+
+  /**
+   * Une cellule du corps n'a pas d'état : elle vit tant qu'un cœur se trouve là
+   * où la forme l'attend, dans un sens ou dans l'autre. Sinon — lapin mort,
+   * éclat d'un souffle — elle disparaît. Ne rien garder dans `life` est voulu :
+   * le salon et les grilles d'avant n'en transmettent pas.
+   */
+  private updateRabbitPart(x: number, y: number, id: MaterialId): void {
+    for (let k = 1; k < RABBIT_SIZE; k++) {
+      if (RABBIT_ID[k] !== id) continue;
+      if (this.get(x - RABBIT_DX[k], y - RABBIT_DY[k]) === RABBIT) return;
+      if (this.get(x + RABBIT_DX[k], y - RABBIT_DY[k]) === RABBIT) return;
+    }
+    this.become(x, y, EMPTY);
+  }
+
+  /**
+   * Un autre lapin repu à portée de museau : même hauteur à une rangée près,
+   * de 3 à 6 cellules de cœur à cœur (plus près, les corps se chevauchent).
+   */
+  private mate(x: number, y: number): boolean {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = 3; dx <= 6; dx++) {
+        for (let s = -1; s <= 1; s += 2) {
+          const mx = x + s * dx, my = y + dy;
+          if (this.get(mx, my) === RABBIT && this.life[this.index(mx, my)] >= BREED) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Côté (-1 ou 1) de la plante la plus proche, de la tête au sol sous les
+   * pattes, 0 si aucune n'est en vue. Il regarde d'abord devant lui : sinon, à
+   * distance égale, tous les lapins partiraient du même côté.
+   */
+  private sniff(x: number, y: number, f: number): number {
+    for (let d = 2; d <= SIGHT; d++) {
+      for (let s = f, n = 0; n < 2; s = -s, n++) {
+        const px = x + s * d;
+        for (let dy = -1; dy <= 2; dy++) if (this.get(px, y + dy) === PLANT) return s;
+      }
+    }
+    return 0;
   }
 
   /** Changement d'état sur place ; la température, elle, ne se réinitialise pas. */

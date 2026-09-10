@@ -87,7 +87,7 @@ function keepRecent(id: MaterialId): void {
 }
 
 // Clavier : les flèches parcourent une grille de matières. Sans ça il faut
-// quarante-six tabulations pour traverser la palette.
+// quarante-sept tabulations pour traverser la palette.
 for (const grid of [paletteEl, recentEl]) {
   grid.addEventListener("keydown", (e) => {
     const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 2, ArrowUp: -2 }[e.key];
@@ -103,6 +103,8 @@ for (const grid of [paletteEl, recentEl]) {
 }
 
 function select(id: MaterialId): void {
+  // La pipette sur l'œil d'un lapin choisit le lapin, pas un œil à peindre.
+  id = MATERIALS[id].part ?? id;
   current = id;
   keepRecent(id);
   // Une source crache la dernière matière choisie avant elle.
@@ -186,6 +188,9 @@ function toCell(e: PointerEvent): { x: number; y: number } {
 /** Les outils qui se tracent en glissant : le marquee, pas le pinceau. */
 const dragging = (): boolean => toolInput.value === "copy" || toolInput.value === "rect";
 
+/** Le pinceau pose une créature de taille fixe (le lapin), pas un disque. */
+const placesCreature = (): boolean => toolInput.value === "paint" && MATERIALS[current].creature === true;
+
 /** Un coup de pinceau, plus son reflet si la symétrie est cochée. */
 function paintAt(x: number, y: number): void {
   dab(x, y);
@@ -203,7 +208,8 @@ const cellSize = (): number => canvas.getBoundingClientRect().width / WIDTH;
 /** Cercle de la taille réelle du pinceau, sous le curseur. */
 function showRing(e: PointerEvent): void {
   if (e.pointerType === "touch") return; // sous le doigt, personne ne le verrait
-  const d = (brush * 2 + 1) * cellSize();
+  // Une créature a sa taille, le rayon du pinceau n'y fait rien : le cercle le dit.
+  const d = (placesCreature() ? 4 : brush * 2 + 1) * cellSize();
   ringEl.hidden = false;
   ringEl.style.width = `${d}px`;
   ringEl.style.height = `${d}px`;
@@ -375,6 +381,9 @@ canvas.addEventListener("pointerdown", (e) => {
     gesture({ t: "toggle", x: p.x, y: p.y });
     return;
   }
+  // Un clic, un lapin : ni trait au Maj, ni dépôt continu tant qu'on tient le
+  // bouton — sinon un clic un peu long en empile une portée entière.
+  if (placesCreature()) { paintAt(p.x, p.y); last = p; return; }
   painting = true;
   // Maj : on relie le dernier point posé, même si le pinceau a été relâché entre-temps.
   if (e.shiftKey && last) strokeTo(last, p);

@@ -60,8 +60,9 @@ Toucher à l'ordre du balayage ou à `clock` introduit des dérives visibles.
 ### Mouvement
 
 - Toute règle de déplacement passe par `y + this.gravity` et `drift()` (vent).
-  Seule exception : `MAGNET`, qui tire la limaille d'un cran vers lui en
-  ignorant la gravité.
+  Exceptions : `MAGNET`, qui tire la limaille d'un cran vers lui en ignorant
+  la gravité, et le lapin, dont les neuf cellules bougent d'un bloc par
+  `relocate()` (voir [Créatures](#créatures--le-lapin)).
 - Déplacer = `tryMove()` (qui refuse une cible figée et vérifie
   `displaces()`), jamais écrire `cells` à la main.
 - Hors grille, `get()` renvoie `STONE` : les règles ne testent pas les bords.
@@ -80,7 +81,8 @@ Toucher à l'ordre du balayage ou à `clock` introduit des dérives visibles.
 - `heat` tire la cellule vers une température sans l'imposer (une flamme peut
   encore faire fondre la glace qu'elle touche).
 - Ajouter un changement d'état = `boil` / `freeze` dans `MATERIALS`, **aucune
-  règle dans `Engine`**. Pas de cycle (`A → B → A` sur des seuils qui se
+  règle dans `Engine`**. Seule exception : une créature, qui doit changer
+  d'état en entier — `thermal()` ne changerait que son cœur. Pas de cycle (`A → B → A` sur des seuils qui se
   chevauchent) : l'assert du registre le refuse.
 - Seuils calibrés à ne pas « simplifier » :
   - pétrole `boil` à 200 °C : à 80 une flamme voisine suffisait ;
@@ -127,6 +129,7 @@ réinitialiser à l'aveugle**, chaque matière en fait autre chose.
 | `SWITCH` | 1 = fermé |
 | `URANIUM` | compteur d'emballement |
 | `MAGNET` | pôle (1 = repousse) |
+| `RABBIT` | satiété du cœur (0 au chargement d'un monde sans état vivant = repart pleine) ; les cellules du corps n'en ont pas |
 
 ## Familles de règles
 
@@ -165,6 +168,43 @@ explosif = ajouter un déclencheur, sinon c'est du TNT repeint.
   `BATTERY`, `SWITCH` fermé).
 - `SWITCH` ne devient **jamais** une étincelle : il la relaie. Sinon il
   redeviendrait `METAL` à l'extinction et disparaîtrait.
+
+### Créatures : le lapin
+
+Un lapin = **neuf cellules de forme fixe** (`RABBIT_DX` / `RABBIT_DY` /
+`RABBIT_ID` dans engine.ts). Le cœur (`RABBIT`) porte la satiété et décide de
+tout ; le reste du corps (`RABBIT_BODY`, `RABBIT_EYE`, `RABBIT_TAIL`, hors
+palette, `part` dans `MATERIALS`) n'a aucun état. Ordre d'un tick du cœur :
+vérifier le corps, cuisson, gel, noyade (eau, eau salée ou boue au-dessus des
+oreilles), faim, chute, puis — posé — manger, se reproduire, se déplacer.
+
+- **Le corps ne dépend pas de `life`.** Le sens (gauche / droite) se lit sur
+  le corps (`intact()` compte les cellules en place pour chaque sens), et une
+  cellule du corps vit tant qu'un cœur est là où la forme l'attend
+  (`updateRabbitPart()`). Voulu : le salon n'envoie que `cells` et `frozen`, et
+  `put()` remet `life` à zéro pour une grille sans état vivant — un invité
+  promu hôte garde ainsi ses lapins.
+- Couleurs de l'œil et de la queue = matières à part, pas une teinte tirée de
+  `life` : le salon et les vignettes ne voient que `cells`.
+- Cœur seul (posé par `set()`) : il se refait un corps s'il a la place, sinon
+  il meurt. Corps incomplet : le lapin meurt en entier (en feu si une partie
+  brûle).
+- `relocate()` bouge les neuf cellules ensemble ou pas du tout. Cases
+  d'arrivée : les siennes, du vide, un gaz, ou — en tombant — un liquide plus
+  léger ; ce qu'il déplace reprend les cases quittées (matière conservée). Il
+  ne **marche** que vers du vide ou un gaz : il n'entre pas dans l'eau de
+  lui-même, il y tombe.
+- Cuisson (`COOK`) et gel (`FROST`) sont des règles, pas `boil` / `freeze`.
+- Pose : `paint()` et `rect()` appellent `spawnRabbit()` (un lapin, quel que
+  soit le rayon) ; `fill()` ignore les créatures (table `CREATURE`).
+- La fuite compare `temp` des deux cases qui encadrent le corps et passe avant
+  la faim.
+- La reproduction coûte `LITTER_COST` au parent et le petit naît sous `BREED` :
+  sans ces deux freins, un enclos de lapins repus double à chaque tick.
+- Acide et retombées le tuent via `CREATURE`, le feu via `flammable`.
+- Coût : ~70 lectures par lapin et par tick (corps, parties, regard). Si des
+  centaines de lapins pèsent au bench, `sniff()` et `intact()` d'abord.
+- La forme ne suit pas la gravité inversée (`ponytail:` dans le code).
 
 ## Rendu
 

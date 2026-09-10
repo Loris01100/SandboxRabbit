@@ -51,6 +51,10 @@ export const FALLOUT = 43;
 export const CEMENT = 44;
 export const FILINGS = 45;
 export const MAGNET = 46;
+export const RABBIT = 47;
+export const RABBIT_BODY = 48;
+export const RABBIT_EYE = 49;
+export const RABBIT_TAIL = 50;
 
 export type MaterialId = number;
 
@@ -90,6 +94,13 @@ export interface Material {
   boil?: Phase;
   /** En dessous de `at` °C, devient `into`. */
   freeze?: Phase;
+  /**
+   * Créature de taille fixe : le pinceau en pose une par clic, quel que soit
+   * son rayon, au lieu d'un disque de cellules.
+   */
+  creature?: boolean;
+  /** Cellule du corps d'une créature : la matière qu'on choisit à sa place (pipette). */
+  part?: MaterialId;
   /** Description affichée dans l'UI. */
   hint: string;
 }
@@ -142,6 +153,15 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [FILINGS]: { id: FILINGS, name: "Limaille", kind: "powder", density: 8, color: [96, 98, 104], noise: 26, hint: "Poudre de fer : un aimant la fait venir, même vers le haut" },
   [MAGNET]: { id: MAGNET, name: "Aimant", kind: "static", density: 9, color: [204, 84, 96], noise: 8, hint: "Attire la limaille alentour, gravité ou pas ; un clic dessus inverse son pôle et la repousse" },
   [THERMITE]: { id: THERMITE, name: "Thermite", kind: "powder", density: 8, color: [124, 112, 102], noise: 20, hint: "Ne souffle rien : brûle à 2800 °C et perce la pierre" },
+  // Un lapin = neuf cellules (voir `RABBIT_DX` dans engine.ts). `RABBIT` en est
+  // le cœur, qui porte la satiété dans `life` et décide de tout ; les trois
+  // suivantes sont le reste du corps, qu'il déplace d'un bloc. Matières à part
+  // plutôt que teinte tirée de `life` : le salon et les vignettes ne voient que
+  // `cells`, ils perdraient l'œil. Poudre pour qu'une mine sente ses pattes.
+  [RABBIT]: { id: RABBIT, name: "Lapin", kind: "powder", density: 5, color: [214, 190, 176], noise: 6, life: 200, flammable: 0.3, creature: true, hint: "Broute les plantes, fuit la chaleur, se noie ; deux lapins repus en font un troisième" },
+  [RABBIT_BODY]: { id: RABBIT_BODY, name: "Lapin", kind: "powder", density: 5, color: [214, 190, 176], noise: 6, flammable: 0.3, part: RABBIT, hint: "Le corps d'un lapin" },
+  [RABBIT_EYE]: { id: RABBIT_EYE, name: "Lapin", kind: "powder", density: 5, color: [40, 30, 34], noise: 0, flammable: 0.3, part: RABBIT, hint: "L'œil d'un lapin" },
+  [RABBIT_TAIL]: { id: RABBIT_TAIL, name: "Lapin", kind: "powder", density: 5, color: [246, 240, 234], noise: 4, flammable: 0.3, part: RABBIT, hint: "La queue d'un lapin" },
 };
 
 /**
@@ -154,7 +174,7 @@ export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
   { name: "Inflammable", ids: [FIRE, EMBER, LAVA, WAX, CANDLE] },
   { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, THERMITE, URANIUM] },
   { name: "Froid", ids: [ICE, SNOW, NITROGEN] },
-  { name: "Vivant", ids: [SEED, PLANT, NANITE] },
+  { name: "Vivant", ids: [SEED, PLANT, RABBIT, NANITE] },
   { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK, MAGNET] },
   { name: "Gaz", ids: [SMOKE, STEAM, FIREDAMP, FALLOUT] },
   { name: "Outils", ids: [SOURCE, EMPTY] },

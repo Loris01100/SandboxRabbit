@@ -7,7 +7,7 @@ a bougé).
 ## Ajouter une matière
 
 1. Une constante d'id dans [materials.ts](../../src/client/sim/materials.ts),
-   à la suite (la dernière est `MAGNET = 46`). **Ne jamais renuméroter** : les
+   à la suite (la dernière est `RABBIT_TAIL = 50`). **Ne jamais renuméroter** : les
    ids sont écrits dans les mondes sauvegardés.
 2. Son entrée dans `MATERIALS` : `id`, `name`, `kind`, `density`, `color`,
    `noise`, `hint` (en français), plus au besoin `flammable`, `life` (≤ 250),
@@ -15,7 +15,10 @@ a bougé).
 3. Son id dans **une** famille de `CATEGORIES` — ou nulle part si elle ne
    s'obtient qu'en jeu (comme la cire fondue).
 4. Si son `kind` ne suffit pas : un `case` dans `Engine.update` et une méthode
-   `updateXxx` (voir la recette suivante).
+   `updateXxx` (voir la recette suivante). Une créature de plusieurs cellules
+   ne part pas d'une matière simple : suivre le lapin (`creature`, `part`,
+   forme en offsets, `relocate()`), décrit dans
+   [simulation.md](simulation.md#créatures--le-lapin).
 5. Un bloc d'`assert` dans [test/sim.ts](../../test/sim.ts) qui prouve son
    comportement. La forme de l'entrée est déjà relue par l'assert du
    registre : clé = `id`, `life` ≤ 250, couleur en trois canaux 0..255,

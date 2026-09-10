@@ -3,9 +3,9 @@
 Un bac à sable cellulaire (« falling sand ») qui tourne entièrement dans le
 navigateur, servi par un Worker Cloudflare qui héberge aussi l'API.
 
-Quarante-six matières, rangées en familles repliables (terrain, liquides,
+Quarante-sept matières, rangées en familles repliables (terrain, liquides,
 inflammable, explosifs, froid, vivant, électricité, gaz, outils) : `sable / eau /
-pierre / bois / huile / goudron / alcool / acide / lave / plante / feu / glace /
+pierre / bois / huile / goudron / alcool / acide / lave / plante / lapin / feu / glace /
 neige / azote liquide / sel / eau salée / poudre / TNT / nitroglycérine / C4 /
 mine / thermite / uranium / grisou / retombées / pétrole / graine / nanites / verre / verre fondu / mercure /
 cire / cire fondue / bougie / boue / braise / métal / pile / interrupteur / étincelle /
@@ -25,6 +25,7 @@ mondes partagés, bac multijoueur.
 | Thermite | L'anti-explosif : elle ne souffle rien, elle perce. Elle impose 2800 °C sur place pendant 150 ticks, ce qui liquéfie la pierre (`boil` à 1400 °C, hors de portée de la lave qui plafonne à 800 °C dans la roche voisine), et elle continue de tomber en brûlant — densité 8, elle passe sous la lave qu'elle vient de créer. D'où un vrai puits, et pas un cratère. |
 | Sel | Se dissout dans l'eau (eau salée, plus lourde, gèle à -18 °C) et fait fondre la glace. |
 | Graine | Tombe comme une poudre, germe en plante au contact de l'eau. |
+| Lapin | La première créature, et elle n'apprend rien : une poignée de règles fixes. **Taille fixe** : un lapin, ce sont neuf cellules de profil (oreille, tête, œil, dos, queue, pattes), qu'un clic pose en entier quel que soit le rayon du pinceau, et que son cœur déplace d'un bloc — un pas, une marche à grimper, un demi-tour. Le cœur porte la satiété dans `life` : elle baisse toute seule (un quart de minute sans manger et il meurt), il broute ce qu'il a devant le museau ou sous les pattes et, affamé, part vers la plante qu'il voit à huit cellules. Il fuit la chaleur vers le côté le plus frais : `temp` étant diffusé, l'air chauffe avant que la flamme n'arrive, il la sent venir. Il ne marche que sur du vide ; tombé dans l'eau, il coule (l'eau déplacée remonte) et se noie. Deux lapins repus à quelques cellules l'un de l'autre font un petit de la même taille, ce qui coûte deux repas : la population suit les plantes au lieu d'exploser. Tout lui arrive en entier : cuit au-delà de 110 °C il flambe, gelé sous -25 °C c'est un lapin de glace, et une patte arrachée (souffle, acide, nanites, gomme) le fait disparaître. Les retombées le tuent, une mine sent ses pattes. |
 | Nanites | Dévorent la matière et se répliquent, puis meurent de vieillesse. Seul le verre les arrête : on peut construire un bocal. |
 | Source | Émet en continu la dernière matière sélectionnée avant elle (stockée dans `life`). |
 | Feu | `flammable` est une probabilité **par tick et par flamme voisine** : la poudre part instantanément (1), l'huile s'embrase (0,6), la graine crépite (0,05), le bois met une seconde à prendre (0,02). C'est le seul réglage de vitesse de propagation. |
@@ -70,7 +71,7 @@ mondes partagés, bac multijoueur.
 | Défis partagés | Un monde sauvegardé avec un objectif (« au moins / moins de N cellules de X ») devient un défi jouable depuis la galerie, marqué 🎯. L'objectif tient en une chaîne `ge:12:600` validée côté Worker ; deux comparaisons suffisent — « plus aucun X » s'écrit « moins de 1 ». Aucun code à écrire pour ajouter un défi de plus. |
 | Bac partagé | Un salon = un Durable Object qui **relaie et ne simule pas**. Le premier connecté est l'hôte : il diffuse sa grille (RLE, ~1 ko) quatre fois par seconde dès qu'il n'est pas seul — le salon dit à chacun combien ils sont, et un hôte qui attend ses invités ne téléverse rien, les invités lui renvoient leurs coups de pinceau et se contentent d'afficher. Un seul simulateur, donc aucune divergence à réconcilier — le moteur tire au sort à chaque tick, deux clients ne convergeraient jamais. Si l'hôte s'en va, le plus ancien restant prend la main. Chaque geste (pinceau, seau, figer, coller, interrupteur) passe par un même relais : un invité qui remplit ou colle n'est plus effacé par l'instantané suivant. Huit places par salon, messages plafonnés à la taille d'un monde, et la limite de débit de l'écriture s'applique à la connexion. |
 | Galerie triée | Un `<select>` bascule entre « plus récents » et « plus vus ». Le tri se fait sur la liste déjà en main (plafonnée à 50 mondes), pas d'aller-retour au Worker. Charger un monde passe par `GET /api/worlds/:id`, seul endroit qui incrémente `views`. |
-| Accessibilité | Les flèches parcourent les grilles de matières (sinon quarante-six tabulations), la barre de statut et le but des défis sont des `role="status"` — les changements sont annoncés au lecteur d'écran. |
+| Accessibilité | Les flèches parcourent les grilles de matières (sinon quarante-sept tabulations), la barre de statut et le but des défis sont des `role="status"` — les changements sont annoncés au lecteur d'écran. |
 | En-têtes | Le Worker pose une CSP stricte (aucun script ni style en ligne — la pastille de couleur d'une matière est montée en CSSOM exprès), `nosniff` et `referrer-policy` sur toute réponse, et un `cache-control` d'un an sur les fichiers hashés contre `no-cache` sur le HTML. Vérifié dans test/api.ts avec un faux binding ASSETS. |
 | Réglages retenus | Matière, pinceau, outil, vitesse, vent, ambiante, taille de grille, zoom et les cases du panneau (symétrie, ne pas remplacer, gomme sélective, météo, vue thermique) sont relus dans `localStorage` au chargement suivant. |
 | Bac repris | La scène est écrite dans `localStorage` quand l'onglet passe en arrière-plan (`visibilitychange`, le seul événement fiable sur mobile) et rechargée au retour. Un lien partagé passe devant, la cuvette de départ n'arrive qu'à défaut. L'état vivant part avec la grille : un incendie laissé en plan repart chaud. |
@@ -81,7 +82,7 @@ mondes partagés, bac multijoueur.
 | Ligne & remplissage | `Maj` + clic trace une ligne droite depuis le dernier point posé, clic droit remplit toute la poche de matière identique sous le curseur. |
 | Défis | Sept scènes prêtes à jouer (Débâcle, Mèche lente, Court-circuit, Puits, Désamorçage, Coup de grisou, Jardin) avec leur objectif et sa détection de victoire, construites en code dans `challenges.ts`. |
 | Familles | La barre d'outils est découpée en `<details>` repliables (`CATEGORIES` dans `materials.ts`) : une famille ouverte à la fois suffit à tenir dans le panneau. Les raccourcis 1..9 / 0 restent sur les dix classiques, indépendamment de l'ordre d'affichage. |
-| Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours), case « Gomme sélective » : la gomme ne retire que la dernière matière choisie. Clic maintenu = dépôt continu, même sans bouger la souris. |
+| Pinceau | Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours), case « Gomme sélective » : la gomme ne retire que la dernière matière choisie. Clic maintenu = dépôt continu, même sans bouger la souris. Une créature (le lapin) fait exception : un clic en pose une, sans trait ni dépôt continu, et le cercle d'aperçu prend sa taille. |
 | Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. La largeur de la grille passe devant (`#320~…`) : le bac du visiteur s'y met, sinon un monde 480 relu dans un bac 320 se décale d'une ligne à chaque rangée. |
 | Galerie | « Sauvegarder » envoie le monde au Worker, « Galerie » ouvre une modale (`<dialog>` natif) qui liste tous les mondes sauvegardés avec leur vignette : la grille décodée est redessinée dans un canvas hors écran, mêmes couleurs que le bac. Un clic charge la scène. La croix au survol d'une vignette supprime le monde, mais seulement sur ceux qu'on a soi-même sauvegardés : le Worker rend un jeton de suppression à la sauvegarde, le navigateur le garde dans `localStorage` et le présente au `DELETE`. Une seule requête : la liste renvoie les grilles coupées à leur bloc matière, quelques centaines d'octets chacune. |
 
@@ -173,9 +174,11 @@ les migrations, puis `npm run cf-typegen`.
 
 Deux pistes distinctes, à ne pas confondre :
 
-- *IA dans la simulation* — des créatures qui cherchent l'eau, fuient le feu,
-  creusent. C'est de l'automate/pathfinding côté client, dans `engine.ts`, sans
-  appel réseau.
+- *Comportements dans la simulation* — le lapin en est la première forme : des
+  règles fixes dans `engine.ts`, sans appel réseau. Prochaine étape, l'évolution :
+  quelques gènes par lapin (vitesse, tolérance à la chaleur…) hérités avec
+  mutation, pour que la sélection trouve la stratégie à la place de la règle.
+  Il faudra un tableau de plus, donc un bloc de plus en fin de codec.
 - *IA générative côté Worker* — ajouter `"ai": { "binding": "AI" }` dans
   `wrangler.jsonc` donne accès à Workers AI depuis le Worker : générer une
   carte à partir d'une description, commenter ce que fait le joueur, etc.
