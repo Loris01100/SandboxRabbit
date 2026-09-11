@@ -112,6 +112,17 @@ Une grille externe (galerie, lien, salon) entre par `engine.adopt()`, qui
 chaque tick et le bac s'arrête. Même filtre sur les gestes (`known()` dans
 gestures.ts).
 
+- `adopt()` ne filtre que `cells`. `life` arrive tel quel (bloc 3 du codec,
+  `paste()` d'un `clip`) : une règle qui y lit un **id de matière** (la
+  `SOURCE`) le passe par la table `KNOWN`. Un id inconnu dans le `life` d'une
+  source arrêtait le bac sur un lien de cinquante caractères.
+- Un geste venu d'un pair peut porter des coordonnées non entières :
+  `applyGesture` les refuse (`whole()`), et `fill()` se garde aussi — en
+  x = 1,5 ses écritures tombaient à côté du tableau et sa pile ne se vidait
+  jamais.
+- Si le moteur jette malgré tout, la boucle de sim/worker.ts repose son
+  échéance dans un `finally` : l'erreur remonte, le bac ne s'arrête plus.
+
 ## Les usages de `life`
 
 `Uint8Array` : donc `life` ≤ 250 dans `MATERIALS`. **Ne jamais le
@@ -123,7 +134,7 @@ réinitialiser à l'aveugle**, chaque matière en fait autre chose.
 | `NITRO` | cellules de chute (au-delà de `SHOCK` = 4, l'atterrissage détonne) |
 | `C4` | amorçage (1 = saute au tick suivant) |
 | `THERMITE` | ticks de combustion |
-| `SOURCE` | la matière émise |
+| `SOURCE` | la matière émise (0 ou id inconnu : de l'eau) |
 | `CANDLE` | mèche allumée |
 | `METAL` | ticks de repos après une étincelle (`RECOVERY`) |
 | `SWITCH` | 1 = fermé |

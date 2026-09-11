@@ -17,7 +17,7 @@ TypeScript directement.
 | --- | --- | --- |
 | [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu, empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
 | [test/ui.ts](../../test/ui.ts) | logique pure du panneau | `ui.ts` |
-| [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache | `app.ts` via `app.request()` (store mémoire, pas de wrangler) |
+| [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, routage des messages du salon | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
 | [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles | `Sandbox` avec un rappel `send` qui empile |
 
 ## Contrainte : Node **dépouille** le TypeScript, il ne le compile pas
@@ -104,7 +104,8 @@ garder ces deux propriétés en modifiant la CI.
 ## Ce qui n'est pas testé automatiquement
 
 main.ts, world.ts, room.ts (client), share.ts, theme.ts et le Durable Object
-tiennent au DOM ou au runtime Cloudflare. Pour eux : `npm run dev`
+tiennent au DOM ou au runtime Cloudflare (le routage du salon, lui, est sorti
+dans relay.ts et testé). Pour eux : `npm run dev`
 (http://localhost:5173, Vite + Worker dans workerd, store mémoire) et vérifier
 dans le navigateur. Le salon partagé se teste avec deux onglets sur le même nom
 de salon.

@@ -43,10 +43,16 @@ function loop(): void {
   const now = performance.now();
   const elapsed = now - last;
   last = now;
-  bac?.frame(elapsed);
-  due += PERIOD;
-  const after = performance.now();
-  if (due < after - PERIOD) due = after;
-  setTimeout(loop, Math.max(0, due - after));
+  // L'échéance suivante est posée même si la frame jette : sans ça, une seule
+  // exception du moteur arrêtait la boucle pour de bon — plus un tick, plus une
+  // image, jusqu'au rechargement de la page.
+  try {
+    bac?.frame(elapsed);
+  } finally {
+    due += PERIOD;
+    const after = performance.now();
+    if (due < after - PERIOD) due = after;
+    setTimeout(loop, Math.max(0, due - after));
+  }
 }
 loop();

@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { route } from "./relay.ts";
 
 /**
  * Salon d'un bac partagé. Le Durable Object **ne simule rien** : il relaie.
@@ -14,8 +15,10 @@ import { DurableObject } from "cloudflare:workers";
  */
 /** Joueurs par salon. Au-delà, la diffusion (une grille par joueur, 4 fois par seconde) coûte plus qu'elle ne rend. */
 const PLACES = 8;
-/** Taille maximale d'un message relayé — même plafond qu'un monde sauvegardé. */
-const MAX = 200_000;
+
+/** Le rôle est gardé dans la pièce jointe du socket : elle survit à l'hibernation. */
+const isHost = (ws: WebSocket): boolean =>
+  (ws.deserializeAttachment() as { host: boolean } | null)?.host === true;
 
 export class Room extends DurableObject {
   fetch(): Response {
@@ -34,10 +37,14 @@ export class Room extends DurableObject {
   }
 
   webSocketMessage(from: WebSocket, message: string | ArrayBuffer): void {
-    // Rien d'autre que du JSON, et rien de plus gros qu'un monde : le salon
-    // relaie sans lire, c'est la seule barrière.
-    if (typeof message !== "string" || message.length > MAX) return;
-    for (const ws of this.ctx.getWebSockets()) if (ws !== from) ws.send(message);
+    // La grille de l'hôte va aux invités, le geste d'un invité à l'hôte, et
+    // rien d'autre ne passe (voir relay.ts) : un invité ne parle jamais aux
+    // autres invités.
+    const to = route(message, isHost(from));
+    if (!to) return;
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws !== from && isHost(ws) === (to === "host")) ws.send(message as string);
+    }
   }
 
   webSocketClose(ws: WebSocket): void {
@@ -65,7 +72,7 @@ export class Room extends DurableObject {
   private promote(gone: WebSocket): void {
     const left = this.ctx.getWebSockets().filter((ws) => ws !== gone);
     this.announce(left);
-    if (left.some((ws) => (ws.deserializeAttachment() as { host: boolean } | null)?.host)) return;
+    if (left.some(isHost)) return;
     const next = left[0];
     if (!next) return;
     next.serializeAttachment({ host: true });

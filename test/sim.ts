@@ -8,7 +8,7 @@ import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/cli
 import { thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, weather, type Gesture } from "../src/client/gestures.ts";
-import { Player, Recorder } from "../src/client/replay.ts";
+import { Player, Recorder, put } from "../src/client/replay.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
@@ -891,6 +891,34 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(e.get(5, 5), EMPTY, "l'id inconnu retombe sur le vide");
   assert.equal(e.get(6, 5), SAND, "le reste passe tel quel");
   e.step(); // ne doit pas jeter
+}
+
+// Une source porte dans `life` la matière qu'elle crache, et ce `life` vient
+// aussi d'ailleurs, que `adopt()` ne filtre pas : un id inconnu faisait jeter
+// `MATERIALS[id].kind` au premier tick, et le bac ne repartait plus.
+{
+  const e = engine();
+  const n = W * H, cells = new Uint8Array(n), life = new Uint8Array(n);
+  cells[e.index(30, 5)] = SOURCE;
+  life[e.index(30, 5)] = 200; // aucune matière ne porte cet id
+  put(e, encode(cells, new Uint8Array(n), life, new Float32Array(n).fill(20)), null, 20);
+  for (let t = 0; t < 40; t++) e.step(); // ne doit pas jeter
+  assert.ok(count(e, WATER) > 0, "une source à l'id inconnu crache de l'eau, comme une source vide");
+}
+
+// Un pair de salon envoie ce qu'il veut : un remplissage en x = 1,5 ne
+// remplissait jamais rien, sa pile ne se vidait plus, et l'onglet de l'hôte
+// gelait. Un test qui régresse ici ne finit pas : c'est ce qu'il garde.
+{
+  const e = engine();
+  for (let x = 0; x < W; x++) e.set(x, 30, SAND);
+  const before = e.cells.slice();
+  applyGesture(e, { t: "fill", x: 1.5, y: 3, id: SAND });
+  applyGesture(e, { t: "rect", x: 0, y: 0, x2: 0.5, y2: 4, id: STONE, over: true });
+  applyGesture(e, { t: "paint", x: Number.NaN, y: 3, r: 3, id: STONE, d: 1, over: true });
+  assert.deepEqual(e.cells, before, "un geste aux coordonnées non entières est ignoré");
+  e.fill(1.5, 3, SAND); // le moteur se garde aussi, pour ce qui ne passe pas par un geste
+  assert.deepEqual(e.cells, before, "et fill() ne boucle pas");
 }
 
 // Un rectangle entièrement hors grille : les bornes sont ramenées, pas niées.

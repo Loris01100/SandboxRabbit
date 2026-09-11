@@ -23,18 +23,26 @@ export type Gesture =
 /** Un id de matière inventé ferait jeter `MATERIALS[id].life` chez l'hôte. */
 const known = (id: MaterialId): MaterialId => (MATERIALS[id] ? id : EMPTY);
 
+/**
+ * Des coordonnées entières, ou rien. Un pair de salon envoie ce qu'il veut :
+ * un remplissage en x = 1,5 ne remplissait jamais rien, sa pile ne se vidait
+ * plus, et l'onglet de l'hôte gelait sur un seul message.
+ */
+const whole = (...v: number[]): boolean => v.every(Number.isSafeInteger);
+
 export function applyGesture(engine: Engine, g: Gesture): void {
+  if (!whole(g.x, g.y)) return;
   switch (g.t) {
     case "paint": engine.paint(g.x, g.y, g.r, known(g.id), g.d, g.over, g.only); return;
     case "fill": engine.fill(g.x, g.y, known(g.id)); return;
-    case "rect": engine.rect(g.x, g.y, g.x2, g.y2, known(g.id), g.over); return;
+    case "rect": if (whole(g.x2, g.y2)) engine.rect(g.x, g.y, g.x2, g.y2, known(g.id), g.over); return;
     case "frozen": engine.setFrozen(g.x, g.y, g.r, g.on); return;
     // Un seul message pour les deux bascules : la cellule dit laquelle c'est.
     case "toggle": engine.toggleSwitch(g.x, g.y); engine.toggleMagnet(g.x, g.y); return;
     case "clip": {
       const n = g.w * g.h;
       // Un morceau plus grand que le bac ne vient pas d'un pair honnête.
-      if (!(n > 0) || n > engine.cells.length) return;
+      if (!whole(g.w, g.h) || !(n > 0) || n > engine.cells.length) return;
       engine.paste({ width: g.w, height: g.h, cells: decode(g.cells, n), frozen: decodeFrozen(g.cells, n), life: decode(g.life, n) }, g.x, g.y);
       return;
     }

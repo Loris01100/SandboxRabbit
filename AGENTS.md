@@ -69,6 +69,7 @@ src/worker/
   app.ts                 routes Hono /api/*, en-têtes, fallback ASSETS ; interface Env
   store.ts               D1 si env.DB, sinon Map en mémoire
   room.ts                Durable Object du salon (relaie, ne simule pas)
+  relay.ts               qui a le droit de dire quoi dans un salon      (pur)
 migrations/              schéma D1, un fichier numéroté par changement
 test/                    scripts d'assert (+ bench.ts, loc.ts)
 ```
@@ -114,7 +115,12 @@ aucun test précis.
   cellule.
 - Pas de `style=` ni de `<script>` en ligne : la CSP les bloque.
 - Données externes (galerie, lien, pair de salon) : `engine.adopt()` et
-  `known()` écartent les ids inconnus, `disc()` borne les rayons.
+  `known()` écartent les ids inconnus, `disc()` borne les rayons,
+  `applyGesture` refuse les coordonnées non entières. `life` n'est pas filtré :
+  une règle qui y lit un id de matière passe par `KNOWN`.
+- Le salon (`relay.ts`) ne laisse passer que la `grid` de l'hôte vers les
+  invités et le `do` d'un invité vers l'hôte ; `role` et `peers` ne viennent
+  que du Durable Object.
 
 **Worker et données**
 

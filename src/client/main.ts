@@ -539,6 +539,10 @@ function fit(w: number): void {
   if (![...sizeInput.options].some((o) => o.value === String(w))) return;
   resize(w, (w * 9) / 16, true);
   sizeInput.value = String(w);
+  // Aucun événement ne part d'une valeur posée en code : sans ce rappel, les
+  // réglages gardaient l'ancienne taille, et la visite suivante rouvrait le bac
+  // dans une grille qui n'était plus la sienne.
+  remember();
 }
 
 // Météo : la pluie elle-même vit dans gestures.ts, avec le tirage du moteur.
@@ -752,13 +756,8 @@ const kept = read(BAC);
 // `quiet` : rien à annuler avant le premier geste. À défaut des deux, le bac a
 // déjà graîné sa cuvette tout seul.
 if (location.hash.length > 1) loadHash(location.hash.slice(1));
-else if (kept) void load(kept, undefined, true);
+else if (kept) loadWorld(kept);
 
-/**
- * Un lien partagé : « 320~<grille> ». La largeur précède la grille, sinon un
- * monde 480 relu dans un bac 320 se décale d'une ligne à chaque rangée.
- * Sans elle (liens d'avant), on suppose le bac tel qu'il est.
- */
 function loadHash(raw: string): void {
   let hash: string;
   try {
@@ -766,17 +765,34 @@ function loadHash(raw: string): void {
   } catch {
     return; // « %zz » dans l'adresse : ce n'est pas un lien de partage
   }
-  const cut = hash.indexOf("~");
-  if (cut > 0) void load(hash.slice(cut + 1), Number(hash.slice(0, cut)), true);
-  else void load(hash, undefined, true);
+  loadWorld(hash);
+}
+
+/**
+ * « 320~<grille> » : un lien partagé, ou le bac rangé en mémoire locale. La
+ * largeur précède la grille, sinon un monde 480 relu dans un bac 320 se décale
+ * d'une ligne à chaque rangée. Sans elle (liens et bacs d'avant), on suppose le
+ * bac tel qu'il est.
+ */
+function loadWorld(world: string): void {
+  const cut = world.indexOf("~");
+  if (cut > 0) void load(world.slice(cut + 1), Number(world.slice(0, cut)), true);
+  else void load(world, undefined, true);
 }
 
 // `visibilitychange` plutôt que `beforeunload` : c'est le seul que les mobiles
 // déclenchent vraiment quand l'onglet part en arrière-plan.
 addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "hidden") return;
   // La grille du bac, telle qu'il l'a envoyée il y a moins d'un quart de
   // seconde : rien à demander, personne ne répondrait — la page s'en va.
-  if (document.visibilityState === "hidden") write(BAC, latestGrid());
+  const grid = latestGrid();
+  // Sa largeur avec, comme dans un lien : sans elle, un défi (320) rangé
+  // depuis un bac réglé en 480 revenait cisaillé à la visite suivante.
+  // ponytail: WIDTH suit un redimensionnement tout de suite, la grille un
+  // quart de seconde plus tard — quitter dans cet intervalle range l'ancienne
+  // grille sous la nouvelle largeur.
+  if (grid) write(BAC, `${WIDTH}~${grid}`);
 });
 
 /* -------------------------------------------------------------------- rejeu */

@@ -116,8 +116,11 @@ const BOIL_AT = new Float32Array(256).fill(Infinity);
 const BOIL_INTO = new Uint8Array(256);
 const FREEZE_AT = new Float32Array(256).fill(-Infinity);
 const FREEZE_INTO = new Uint8Array(256);
+/** 1 = id présent dans `MATERIALS`. Pour ce qui lit un id ailleurs que dans `cells` (le `life` d'une source). */
+const KNOWN = new Uint8Array(256);
 for (const key of Object.keys(MATERIALS)) {
   const m = MATERIALS[Number(key)];
+  KNOWN[m.id] = 1;
   KIND[m.id] = KINDS[m.kind];
   DENSITY[m.id] = m.density;
   if (m.heat !== undefined) HEAT[m.id] = m.heat;
@@ -445,7 +448,9 @@ export class Engine {
    * peut faire toute la grille.
    */
   fill(x: number, y: number, id: MaterialId): void {
-    if (!this.inBounds(x, y)) return;
+    // En x = 1,5, les écritures tombent à côté du tableau typé : la poche ne
+    // se remplit jamais, la pile ne se vide plus, et l'onglet gèle.
+    if (!Number.isInteger(x) || !Number.isInteger(y) || !this.inBounds(x, y)) return;
     const start = this.index(x, y);
     const from = this.cells[start];
     if (from === id || CREATURE[id]) return; // une poche ne se remplit pas de lapins
@@ -888,8 +893,13 @@ export class Engine {
   /** Générateur : crache sa matière (stockée dans `life`) dans la case libre voisine. */
   private updateSource(i: number, x: number, y: number): void {
     if (this.rand() > 0.5) return;
-    const id = this.life[i] || WATER;
-    const dy = MATERIALS[id].kind === "gas" ? -this.gravity : this.gravity;
+    // `life` arrive aussi d'ailleurs (lien, galerie, `clip` d'un pair), et
+    // `adopt()` ne filtre que `cells` : un id inconnu faisait jeter
+    // `MATERIALS[id]` au premier tick, et un lien de cinquante caractères
+    // arrêtait le bac pour de bon. Il retombe sur l'eau, comme une source vide.
+    const emitted = this.life[i];
+    const id = emitted !== EMPTY && KNOWN[emitted] ? emitted : WATER;
+    const dy = KIND[id] === KINDS.gas ? -this.gravity : this.gravity;
     if (this.get(x, y + dy) === EMPTY) this.become(x, y + dy, id);
   }
 

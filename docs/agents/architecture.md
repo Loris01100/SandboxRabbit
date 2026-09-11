@@ -33,7 +33,8 @@ flowchart LR
 2. **Le Web Worker de simulation** ([sim/worker.ts](../../src/client/sim/worker.ts))
    héberge `Sandbox`, qui possède l'`Engine` et le `Renderer`. Il avance au
    temps réellement écoulé (`setTimeout` à ~60 Hz, pas de `requestAnimationFrame`)
-   et renvoie des **nouvelles**.
+   et renvoie des **nouvelles**. L'échéance suivante est posée dans un
+   `finally` : une exception du moteur ne coupe plus la boucle pour de bon.
 3. **Le Worker Cloudflare** sert le site statique **et** l'API — il n'y a pas
    de projet Pages séparé.
 
@@ -95,9 +96,14 @@ reçu : un pair de salon ne peut pas en semer un disque.
 ## Salon partagé (bac multijoueur)
 
 - Serveur : [src/worker/room.ts](../../src/worker/room.ts), un Durable Object par
-  nom de salon, API d'hibernation des WebSockets. **Il relaie sans simuler ni
-  lire** : tout message texte ≤ 200 000 caractères est renvoyé aux autres.
-  8 places.
+  nom de salon, API d'hibernation des WebSockets. **Il relaie sans simuler**,
+  mais pas à l'aveugle : [src/worker/relay.ts](../../src/worker/relay.ts)
+  (pur, testé dans test/api.ts) lit le `type` de chaque message texte
+  ≤ 200 000 caractères et n'en laisse passer que deux — la `grid` de l'hôte
+  vers les invités, le `do` d'un invité vers l'hôte. Un invité ne parle donc
+  jamais aux autres invités, et `role` / `peers` ne viennent que du DO : un
+  invité qui les imitait destituait l'hôte ou le faisait taire. Le rôle vit
+  dans la pièce jointe du socket (`serializeAttachment`). 8 places.
 - Client : [src/client/room.ts](../../src/client/room.ts).
 - Le premier connecté est **l'hôte** : seul simulateur, sa grille fait foi. Si
   il part, le plus ancien restant est promu.
@@ -114,7 +120,9 @@ clients qui simulent divergent forcément.
 
 Ce qui arrive d'un pair n'est pas de confiance : `known()` écarte les ids de
 matière inconnus, `disc()` borne les rayons, `applyGesture` refuse un `clip`
-plus grand que le bac.
+plus grand que le bac et toute coordonnée non entière (un `fill` en x = 1,5
+gelait l'hôte). Le `life` d'un `clip` n'est pas filtré : voir « Données venues
+d'ailleurs » dans [simulation.md](simulation.md).
 
 ## API HTTP
 
@@ -208,3 +216,9 @@ Accès `localStorage` : uniquement via `read` / `write` / `forget` de ui.ts.
 Un `localStorage.getItem` nu jette quand les cookies sont bloqués, et au
 chargement d'un module cela laisse la page blanche. Clés existantes :
 `sandbox-rabbit:mondes`, `:reglages`, `:records`, `:bac`, `:theme`.
+
+`:bac` suit le format d'un lien de partage, `320~<grille>` (`loadWorld()` de
+main.ts lit les deux ; une valeur sans `~`, d'avant, se charge dans le bac tel
+qu'il est). Sans la largeur, un défi rangé en 320 depuis un bac réglé en 480
+revenait cisaillé. Pour la même raison, `fit()` appelle `remember()` : une
+taille imposée en code (défi, lien, galerie, salon) n'émet aucun événement.

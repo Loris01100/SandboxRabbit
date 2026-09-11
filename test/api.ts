@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict";
 import app from "../src/worker/app.ts";
+import { route } from "../src/worker/relay.ts";
 
 const env = {} as never;
 
@@ -88,6 +89,25 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   const world = await (await app.request(`/api/worlds/${id}`, {}, env)).json();
   assert.equal(world.goal, "ge:12:600", "l'objectif voyage avec le monde");
   await app.request(`/api/worlds/${id}`, { method: "DELETE", headers: { "x-world-token": token } }, env);
+}
+
+// Le salon ne relaie plus à l'aveugle : l'hôte ne diffuse que sa grille, un
+// invité ne parle qu'à l'hôte et seulement par gestes. `role` et `peers` ne
+// viennent que du salon — un invité qui les imitait destituait l'hôte.
+{
+  const msg = (o: unknown): string => JSON.stringify(o);
+  const grille = msg({ type: "grid", width: 320, height: 180, data: "AQE" });
+  assert.equal(route(msg({ type: "do", g: { t: "fill", x: 1, y: 1, id: 1 } }), false), "host", "le geste d'un invité va à l'hôte");
+  assert.equal(route(grille, true), "guests", "la grille de l'hôte va aux invités");
+  assert.equal(route(msg({ type: "role", host: false }), false), null, "un invité ne destitue pas l'hôte");
+  assert.equal(route(msg({ type: "peers", n: 1 }), false), null, "ni ne le fait taire");
+  assert.equal(route(grille, false), null, "ni n'impose sa grille aux autres invités");
+  assert.equal(route(msg({ type: "role", host: true }), true), null, "l'hôte non plus ne distribue pas les rôles");
+  assert.equal(route(msg({ type: "do", g: {} }), true), null, "ni n'envoie de gestes");
+  assert.equal(route("pas du json", false), null);
+  assert.equal(route("null", false), null);
+  assert.equal(route(msg({ type: "do", g: "x".repeat(200_001) }), false), null, "plafonné à la taille d'un monde");
+  assert.equal(route(new ArrayBuffer(4), false), null, "rien que du texte");
 }
 
 // Sans binding Durable Object (tests, `vite dev`), le bac partagé se dit indisponible.
