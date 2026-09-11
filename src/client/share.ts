@@ -186,7 +186,21 @@ for (const id of PALETTE) {
   goalId.append(new Option(MATERIALS[id].name, String(id)));
 }
 
+/** Plafond d'un monde côté Worker (`POST /api/worlds`, app.ts). */
+const HEAVY = 200_000;
+
 document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", async () => {
+  // L'état vivant (vies, températures) fait l'essentiel du poids : un incendie
+  // en 640×360 passait le plafond, et la sauvegarde échouait sans dire
+  // pourquoi. On garde alors la matière et le figé — les deux premiers blocs du
+  // codec, ce que reçoit déjà un invité de salon.
+  let data = latestGrid();
+  const alive = data.length <= HEAVY;
+  if (!alive) data = data.split(".").slice(0, 2).join(".");
+  if (data.length > HEAVY) {
+    statusEl.textContent = "Monde trop chargé pour la galerie, même sans son état vivant.";
+    return;
+  }
   const name = prompt("Nom du monde ?", `bac-${new Date().toLocaleTimeString("fr-FR")}`);
   if (!name) return;
   statusEl.textContent = "Sauvegarde…";
@@ -194,7 +208,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      name, width: WIDTH, height: HEIGHT, data: latestGrid(),
+      name, width: WIDTH, height: HEIGHT, data,
       goal: goalOp.value ? `${goalOp.value}:${goalId.value}:${goalN.value}` : null,
     }),
   });
@@ -202,7 +216,9 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
   // Le jeton n'est rendu que là : gardé maintenant ou perdu pour de bon.
   const { id, token } = (await res.json()) as { id: string; token?: string };
   if (token) write(OWNED, JSON.stringify({ ...owned(), [id]: token }));
-  statusEl.textContent = "Sauvegardé — visible dans la galerie.";
+  statusEl.textContent = alive
+    ? "Sauvegardé — visible dans la galerie."
+    : "Sauvegardé sans son état vivant (trop lourd) — visible dans la galerie.";
 });
 
 // Partage : le monde entier tient dans l'URL (RLE + base64, ~1 ko). La largeur

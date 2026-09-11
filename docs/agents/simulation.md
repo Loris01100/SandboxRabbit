@@ -236,3 +236,13 @@ défi en cours, l'enregistrement et le rejeu.
 Tout ce qui change la grille **sans passer par un geste** (annuler, vider,
 charger, bâtir une scène) doit appeler `this.rec?.stamp()`, sinon le rejeu
 diverge à partir de là. Un changement de taille abandonne l'enregistrement.
+
+Pendant un rejeu, le `Player` possède la grille : les gestes sont ignorés, la
+pause l'arrête, `step` l'avance d'un tick, et tout ordre qui **remplace** la
+grille (`clear`, `undo`, `redo`, `load`, `scene`, `size`) l'arrête d'abord par
+`this.play(false)` — il continuait sinon sur une grille qu'il n'avait pas
+enregistrée. `play(false)` remet dans le moteur les réglages du panneau
+(`knobs`), que le rejeu avait remplacés par les siens.
+
+La condition de victoire (`won`) est désarmée par `clear`, `load` et `size` :
+un bac vidé ou neuf remplissait d'avance plus d'un objectif.

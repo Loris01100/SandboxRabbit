@@ -166,4 +166,63 @@ const last = <T extends News["t"]>(news: News[], t: T): Extract<News, { t: T }> 
   assert.equal(count(sim.engine, SAND), 0, "le geste est ignoré, sinon le rejeu divergerait");
 }
 
+/** Un bac avec une partie enregistrée, prête à rejouer. */
+function filmé(): { sim: Sandbox; news: News[] } {
+  const b = bac();
+  b.sim.order({ t: "rec", on: true });
+  run(b.sim, 20);
+  b.sim.order({ t: "rec", on: false });
+  return b;
+}
+
+// La pause arrête aussi un rejeu, et « Pas à pas » l'avance d'un tick.
+{
+  const { sim, news } = filmé();
+  sim.order({ t: "set", k: { running: false } });
+  sim.order({ t: "play", on: true });
+  run(sim, 200);
+  assert.equal(last(news, "play")!.on, true, "en pause, le rejeu attend au lieu de filer jusqu'au bout");
+  for (let n = 0; n < 25; n++) sim.order({ t: "edit", do: "step" });
+  assert.equal(last(news, "play")!.on, false, "pas à pas, il avance, jusqu'à sa fin");
+}
+
+// Vider pendant un rejeu l'arrête d'abord : il continuait sinon sur une grille
+// qu'il n'avait pas enregistrée.
+{
+  const { sim, news } = filmé();
+  sim.order({ t: "play", on: true });
+  sim.order({ t: "edit", do: "clear" });
+  assert.equal(last(news, "play")!.on, false, "le rejeu s'arrête");
+  assert.equal(count(sim.engine, STONE), 0, "et le bac est bien vidé");
+}
+
+// Après un rejeu, le moteur reprend les réglages du panneau, pas ceux de
+// l'enregistrement : sinon le bouton Gravité disait l'inverse du bac.
+{
+  const { sim } = filmé();
+  sim.order({ t: "set", k: { gravity: -1, wind: 0.3 } });
+  sim.order({ t: "play", on: true });
+  assert.equal(sim.engine.gravity, 1, "le rejeu joue avec la gravité enregistrée");
+  sim.order({ t: "play", on: false });
+  assert.equal(sim.engine.gravity, -1, "puis rend celle du panneau");
+  assert.equal(sim.engine.wind, 0.3, "et son vent");
+}
+
+// Vider abandonne le défi en cours : Débâcle vidé n'a plus de glace, il était
+// gagné d'avance. Charger un autre monde aussi.
+{
+  const { sim, news } = bac();
+  sim.order({ t: "size", w: 320, h: 180, keep: true }); // les défis sont écrits pour 320×180
+  sim.order({ t: "scene", name: "Débâcle" });
+  sim.order({ t: "edit", do: "clear" });
+  run(sim, 40);
+  assert.equal(last(news, "won"), undefined, "un bac vidé ne gagne pas le défi");
+
+  sim.order({ t: "goal", goal: `ge:${SAND}:10` });
+  sim.order({ t: "load", data: "AQI", ask: 1 });
+  sim.order({ t: "do", g: { t: "rect", x: 2, y: 2, x2: 20, y2: 4, id: SAND, over: true } });
+  run(sim, 40);
+  assert.equal(last(news, "won"), undefined, "l'objectif d'un monde ne suit pas dans le suivant");
+}
+
 console.log("ok — protocole du bac conforme");

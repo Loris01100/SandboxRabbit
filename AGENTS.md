@@ -108,7 +108,8 @@ aucun test précis.
 - Toute modification de la grille par l'utilisateur passe par `gesture()` de
   main.ts (jamais `order({t:"do"})` en direct), sinon le salon ne la voit pas.
 - Ce qui change la grille sans geste appelle `this.rec?.stamp()` dans
-  sandbox.ts, sinon le rejeu diverge.
+  sandbox.ts, sinon le rejeu diverge. S'il la remplace, il arrête d'abord le
+  rejeu (`this.play(false)`).
 - `localStorage` uniquement via `read` / `write` / `forget` de ui.ts.
 - `room.ts`, `share.ts`, `theme.ts` n'importent pas main.ts (cycle).
 - 1 cellule = 1 pixel, un seul `putImageData` par frame : pas de dessin par

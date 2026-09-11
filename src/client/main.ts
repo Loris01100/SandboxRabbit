@@ -29,6 +29,14 @@ let playing = false;
 /** Taille de la dernière partie enregistrée, ou null : le bac garde le film. */
 let film: { w: number; h: number } | null = null;
 let recording = false;
+/** Invité d'un salon : c'est l'hôte qui simule, la pause n'est pas à lui. */
+let guest = false;
+const FOLLOW = "Vous suivez l'hôte : c'est lui qui simule.";
+/**
+ * Défi en cours. Déclaré ici, pas avec les défis plus bas : la restauration
+ * des réglages rejoue « input » sur la taille, dont le rappel le lit.
+ */
+let challenge: Challenge | null = null;
 
 /* ---------------------------------------------------------------- palette */
 
@@ -527,6 +535,7 @@ const sizeInput = document.querySelector<HTMLSelectElement>("#size")!;
 sizeInput.addEventListener("input", () => {
   const w = Number(sizeInput.value);
   resize(w, (w * 9) / 16);
+  abandon();
 });
 
 /**
@@ -617,6 +626,7 @@ gravityButton.addEventListener("click", flipGravity);
 
 const playButton = document.querySelector<HTMLButtonElement>("#play")!;
 function toggleRun(): void {
+  if (guest) { statusEl.textContent = FOLLOW; return; }
   running = !running;
   set({ running });
   playButton.textContent = running ? "Pause" : "Reprendre";
@@ -624,6 +634,7 @@ function toggleRun(): void {
 playButton.addEventListener("click", toggleRun);
 
 document.querySelector<HTMLButtonElement>("#step")!.addEventListener("click", () => {
+  if (guest) { statusEl.textContent = FOLLOW; return; }
   running = false;
   playButton.textContent = "Reprendre";
   set({ running });
@@ -645,10 +656,14 @@ document.querySelector<HTMLButtonElement>("#surprise")!.addEventListener("click"
   const scene = SCENES[Math.floor(Math.random() * SCENES.length)];
   fit(320);
   order({ t: "scene", name: scene.name });
+  abandon();
   statusEl.textContent = `« ${scene.name} » — servez-vous.`;
 });
 
-document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => order({ t: "edit", do: "clear" }));
+document.querySelector<HTMLButtonElement>("#clear")!.addEventListener("click", () => {
+  order({ t: "edit", do: "clear" });
+  abandon();
+});
 
 /* -------------------------------------------------------------- mondes/API */
 
@@ -674,7 +689,12 @@ function load(data: string, width?: number, quiet = false): Promise<boolean> {
   }
   // Le décodage et le cran d'annulation sont l'affaire du bac ; il répond si la
   // grille était lisible, et dit lui-même qu'elle ne l'était pas.
-  return askLoad(data, quiet);
+  return askLoad(data, quiet).then((ok) => {
+    // Avant que la galerie n'arme l'objectif d'un monde-défi : elle attend
+    // cette même promesse.
+    if (ok) abandon();
+    return ok;
+  });
 }
 
 /* ------------------------------------------------------------- bac partagé */
@@ -686,7 +706,11 @@ initRoom({
   // manquerait de l'enregistrement de l'hôte.
   apply: gesture,
   role(host) {
+    guest = !host;
+    // Le bac aussi, pas seulement le bouton : un invité qui simulait entre deux
+    // grilles de l'hôte voyait l'image sauter tous les quarts de seconde.
     running = host;
+    set({ running });
     playButton.textContent = running ? "Pause" : "Reprendre";
   },
   size(w) {
@@ -701,7 +725,6 @@ initRoom({
 
 const goalEl = document.querySelector<HTMLParagraphElement>("#goal")!;
 const challengesEl = document.querySelector<HTMLDivElement>("#challenges")!;
-let challenge: Challenge | null = null;
 /** Horloge murale : la pause et le ralenti comptent aussi, c'est un chrono de joueur. */
 let startedAt = 0;
 
@@ -715,6 +738,17 @@ function startChallenge(c: Challenge): void {
   challenge = c;
   startedAt = performance.now();
   goalEl.textContent = `${c.name} — ${c.goal}${best(c.name)}`;
+}
+
+/**
+ * Le bac a été vidé, redimensionné ou remplacé : le défi en cours n'a plus
+ * d'objet. Le bac l'a déjà désarmé ; sans ce pendant, la page affichait encore
+ * son but et faisait tourner son chrono.
+ */
+function abandon(): void {
+  if (!challenge) return;
+  goalEl.textContent = `${challenge.name} — abandonné.`;
+  challenge = null;
 }
 
 for (const c of CHALLENGES) {

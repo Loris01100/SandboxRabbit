@@ -147,9 +147,12 @@ export class Sandbox {
     const budget = ticksFor(this.knobs.speed, ms, this.pending);
     this.pending = budget.pending;
     if (this.player) {
-      // Un rejeu remplace la simulation : c'est lui qui avance le bac.
-      for (let n = budget.ticks; n > 0; n--) {
-        if (!this.player.step()) { this.play(false); break; }
+      // Un rejeu remplace la simulation : c'est lui qui avance le bac. La pause
+      // l'arrête aussi — il avançait sans elle, et « Pas à pas » n'y pouvait rien.
+      if (this.knobs.running) {
+        for (let n = budget.ticks; n > 0; n--) {
+          if (!this.player.step()) { this.play(false); break; }
+        }
       }
     } else if (this.knobs.running) {
       for (let n = budget.ticks; n > 0; n--) this.tick();
@@ -199,6 +202,15 @@ export class Sandbox {
   }
 
   private edit(what: "clear" | "undo" | "redo" | "step" | "snapshot"): void {
+    // Pendant un rejeu, « Pas à pas » avance le rejeu lui-même…
+    if (what === "step" && this.player) {
+      if (!this.player.step()) this.play(false);
+      return;
+    }
+    // …et vider, annuler ou rétablir l'arrêtent d'abord : il continuait sinon
+    // sur une grille qu'il n'avait pas enregistrée, et divergeait. Annuler
+    // ramène alors au bac d'avant le rejeu, que `play()` a mis de côté.
+    if (what !== "snapshot") this.play(false);
     switch (what) {
       case "snapshot": return this.snapshot();
       case "step": return this.tick();
@@ -206,6 +218,9 @@ export class Sandbox {
         this.snapshot();
         this.engine.clear();
         this.rec?.stamp();
+        // Un défi vidé est souvent gagné d'avance (Débâcle : plus de glace du
+        // tout) : vider l'abandonne.
+        this.won = null;
         return;
       case "undo": return this.jump(this.undoStack, this.redoStack, "Annulé", "Rien à annuler.");
       case "redo": return this.jump(this.redoStack, this.undoStack, "Rétabli", "Rien à rétablir.");
@@ -248,6 +263,7 @@ export class Sandbox {
     const challenge = CHALLENGES.find((c) => c.name === name);
     const found = challenge ?? SCENES.find((s) => s.name === name);
     if (!found) return;
+    this.play(false); // la scène remplace la grille du rejeu : il s'arrête
     this.snapshot();
     this.engine.clear();
     found.build(this.engine);
@@ -261,6 +277,7 @@ export class Sandbox {
    * écarte les matières inconnues.
    */
   private load(data: string, ask?: number, quiet?: boolean): void {
+    this.play(false); // la grille venue d'ailleurs remplace celle du rejeu
     if (!quiet) this.snapshot();
     try {
       put(this.engine, data, null, this.engine.ambient);
@@ -276,10 +293,18 @@ export class Sandbox {
       return;
     }
     this.rec?.stamp();
+    // Un autre monde : l'objectif du défi en cours ne le concerne plus. Un
+    // monde-défi de la galerie réarme le sien juste après (ordre `goal`).
+    this.won = null;
     if (ask !== undefined) this.send({ t: "reply", ask, value: true });
   }
 
   private resize(width: number, height: number, keep: boolean): void {
+    // Le rejeu tient l'ancien moteur : il continuerait d'avancer dans le vide.
+    this.play(false);
+    // Un bac neuf (la cuvette, ou rien) remplirait d'avance plus d'un objectif.
+    // Un défi livré se rebâtit après (`fit()` puis l'ordre `scene`).
+    this.won = null;
     const { wind, ambient, gravity, emit } = this.engine;
     this.engine = new Engine(width, height);
     Object.assign(this.engine, { wind, ambient, gravity, emit });
@@ -315,6 +340,11 @@ export class Sandbox {
     if (!on) {
       if (!this.player) return;
       this.player = null;
+      // Le rejeu a posé ses réglages dans le moteur (vent, ambiante, gravité,
+      // matière des sources) : on remet ceux du panneau, sinon le bouton
+      // Gravité disait « vers le bas » d'un bac qui tombait vers le haut.
+      const { wind, ambient, gravity, emit } = this.knobs;
+      Object.assign(this.engine, { wind, ambient, gravity, emit });
       this.send({ t: "play", on: false });
       return;
     }

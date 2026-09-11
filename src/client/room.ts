@@ -65,6 +65,8 @@ let host = false;
 let beat = 0;
 /** Connectés au salon, compté par le Durable Object. Seul, l'hôte ne diffuse rien. */
 let peers = 1;
+/** Plafond d'un message relayé par le salon (`MAX` de src/worker/relay.ts). */
+const HEAVY = 200_000;
 /** La dernière grille courte (matière + figé) envoyée par le bac. */
 let mine = "";
 
@@ -128,10 +130,21 @@ roomButton.addEventListener("click", () => {
     statusEl.textContent = failed ? "Salon injoignable." : "Salon quitté.";
   });
 
+  // Une grille trop lourde n'est signalée qu'une fois, pas quatre par seconde.
+  let heavy = false;
   beat = setInterval(() => {
     // Personne en face : ni téléversement, ni réveil du salon.
-    if (host && peers > 1 && mine && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "grid", width: WIDTH, height: HEIGHT, data: mine }));
+    if (!host || peers < 2 || !mine || ws.readyState !== WebSocket.OPEN) return;
+    const message = JSON.stringify({ type: "grid", width: WIDTH, height: HEIGHT, data: mine });
+    // Le salon jette sans rien dire un message au-delà de son plafond
+    // (relay.ts) : les invités restaient figés sur la dernière grille reçue.
+    if (message.length > HEAVY) {
+      if (!heavy) statusEl.textContent = "Grille trop chargée pour le salon : les invités ne la reçoivent plus.";
+      heavy = true;
+      return;
     }
+    if (heavy) statusEl.textContent = `Salon « ${name} » — les invités reçoivent à nouveau la grille.`;
+    heavy = false;
+    ws.send(message);
   }, 250);
 });

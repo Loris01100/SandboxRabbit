@@ -49,14 +49,14 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | --- | --- |
 | `do` `{g}` | Applique un `Gesture` (ignoré pendant un rejeu). **N'envoyer que via `gesture()` de main.ts.** |
 | `set` `{k}` | Met à jour les réglages (`Knobs` : vent, ambiante, gravité, vitesse, pause, vue thermique, salon…) |
-| `size` `{w,h,keep}` | Recrée moteur et rendu ; vide l'annulation, abandonne l'enregistrement |
-| `load` `{data,ask?,quiet?}` | Pose une grille encodée ; `quiet` = sans cran d'annulation (salon) |
-| `edit` | `clear` / `undo` / `redo` / `step` / `snapshot` |
-| `scene` `{name}` | Bâtit un défi ou un décor de `challenges.ts` |
+| `size` `{w,h,keep}` | Recrée moteur et rendu ; vide l'annulation, abandonne l'enregistrement, arrête le rejeu, désarme le défi |
+| `load` `{data,ask?,quiet?}` | Pose une grille encodée ; `quiet` = sans cran d'annulation (salon). Arrête le rejeu et désarme le défi en cours — un monde-défi réarme le sien par `goal` juste après |
+| `edit` | `clear` / `undo` / `redo` / `step` / `snapshot`. Pendant un rejeu, `step` l'avance d'un tick, `clear` / `undo` / `redo` l'arrêtent d'abord. `clear` désarme le défi |
+| `scene` `{name}` | Bâtit un défi ou un décor de `challenges.ts` ; arrête le rejeu |
 | `goal` `{goal}` | Objectif d'un monde-défi (`ge:12:600`) |
 | `cursor` `{x,y}` | Position de la sonde |
 | `clip` `{ask,…}` | Découpe un rectangle, répond par `reply` |
-| `rec` / `play` `{on}` | Enregistrement / rejeu |
+| `rec` / `play` `{on}` | Enregistrement / rejeu. Le rejeu obéit à la pause ; à sa fin, le moteur reprend les réglages du panneau (`knobs`) |
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
@@ -107,6 +107,12 @@ reçu : un pair de salon ne peut pas en semer un disque.
 - Client : [src/client/room.ts](../../src/client/room.ts).
 - Le premier connecté est **l'hôte** : seul simulateur, sa grille fait foi. Si
   il part, le plus ancien restant est promu.
+- Un invité met **son bac** en pause (`set({running: false})` dans le rappel
+  `role` de main.ts, pas seulement le bouton) : il simulait sinon entre deux
+  grilles, et l'image sautait tous les quarts de seconde. Pause et Pas à pas
+  lui sont refusés tant qu'il est invité.
+- Une grille qui dépasse le plafond du salon n'est pas envoyée (le DO la
+  jetterait sans rien dire) : l'hôte le signale dans la barre de statut.
 
 | Message | Sens | Contenu |
 | --- | --- | --- |
