@@ -31,7 +31,7 @@ let film: { w: number; h: number } | null = null;
 let recording = false;
 /** Invité d'un salon : c'est l'hôte qui simule, la pause n'est pas à lui. */
 let guest = false;
-const FOLLOW = "Vous suivez l'hôte : c'est lui qui simule.";
+const FOLLOW = "Vous suivez l'hôte : c'est lui qui mène le bac.";
 /**
  * Défi en cours. Déclaré ici, pas avec les défis plus bas : la restauration
  * des réglages rejoue « input » sur la taille, dont le rappel le lit.
@@ -707,17 +707,12 @@ initRoom({
   apply: gesture,
   role(host) {
     guest = !host;
-    // Le bac aussi, pas seulement le bouton : un invité qui simulait entre deux
-    // grilles de l'hôte voyait l'image sauter tous les quarts de seconde.
     running = host;
     set({ running });
     playButton.textContent = running ? "Pause" : "Reprendre";
   },
   size(w) {
     fit(w);
-  },
-  grid(data) {
-    void load(data, undefined, true);
   },
 });
 

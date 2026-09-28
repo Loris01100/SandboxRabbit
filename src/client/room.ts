@@ -1,15 +1,21 @@
 /**
  * Le bac partagé, côté navigateur. En face, un Durable Object qui ne fait que
- * relayer (src/worker/room.ts). L'hôte est le seul à simuler : il diffuse sa
- * grille quatre fois par seconde **dès qu'il n'est pas seul**, les invités lui
- * envoient leurs gestes et affichent ce qu'ils reçoivent — un seul simulateur,
- * donc rien à réconcilier.
- * ponytail: pas d'identité ni de verrou, qui entre peint. Et l'instantané ne
- * porte que matière et figé : la vue thermique d'un invité reste muette.
+ * relayer (src/worker/room.ts).
  *
- * La grille diffusée n'est pas encodée ici : c'est le bac qui l'envoie tout
- * encodée (nouvelle « grid »), quatre fois par seconde, et seulement pendant
- * qu'un salon est ouvert — le réglage `room` le lui dit.
+ * Lockstep : chacun simule chez soi. L'hôte mène la partie — les gestes des
+ * invités lui arrivent, il les applique au tick où il en est et les range dans
+ * sa partie, qu'il diffuse **dès qu'il n'est pas seul** : un départ (`start`,
+ * la grille entière et l'état du tirage), puis vingt fois par seconde la suite
+ * (`turn` : les gestes et changements de réglage, et jusqu'où il est allé).
+ * Chaque invité la rejoue dans son bac, un peu derrière l'hôte ; le moteur
+ * étant déterministe, tous voient le même bac à 60 images par seconde, pour
+ * quelques octets par geste. C'est le rejeu de replay.ts, en direct.
+ *
+ * Une fois par seconde l'hôte joint l'empreinte de sa grille : un invité qui
+ * ne la retrouve pas demande un nouveau départ (`sync`).
+ *
+ * ponytail: pas d'identité ni de verrou, qui entre peint. Et un invité voit
+ * son propre coup de pinceau après un aller-retour : pas de prédiction locale.
  *
  * Ce module ne connaît ni le bouton Pause ni le sélecteur de taille : il les
  * demande par des rappels, sinon il faudrait importer main.ts et boucler.
@@ -17,12 +23,10 @@
 import { HEIGHT, WIDTH, listen, order } from "./world.ts";
 import type { Gesture } from "./gestures.ts";
 
-/** Appelé quand on devient hôte (true) ou invité (false) : un invité ne simule pas. */
+/** Appelé quand on devient hôte (true) ou invité (false) : un invité ne pilote pas la pause. */
 let onRole: (host: boolean) => void = () => {};
 /** Appelé quand l'hôte impose sa taille de grille. */
 let onSize: (w: number, h: number) => void = () => {};
-/** Pose la grille de l'hôte dans le bac, sans cran d'annulation (4 par seconde). */
-let onGrid: (data: string) => void = () => {};
 /**
  * Applique le geste d'un invité. C'est main.ts qui le fait, pas ce module : le
  * geste d'un pair doit emprunter le même chemin que ceux de l'hôte, sinon il
@@ -33,12 +37,10 @@ let onApply: (g: Gesture) => void = () => {};
 export function initRoom(hooks: {
   role(host: boolean): void;
   size(w: number, h: number): void;
-  grid(data: string): void;
   apply(g: Gesture): void;
 }): void {
   onRole = hooks.role;
   onSize = hooks.size;
-  onGrid = hooks.grid;
   onApply = hooks.apply;
 }
 
@@ -61,35 +63,58 @@ function parse(data: string): any {
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const roomButton = document.querySelector<HTMLButtonElement>("#room")!;
 let socket: WebSocket | null = null;
+let room = "";
 let host = false;
-let beat = 0;
 /** Connectés au salon, compté par le Durable Object. Seul, l'hôte ne diffuse rien. */
 let peers = 1;
 /** Plafond d'un message relayé par le salon (`MAX` de src/worker/relay.ts). */
 const HEAVY = 200_000;
-/** La dernière grille courte (matière + figé) envoyée par le bac. */
-let mine = "";
+/**
+ * Un départ coûte la grille entière à chaque invité : un invité qui divergerait
+ * sans cesse (ou qui le prétendrait) n'en obtient pas plus d'un toutes les
+ * `RESYNC` ms. La demande est différée, pas jetée : sinon il resterait figé.
+ */
+const RESYNC = 2000;
+let lastStart = 0;
+let resync = 0;
 
-listen((news) => {
-  if (news.t === "grid" && news.room !== undefined) mine = news.room;
-});
-
-/** Grille reçue de l'hôte : posée sans passer par la pile d'annulation. */
-function applyGrid(data: string, w: number, h: number): void {
-  // La grille de l'hôte impose sa taille.
-  if (w !== WIDTH || h !== HEIGHT) onSize(w, h);
-  // Une taille refusée (ou fantaisiste) laisserait le bac poser une bouillie.
-  if (w !== WIDTH || h !== HEIGHT) return;
-  onGrid(data);
+/** L'hôte (re)part de sa grille présente, si quelqu'un est là pour la suivre. */
+function restart(): void {
+  clearTimeout(resync);
+  resync = 0;
+  if (!host) return;
+  order({ t: "host", on: peers >= 2 });
 }
 
+function send(message: string): void {
+  if (socket?.readyState !== WebSocket.OPEN) return;
+  if (message.length > HEAVY) {
+    statusEl.textContent = "Grille trop chargée pour le salon : les invités ne la reçoivent plus.";
+    return;
+  }
+  socket.send(message);
+}
+
+listen((news) => {
+  if (!socket) return;
+  if (news.t === "start" && host) {
+    lastStart = Date.now();
+    send(JSON.stringify({ type: "start", rec: news.rec }));
+  }
+  if (news.t === "turn" && host) {
+    send(JSON.stringify({ type: "turn", ticks: news.ticks, beats: news.beats, sums: news.sums }));
+  }
+  if (news.t === "desync" && !host) send(JSON.stringify({ type: "sync" }));
+});
+
 function leaveRoom(): void {
-  clearInterval(beat);
+  clearTimeout(resync);
+  resync = 0;
   socket = null;
   host = false;
   peers = 1;
-  mine = "";
-  order({ t: "set", k: { room: false } }); // le bac cesse d'encoder pour personne
+  order({ t: "host", on: false });
+  order({ t: "follow", rec: null });
   roomButton.textContent = "Bac partagé";
   // On redevient maître de son bac : sans ça un invité qui part reste en pause.
   onRole(true);
@@ -101,7 +126,7 @@ roomButton.addEventListener("click", () => {
   if (!name) return;
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/room/${encodeURIComponent(name)}`);
   socket = ws;
-  order({ t: "set", k: { room: true } });
+  room = name;
   roomButton.textContent = "Quitter le salon";
   statusEl.textContent = `Connexion au salon « ${name} »…`;
 
@@ -110,16 +135,34 @@ roomButton.addEventListener("click", () => {
     const msg = parse(e.data as string);
     if (!msg) return;
     if (msg.type === "role") {
-      host = msg.host;
-      // Un invité ne simule pas : sa grille est écrasée quatre fois par seconde.
+      host = msg.host === true;
       onRole(host);
       statusEl.textContent = host
-        ? `Salon « ${name} » — vous simulez pour tout le monde.`
-        : `Salon « ${name} » — vous suivez l'hôte.`;
+        ? `Salon « ${room} » — vous menez la partie.`
+        : `Salon « ${room} » — vous suivez l'hôte.`;
+      if (host) {
+        order({ t: "follow", rec: null });
+        restart();
+      }
     }
-    if (msg.type === "peers" && typeof msg.n === "number") peers = msg.n;
-    if (msg.type === "grid" && !host && typeof msg.data === "string") applyGrid(msg.data, msg.width, msg.height);
+    if (msg.type === "peers" && typeof msg.n === "number") {
+      const before = peers;
+      peers = msg.n;
+      if (host && (peers > before || peers < 2)) restart();
+    }
+    if (msg.type === "start" && !host && msg.rec && typeof msg.rec === "object") {
+      const { w, h } = msg.rec;
+      if (w !== WIDTH || h !== HEIGHT) onSize(w, h);
+      if (w !== WIDTH || h !== HEIGHT) return;
+      order({ t: "follow", rec: msg.rec });
+    }
+    if (msg.type === "turn" && !host && typeof msg.ticks === "number" && Array.isArray(msg.beats) && Array.isArray(msg.sums)) {
+      order({ t: "turn", ticks: msg.ticks, beats: msg.beats, sums: msg.sums });
+    }
     if (msg.type === "do" && host && msg.g) onApply(msg.g);
+    if (msg.type === "sync" && host && !resync) {
+      resync = setTimeout(restart, Math.max(0, lastStart + RESYNC - Date.now()));
+    }
   });
   // Une connexion qui échoue déclenche « error » puis « close » : sans ce
   // drapeau, « Salon quitté » effacerait aussitôt « Salon injoignable ».
@@ -129,22 +172,4 @@ roomButton.addEventListener("click", () => {
     leaveRoom();
     statusEl.textContent = failed ? "Salon injoignable." : "Salon quitté.";
   });
-
-  // Une grille trop lourde n'est signalée qu'une fois, pas quatre par seconde.
-  let heavy = false;
-  beat = setInterval(() => {
-    // Personne en face : ni téléversement, ni réveil du salon.
-    if (!host || peers < 2 || !mine || ws.readyState !== WebSocket.OPEN) return;
-    const message = JSON.stringify({ type: "grid", width: WIDTH, height: HEIGHT, data: mine });
-    // Le salon jette sans rien dire un message au-delà de son plafond
-    // (relay.ts) : les invités restaient figés sur la dernière grille reçue.
-    if (message.length > HEAVY) {
-      if (!heavy) statusEl.textContent = "Grille trop chargée pour le salon : les invités ne la reçoivent plus.";
-      heavy = true;
-      return;
-    }
-    if (heavy) statusEl.textContent = `Salon « ${name} » — les invités reçoivent à nouveau la grille.`;
-    heavy = false;
-    ws.send(message);
-  }, 250);
 });

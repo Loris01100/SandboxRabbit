@@ -122,15 +122,89 @@ const last = <T extends News["t"]>(news: News[], t: T): Extract<News, { t: T }> 
 // Les réglages passent au moteur, la grille encodée revient quatre fois par seconde.
 {
   const { sim, news } = bac();
-  sim.order({ t: "set", k: { wind: 0.5, ambient: -30, gravity: -1, room: true } });
+  sim.order({ t: "set", k: { wind: 0.5, ambient: -30, gravity: -1 } });
   assert.equal(sim.engine.wind, 0.5, "le vent est arrivé au moteur");
   assert.equal(sim.engine.ambient, -30, "l'ambiante aussi");
   assert.equal(sim.engine.gravity, -1, "et la gravité");
   run(sim, 20);
-  const grid = last(news, "grid")!;
-  assert.ok(grid.full.length > 0, "la grille complète part pour la sauvegarde");
-  assert.ok(grid.room !== undefined && grid.room.length < grid.full.length,
-    "et le salon reçoit la version courte, sans les vies ni les températures");
+  assert.ok(last(news, "grid")!.full.length > 0, "la grille complète part pour la sauvegarde");
+}
+
+/**
+ * Un salon en lockstep : l'hôte et un invité, reliés comme le ferait room.ts
+ * (départ et suite vers l'invité, gestes et demandes de départ vers l'hôte),
+ * le réseau en moins. L'invité suit à son rythme : on ne le compare qu'au
+ * tick où il est.
+ */
+function salon(): { hôte: Sandbox; invité: Sandbox; relayer(): void; desyncs: () => number } {
+  const versInvité: News[] = [];
+  const hôte = new Sandbox(W, H, (n) => { if (n.t === "start" || n.t === "turn") versInvité.push(n); });
+  let desyncs = 0;
+  const invité = new Sandbox(W, H, (n) => { if (n.t === "desync") desyncs++; });
+  invité.order({ t: "do", g: { t: "rect", x: 0, y: 0, x2: W - 1, y2: 10, id: SAND, over: true } });
+  hôte.order({ t: "host", on: true });
+  const relayer = (): void => {
+    for (const n of versInvité.splice(0)) {
+      if (n.t === "start") invité.order({ t: "follow", rec: structuredClone(n.rec) });
+      if (n.t === "turn") invité.order(structuredClone(n));
+    }
+  };
+  relayer();
+  return { hôte, invité, relayer, desyncs: () => desyncs };
+}
+
+/** Fait tourner les deux bacs, frame par frame, le relais entre les deux. */
+function jouer(s: ReturnType<typeof salon>, frames: number): void {
+  for (let n = 0; n < frames; n++) {
+    s.hôte.frame(16);
+    s.relayer();
+    s.invité.frame(16);
+  }
+}
+
+// Gestes, réglages, vider, décor : l'invité retombe sur la grille de l'hôte, au
+// tick près, sans jamais recevoir de grille après le départ (sauf pour vider).
+{
+  const s = salon();
+  assert.equal(count(s.invité.engine, SAND), count(s.hôte.engine, SAND), "le départ pose la grille de l'hôte");
+  jouer(s, 30);
+  s.hôte.order({ t: "do", g: { t: "paint", x: 40, y: 4, r: 5, id: WATER, d: 1, over: true } });
+  jouer(s, 30);
+  s.hôte.order({ t: "set", k: { wind: 0.8, gravity: -1, weather: true } });
+  jouer(s, 60);
+  s.hôte.order({ t: "edit", do: "clear" });
+  s.hôte.order({ t: "do", g: { t: "rect", x: 10, y: 10, x2: 30, y2: 14, id: SAND, over: true } });
+  s.hôte.order({ t: "set", k: { wind: 0, gravity: 1, weather: false } });
+  jouer(s, 120);
+  s.hôte.order({ t: "set", k: { running: false } });
+  jouer(s, 40);
+  assert.deepEqual(s.invité.engine.cells, s.hôte.engine.cells, "même matière, cellule pour cellule");
+  assert.deepEqual(s.invité.engine.temp, s.hôte.engine.temp, "mêmes températures");
+  assert.equal(s.invité.engine.seed, s.hôte.engine.seed, "même tirage au sort");
+  assert.equal(s.desyncs(), 0, "et les empreintes n'ont jamais divergé");
+}
+
+// L'invité ne touche pas à son bac : ses ordres le feraient diverger pour de bon.
+{
+  const s = salon();
+  jouer(s, 10);
+  const avant = count(s.invité.engine, WATER);
+  s.invité.order({ t: "do", g: { t: "rect", x: 0, y: 0, x2: 20, y2: 20, id: WATER, over: true } });
+  s.invité.order({ t: "edit", do: "clear" });
+  s.invité.order({ t: "set", k: { gravity: -1 } });
+  assert.equal(count(s.invité.engine, WATER), avant, "ni pinceau ni vidage en direct");
+  assert.equal(s.invité.engine.gravity, 1, "ni ses réglages : ce sont ceux de l'hôte");
+  s.invité.order({ t: "follow", rec: null });
+  assert.equal(s.invité.engine.gravity, -1, "rendus au panneau quand il quitte le salon");
+}
+
+// Un invité qui a divergé le voit à l'empreinte suivante, et le dit une fois.
+{
+  const s = salon();
+  jouer(s, 5);
+  s.invité.engine.cells[0] = s.invité.engine.cells[0] === SAND ? WATER : SAND;
+  jouer(s, 140);
+  assert.equal(s.desyncs(), 1, "la divergence est signalée, une seule fois");
 }
 
 // Enregistrer puis rejouer : le bac retombe sur la même grille.

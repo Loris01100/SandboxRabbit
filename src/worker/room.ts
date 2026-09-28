@@ -3,17 +3,16 @@ import { route } from "./relay.ts";
 
 /**
  * Salon d'un bac partagé. Le Durable Object **ne simule rien** : il relaie.
- * Le premier connecté est l'hôte, sa grille fait foi ; les autres lui envoient
- * leurs coups de pinceau et reçoivent ses instantanés. Un seul simulateur, donc
- * aucune divergence à arbitrer — le moteur tire au sort à chaque tick.
+ * Le premier connecté est l'hôte, il mène la partie : les autres lui envoient
+ * leurs coups de pinceau, il les range dans sa partie au tick où il les
+ * applique, et diffuse cette partie (un départ, puis sa suite). Le moteur
+ * étant déterministe, chaque invité la rejoue chez lui et voit le même bac.
  *
- * Rien n'est gardé ici, pas même la dernière grille : l'hôte en diffuse une
- * toutes les 250 ms, un arrivant n'attend donc jamais plus que ça.
- *
- * ponytail: un instantané complet (~1 ko de RLE) quatre fois par seconde plutôt
- * qu'un delta. À revoir le jour où un salon dépasse la poignée de joueurs.
+ * Rien n'est gardé ici, pas même le dernier départ : l'hôte en renvoie un dès
+ * que le compte de joueurs monte (`peers`), un arrivant n'attend donc qu'un
+ * aller-retour.
  */
-/** Joueurs par salon. Au-delà, la diffusion (une grille par joueur, 4 fois par seconde) coûte plus qu'elle ne rend. */
+/** Joueurs par salon. Au-delà, un arrivant coûte un départ complet à tous les autres. */
 const PLACES = 8;
 
 /** Le rôle est gardé dans la pièce jointe du socket : elle survit à l'hibernation. */
@@ -37,7 +36,7 @@ export class Room extends DurableObject {
   }
 
   webSocketMessage(from: WebSocket, message: string | ArrayBuffer): void {
-    // La grille de l'hôte va aux invités, le geste d'un invité à l'hôte, et
+    // La partie de l'hôte va aux invités, le geste d'un invité à l'hôte, et
     // rien d'autre ne passe (voir relay.ts) : un invité ne parle jamais aux
     // autres invités.
     const to = route(message, isHost(from));
@@ -53,8 +52,9 @@ export class Room extends DurableObject {
 
   /**
    * Combien de monde dans le salon. L'hôte s'en sert pour se taire quand il est
-   * seul : sans ça il téléverse sa grille quatre fois par seconde pour personne,
-   * et réveille ce Durable Object autant de fois.
+   * seul — sans ça il téléverse sa partie vingt fois par seconde pour personne,
+   * et réveille ce Durable Object autant de fois — et pour renvoyer un départ
+   * quand quelqu'un arrive.
    */
   private announce(left: WebSocket[]): void {
     const message = JSON.stringify({ type: "peers", n: left.length });
@@ -67,7 +67,8 @@ export class Room extends DurableObject {
 
   /**
    * L'hôte est parti : le plus ancien socket restant prend la main. Sans ça le
-   * salon continue de tourner sans personne pour simuler.
+   * salon reste figé, sans personne pour mener la partie. Le nouvel hôte a la
+   * même grille que l'ancien (au retard près) : il repart de la sienne.
    */
   private promote(gone: WebSocket): void {
     const left = this.ctx.getWebSockets().filter((ws) => ws !== gone);

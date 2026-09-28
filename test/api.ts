@@ -91,17 +91,23 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   await app.request(`/api/worlds/${id}`, { method: "DELETE", headers: { "x-world-token": token } }, env);
 }
 
-// Le salon ne relaie plus à l'aveugle : l'hôte ne diffuse que sa grille, un
-// invité ne parle qu'à l'hôte et seulement par gestes. `role` et `peers` ne
-// viennent que du salon — un invité qui les imitait destituait l'hôte.
+// Le salon ne relaie plus à l'aveugle : l'hôte ne diffuse que sa partie, un
+// invité ne parle qu'à l'hôte, par gestes ou pour redemander un départ.
+// `role` et `peers` ne viennent que du salon — un invité qui les imitait
+// destituait l'hôte.
 {
   const msg = (o: unknown): string => JSON.stringify(o);
-  const grille = msg({ type: "grid", width: 320, height: 180, data: "AQE" });
+  const départ = msg({ type: "start", rec: { w: 320, h: 180 } });
+  const suite = msg({ type: "turn", ticks: 3, beats: [], sums: [] });
   assert.equal(route(msg({ type: "do", g: { t: "fill", x: 1, y: 1, id: 1 } }), false), "host", "le geste d'un invité va à l'hôte");
-  assert.equal(route(grille, true), "guests", "la grille de l'hôte va aux invités");
+  assert.equal(route(msg({ type: "sync" }), false), "host", "sa demande de repartir aussi");
+  assert.equal(route(départ, true), "guests", "le départ de l'hôte va aux invités");
+  assert.equal(route(suite, true), "guests", "et la suite de sa partie");
+  assert.equal(route(msg({ type: "sync" }), true), null, "l'hôte n'a rien à redemander");
   assert.equal(route(msg({ type: "role", host: false }), false), null, "un invité ne destitue pas l'hôte");
   assert.equal(route(msg({ type: "peers", n: 1 }), false), null, "ni ne le fait taire");
-  assert.equal(route(grille, false), null, "ni n'impose sa grille aux autres invités");
+  assert.equal(route(départ, false), null, "ni n'impose sa grille aux autres invités");
+  assert.equal(route(suite, false), null, "ni sa partie");
   assert.equal(route(msg({ type: "role", host: true }), true), null, "l'hôte non plus ne distribue pas les rôles");
   assert.equal(route(msg({ type: "do", g: {} }), true), null, "ni n'envoie de gestes");
   assert.equal(route("pas du json", false), null);

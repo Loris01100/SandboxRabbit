@@ -15,7 +15,7 @@ import { Renderer } from "./render.ts";
 import { encode } from "./codec.ts";
 import { SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, weather, type Gesture } from "../gestures.ts";
-import { Player, Recorder, put, type Recording } from "../replay.ts";
+import { Player, Recorder, put, type Beat, type Recording } from "../replay.ts";
 import { CHALLENGES, SCENES, count } from "../challenges.ts";
 import { parseGoal, ticksFor } from "../ui.ts";
 
@@ -30,8 +30,12 @@ export interface Knobs {
   speed: number;
   running: boolean;
   heatmap: boolean;
-  /** Un salon est ouvert : il faut aussi la grille courte, quatre fois par seconde. */
-  room: boolean;
+}
+
+export interface Turn {
+  ticks: number;
+  beats: Beat[];
+  sums: [number, number][];
 }
 
 export type Order =
@@ -45,35 +49,46 @@ export type Order =
   | { t: "cursor"; x: number; y: number }
   | { t: "clip"; ask: number; x: number; y: number; x2: number; y2: number }
   | { t: "rec"; on: boolean }
-  | { t: "play"; on: boolean };
+  | { t: "play"; on: boolean }
+  | { t: "host"; on: boolean }
+  | { t: "follow"; rec: Recording | null }
+  | ({ t: "turn" } & Turn);
 
 export type News =
-  /** Une frame prête à poser : `pixels` fait `w * h * 4` octets. */
   | { t: "frame"; pixels: Uint8ClampedArray; w: number; h: number; probe: [MaterialId, number] | null }
-  /** Deux fois par seconde : ce qui coûte un balayage de la grille. */
   | { t: "stats"; filled: number }
-  /** Quatre fois par seconde : la grille encodée (sauvegarde, mémoire locale, salon). */
-  | { t: "grid"; full: string; room?: string }
+  | { t: "grid"; full: string }
+  | { t: "start"; rec: Recording }
+  | ({ t: "turn" } & Turn)
+  | { t: "desync" }
   | { t: "reply"; ask: number; value: unknown }
   | { t: "say"; text: string }
   | { t: "won" }
   | { t: "rec"; ticks: number; beats: number; size: number; w: number; h: number }
   | { t: "play"; on: boolean };
 
-/** Une copie des quatre tableaux : dix crans gardés (~230 ko le cran en 320×180). */
 const UNDO_MAX = 10;
 type Snapshot = { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array };
 
-/** Intervalle des nouvelles chères, en ms. */
 const STATS = 500;
 const GRID = 250;
+const TURN = 50;
+const SUM = 60;
+const CATCH_UP = 32;
+const FOLLOW = "Vous suivez l'hôte : c'est lui qui mène le bac.";
+
+function fingerprint(cells: Uint8Array): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < cells.length; i++) h = Math.imul(h ^ cells[i], 0x01000193);
+  return h >>> 0;
+}
 
 export class Sandbox {
   engine: Engine;
   renderer: Renderer;
   knobs: Knobs = {
     wind: 0, ambient: 20, gravity: 1, emit: WATER,
-    weather: false, speed: 1, running: true, heatmap: false, room: false,
+    weather: false, speed: 1, running: true, heatmap: false,
   };
 
   private send: (news: News) => void;
@@ -89,6 +104,18 @@ export class Sandbox {
   private pending = 0;
   private sinceStats = 0;
   private sinceGrid = 0;
+  /**
+   * Hôte d'un salon : la partie diffusée aux invités. C'est un enregistrement
+   * comme un autre, vidé à chaque envoi — chaque invité simule de son côté en
+   * la rejouant, et le moteur étant déterministe, tous voient le même bac.
+   */
+  private stream: Recorder | null = null;
+  private sums: [number, number][] = [];
+  private sinceTurn = 0;
+  private sent = 0;
+  private follower: Player | null = null;
+  private checks = new Map<number, number>();
+  private lost = false;
 
   constructor(width: number, height: number, send: (news: News) => void) {
     this.engine = new Engine(width, height);
@@ -98,6 +125,12 @@ export class Sandbox {
   }
 
   order(o: Order): void {
+    if (this.follower && (o.t === "do" || o.t === "edit" || o.t === "scene" || o.t === "load"
+      || o.t === "goal" || o.t === "rec" || o.t === "play")) {
+      if (o.t !== "do" && !(o.t === "edit" && o.do === "snapshot")) this.send({ t: "say", text: FOLLOW });
+      if (o.t === "load" && o.ask !== undefined) this.send({ t: "reply", ask: o.ask, value: false });
+      return;
+    }
     switch (o.t) {
       case "do":
         // Pendant un rejeu, le bac appartient à l'enregistrement : un geste de
@@ -105,12 +138,21 @@ export class Sandbox {
         if (this.player) return;
         applyGesture(this.engine, o.g);
         this.rec?.gesture(o.g);
+        this.stream?.gesture(o.g);
         return;
       case "set": {
         Object.assign(this.knobs, o.k);
         const { wind, ambient, gravity, emit, heatmap } = this.knobs;
-        Object.assign(this.engine, { wind, ambient, gravity, emit });
+        if (!this.follower) Object.assign(this.engine, { wind, ambient, gravity, emit });
         this.renderer.heatmap = heatmap;
+        return;
+      }
+      case "host": return this.host(o.on);
+      case "follow": return this.follow(o.rec);
+      case "turn": {
+        if (!this.follower) return;
+        this.follower.feed(o.beats, o.ticks);
+        for (const [at, sum] of o.sums) this.checks.set(at, sum);
         return;
       }
       case "size": return this.resize(o.w, o.h, o.keep);
@@ -146,7 +188,9 @@ export class Sandbox {
   frame(ms: number): void {
     const budget = ticksFor(this.knobs.speed, ms, this.pending);
     this.pending = budget.pending;
-    if (this.player) {
+    if (this.follower) {
+      this.catchUp(this.follower);
+    } else if (this.player) {
       // Un rejeu remplace la simulation : c'est lui qui avance le bac. La pause
       // l'arrête aussi — il avançait sans elle, et « Pas à pas » n'y pouvait rien.
       if (this.knobs.running) {
@@ -183,13 +227,69 @@ export class Sandbox {
     if (this.sinceGrid >= GRID) {
       this.sinceGrid = 0;
       const { cells, frozen, life, temp } = this.engine;
-      this.send({
-        t: "grid",
-        full: encode(cells, frozen, life, temp),
-        // Le salon n'a que faire des vies et des températures, et le message est
-        // plafonné en face : on lui garde la version courte.
-        room: this.knobs.room ? encode(cells, frozen) : undefined,
-      });
+      this.send({ t: "grid", full: encode(cells, frozen, life, temp) });
+    }
+
+    this.sinceTurn += ms;
+    if (this.stream && this.sinceTurn >= TURN) {
+      this.sinceTurn = 0;
+      const { ticks } = this.stream.rec;
+      const beats = this.stream.drain();
+      if (ticks !== this.sent || beats.length > 0) {
+        this.sent = ticks;
+        this.send({ t: "turn", ticks, beats, sums: this.sums });
+        this.sums = [];
+      }
+    }
+  }
+
+  /**
+   * Invité : avance vers le tick de l'hôte. Un tiers du retard par frame —
+   * régulier quand les messages arrivent par paquets de trois frames, et
+   * l'écart se stabilise tout seul quelle que soit la vitesse choisie par
+   * l'hôte.
+   */
+  private catchUp(p: Player): void {
+    for (let n = Math.min(CATCH_UP, Math.ceil((p.rec.ticks - p.tick) / 3)); n > 0; n--) {
+      const sum = this.checks.get(p.tick);
+      if (sum !== undefined) {
+        this.checks.delete(p.tick);
+        if (!this.lost && sum !== fingerprint(this.engine.cells)) {
+          this.lost = true;
+          this.send({ t: "desync" });
+        }
+      }
+      if (!p.step()) return;
+    }
+  }
+
+  /** Hôte : (re)part de l'état présent — un arrivant ne connaît rien d'autre. */
+  private host(on: boolean): void {
+    this.stream = null;
+    this.sums = [];
+    if (!on) return;
+    this.play(false);
+    this.stream = new Recorder(this.engine, this.knobs.weather);
+    this.sent = 0;
+    this.send({ t: "start", rec: { ...this.stream.rec, beats: [] } });
+  }
+
+  private follow(rec: Recording | null): void {
+    this.follower = null;
+    this.checks.clear();
+    this.lost = false;
+    if (!rec) {
+      const { wind, ambient, gravity, emit } = this.knobs;
+      Object.assign(this.engine, { wind, ambient, gravity, emit });
+      return;
+    }
+    this.play(false);
+    this.record(false);
+    this.won = null;
+    try {
+      this.follower = new Player({ ...rec, beats: [...rec.beats] }, this.engine);
+    } catch {
+      this.send({ t: "say", text: "Partie de l'hôte illisible." });
     }
   }
 
@@ -197,8 +297,22 @@ export class Sandbox {
   private tick(): void {
     const rain = this.knobs.weather;
     this.rec?.tick(rain); // avant le pas : c'est l'état de la scène qui va servir
+    this.stream?.tick(rain);
     if (rain) weather(this.engine);
     this.engine.step();
+    const ticks = this.stream?.rec.ticks;
+    if (ticks !== undefined && ticks % SUM === 0) this.sums.push([ticks, fingerprint(this.engine.cells)]);
+  }
+
+  /**
+   * La grille a changé sans geste (annuler, vider, charger, décor) : les deux
+   * enregistrements la gardent en entier. Le salon **en dernier** : `stamp()`
+   * repose dans le bac la grille arrondie qu'il vient d'encoder, c'est donc la
+   * sienne que le bac garde — celle que reçoivent les invités.
+   */
+  private stamp(): void {
+    this.rec?.stamp();
+    this.stream?.stamp();
   }
 
   private edit(what: "clear" | "undo" | "redo" | "step" | "snapshot"): void {
@@ -217,7 +331,7 @@ export class Sandbox {
       case "clear":
         this.snapshot();
         this.engine.clear();
-        this.rec?.stamp();
+        this.stamp();
         // Un défi vidé est souvent gagné d'avance (Débâcle : plus de glace du
         // tout) : vider l'abandonne.
         this.won = null;
@@ -245,7 +359,7 @@ export class Sandbox {
     this.engine.temp.set(state.temp);
     this.engine.frozen.set(state.frozen);
     // La grille change sans geste : l'enregistrement la garde en entier.
-    this.rec?.stamp();
+    this.stamp();
   }
 
   /** Dépile d'un côté en empilant de l'autre : annuler et rétablir sont le même geste. */
@@ -267,7 +381,7 @@ export class Sandbox {
     this.snapshot();
     this.engine.clear();
     found.build(this.engine);
-    this.rec?.stamp();
+    this.stamp();
     this.won = challenge ? challenge.won : null;
   }
 
@@ -292,7 +406,7 @@ export class Sandbox {
       if (ask !== undefined) this.send({ t: "reply", ask, value: false });
       return;
     }
-    this.rec?.stamp();
+    this.stamp();
     // Un autre monde : l'objectif du défi en cours ne le concerne plus. Un
     // monde-défi de la galerie réarme le sien juste après (ordre `goal`).
     this.won = null;
@@ -319,12 +433,18 @@ export class Sandbox {
       this.send({ t: "say", text: "Enregistrement abandonné : le bac a changé de taille." });
     }
     if (!keep) seed(this.engine);
+    if (this.stream) this.host(true);
+    if (this.follower) {
+      this.follow(null);
+      this.send({ t: "desync" });
+    }
   }
 
   private record(on: boolean): void {
     if (on) {
       if (this.player) return; // on n'enregistre pas un rejeu
       this.rec = new Recorder(this.engine, this.knobs.weather);
+      this.stream?.stamp();
       return;
     }
     if (!this.rec) return;
@@ -349,6 +469,10 @@ export class Sandbox {
       return;
     }
     if (this.player || !this.film) return;
+    if (this.stream) {
+      this.send({ t: "say", text: "Pas de rejeu pendant un salon partagé." });
+      return;
+    }
     if (this.rec) {
       this.send({ t: "say", text: "Enregistrement en cours : arrêtez-le d'abord." });
       return;

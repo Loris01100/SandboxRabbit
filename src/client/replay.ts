@@ -134,6 +134,19 @@ export class Recorder {
     this.rec.ticks++;
   }
 
+  /**
+   * Rend les beats accumulés et les oublie : c'est le salon qui s'en sert, il
+   * les diffuse au fil de l'eau plutôt que de garder la partie entière. Les
+   * derniers réglages passent dans `rec.scene`, sinon `tick()` les croirait
+   * changés et en pousserait un beat à chaque tick.
+   */
+  drain(): Beat[] {
+    const beats = this.rec.beats;
+    this.rec.scene = this.scene();
+    this.rec.beats = [];
+    return beats;
+  }
+
   /** Les derniers réglages connus : le dernier `scene` posé, sinon ceux du départ. */
   private scene(): Scene {
     for (let i = this.rec.beats.length - 1; i >= 0; i--) {
@@ -171,6 +184,18 @@ export class Player {
     engine.scan = rec.scan;
     put(engine, rec.grid, rec.clock, rec.scene.ambient);
     apply(engine, rec.scene);
+  }
+
+  /**
+   * La suite d'une partie qui se joue ailleurs (salon) : l'enregistrement
+   * s'allonge pendant qu'on le rejoue. Les beats déjà joués sont jetés, sinon
+   * un invité garderait toute la séance en mémoire.
+   */
+  feed(beats: Beat[], ticks: number): void {
+    this.rec.beats.splice(0, this.at);
+    this.at = 0;
+    this.rec.beats.push(...beats);
+    this.rec.ticks = ticks;
   }
 
   /** Joue un tick. Renvoie false quand l'enregistrement est fini. */

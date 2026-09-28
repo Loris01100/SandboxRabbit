@@ -119,9 +119,12 @@ aucun test précis.
   `known()` écartent les ids inconnus, `disc()` borne les rayons,
   `applyGesture` refuse les coordonnées non entières. `life` n'est pas filtré :
   une règle qui y lit un id de matière passe par `KNOWN`.
-- Le salon (`relay.ts`) ne laisse passer que la `grid` de l'hôte vers les
-  invités et le `do` d'un invité vers l'hôte ; `role` et `peers` ne viennent
-  que du Durable Object.
+- Le salon (`relay.ts`) ne laisse passer que `start` / `turn` de l'hôte vers
+  les invités et `do` / `sync` d'un invité vers l'hôte ; `role` et `peers` ne
+  viennent que du Durable Object.
+- Salon en lockstep : ce qui change la grille de l'hôte sans geste passe par
+  `stamp()` de sandbox.ts, sinon les invités divergent (voir
+  [docs/agents/architecture.md](docs/agents/architecture.md)).
 
 **Worker et données**
 

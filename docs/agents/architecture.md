@@ -99,30 +99,46 @@ reçu : un pair de salon ne peut pas en semer un disque.
   nom de salon, API d'hibernation des WebSockets. **Il relaie sans simuler**,
   mais pas à l'aveugle : [src/worker/relay.ts](../../src/worker/relay.ts)
   (pur, testé dans test/api.ts) lit le `type` de chaque message texte
-  ≤ 200 000 caractères et n'en laisse passer que deux — la `grid` de l'hôte
-  vers les invités, le `do` d'un invité vers l'hôte. Un invité ne parle donc
-  jamais aux autres invités, et `role` / `peers` ne viennent que du DO : un
-  invité qui les imitait destituait l'hôte ou le faisait taire. Le rôle vit
+  ≤ 200 000 caractères et ne laisse passer que `start` / `turn` de l'hôte
+  vers les invités, `do` / `sync` d'un invité vers l'hôte. Un invité ne parle
+  donc jamais aux autres invités, et `role` / `peers` ne viennent que du DO :
+  un invité qui les imitait destituait l'hôte ou le faisait taire. Le rôle vit
   dans la pièce jointe du socket (`serializeAttachment`). 8 places.
-- Client : [src/client/room.ts](../../src/client/room.ts).
-- Le premier connecté est **l'hôte** : seul simulateur, sa grille fait foi. Si
-  il part, le plus ancien restant est promu.
-- Un invité met **son bac** en pause (`set({running: false})` dans le rappel
-  `role` de main.ts, pas seulement le bouton) : il simulait sinon entre deux
-  grilles, et l'image sautait tous les quarts de seconde. Pause et Pas à pas
-  lui sont refusés tant qu'il est invité.
-- Une grille qui dépasse le plafond du salon n'est pas envoyée (le DO la
-  jetterait sans rien dire) : l'hôte le signale dans la barre de statut.
+- Client : [src/client/room.ts](../../src/client/room.ts) pour le réseau,
+  `host()` / `follow()` / `catchUp()` de
+  [sandbox.ts](../../src/client/sim/sandbox.ts) pour la simulation.
+- **Lockstep** : chacun simule chez soi, le moteur étant déterministe
+  (`engine.rand()`). Le premier connecté est **l'hôte** et mène la partie :
+  les gestes des invités lui arrivent, il les applique au tick où il en est.
+  Sa partie est un `Recorder` (replay.ts) vidé à chaque envoi (`drain()`) ;
+  chaque invité la rejoue dans un `Player` qui s'allonge (`feed()`), un tiers
+  de son retard par frame (32 ticks au plus). Si l'hôte part, le plus ancien
+  restant est promu et repart de sa propre grille — la même, au retard près.
+- Tout ce qui change la grille de l'hôte **sans geste** (vider, annuler,
+  charger, décor, et le `Recorder` d'un enregistrement local, qui arrondit
+  les températures) passe par `stamp()` de sandbox.ts, le salon en dernier :
+  sinon les invités divergent. Un rejeu local est refusé tant qu'il y a du
+  monde (il avancerait le bac hors de la partie).
+- Un invité refuse tout ordre qui toucherait à son bac (`do`, `edit`, `scene`,
+  `load`, `goal`, `rec`, `play`) : ses gestes partent à l'hôte et lui
+  reviennent dans la partie, après un aller-retour (pas de prédiction). Ses
+  réglages restent dans le panneau et rentrent au moteur quand il part.
+- Filet : une empreinte FNV de `cells` par seconde (`sums`). Un invité qui ne
+  la retrouve pas envoie `sync` une fois ; l'hôte renvoie un départ, pas plus
+  d'un toutes les 2 s (différé, pas jeté). Changer de taille chez un invité
+  fait de même, et le départ reçu le remet à la taille de l'hôte.
+- Un message qui dépasse le plafond du salon n'est pas envoyé (le DO le
+  jetterait sans rien dire) : l'hôte le signale dans la barre de statut. Un
+  départ pèse ~2 à 9 Ko, une suite ~50 octets.
 
 | Message | Sens | Contenu |
 | --- | --- | --- |
 | `role` | DO → client | `{host: boolean}` |
-| `peers` | DO → tous | `{n}` : nombre de connectés |
-| `grid` | hôte → invités | `{width, height, data}` (matière + figé seulement), toutes les 250 ms **si `peers > 1`** |
+| `peers` | DO → tous | `{n}` : nombre de connectés ; l'hôte renvoie un `start` quand il monte, se tait à 1 |
+| `start` | hôte → invités | `{rec: Recording}` : grille complète (état vivant), `clock`, `seed`, `scan`, réglages |
+| `turn` | hôte → invités | `{ticks, beats, sums}` toutes les 50 ms tant que le bac avance ou qu'il y a des gestes |
 | `do` | invité → hôte | `{g: Gesture}` ; l'hôte l'applique via le même chemin que ses propres gestes |
-
-Pourquoi un seul simulateur : le moteur tire au sort à chaque tick, deux
-clients qui simulent divergent forcément.
+| `sync` | invité → hôte | demande un nouveau `start` (empreinte différente, changement de taille) |
 
 Ce qui arrive d'un pair n'est pas de confiance : `known()` écarte les ids de
 matière inconnus, `disc()` borne les rayons, `applyGesture` refuse un `clip`
