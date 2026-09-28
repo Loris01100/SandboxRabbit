@@ -15,10 +15,10 @@
     "loc": "node test/loc.ts"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.0.0",
-    "@types/node": "^24.19.0",
+    "@cloudflare/vite-plugin": "^1.60.1",
+    "@types/node": "^26.6.2",
     "typescript": "^7.0.2",
-    "vite": "^8.2.1",
+    "vite": "^8.3.1",
     "wrangler": "^4.0.0"
   },
   "dependencies": {
