@@ -177,8 +177,8 @@ aucun test précis.
   (« à revoir le jour où… »). En ajouter un plutôt que de laisser une dette
   implicite.
 - Pas de framework UI, DOM impératif, éléments récupérés par
-  `querySelector<…>("#id")!`. Pas de dépendance client sans raison forte : le
-  bundle a un budget de 80 Kio en CI.
+  `querySelector<…>("#id")!`. Pas de dépendance client sans raison forte : la
+  CI tient deux budgets de 80 Kio, la page (JS + CSS) et le moteur (Worker).
 - Ce qui est testable (pur) va dans un module sans DOM (`ui.ts`,
   `gestures.ts`…) avec son test, plutôt que de grossir main.ts.
 - TypeScript strict, `noUnusedLocals` / `noUnusedParameters` : préfixer par `_`

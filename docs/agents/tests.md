@@ -155,8 +155,13 @@ Node 24 :
    mesure dépend beaucoup de la charge de la machine (de 2,8 à 5 ms d'une
    exécution à l'autre sur un poste occupé) : relancer avant de conclure à une
    régression.
-6. **Bundle JS + CSS ≤ 81 920 octets** non compressés (`dist/client/assets`).
-   Pas de framework, pas de dépendance client ajoutée à la légère.
+6. **Deux budgets de bundle, 81 920 octets chacun**, non compressés
+   (`dist/client/assets`) : la **page** (`index-*.js` + `*.css`, ce qui
+   s'affiche d'abord) et le **moteur** (`worker-*.js`, le Worker de
+   simulation, qui sert aussi de fil auxiliaire). Un seul total ne disait pas
+   lequel avait grossi ; il avait dépassé 80 Ko sans que personne le voie.
+   Pas de framework, pas de dépendance client ajoutée à la légère, et pas de
+   second fichier qui embarquerait une autre copie du moteur.
 
 Les actions sont épinglées par SHA et le workflow n'a que `contents: read` :
 garder ces deux propriétés en modifiant la CI.

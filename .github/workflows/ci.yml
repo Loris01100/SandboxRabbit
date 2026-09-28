@@ -31,10 +31,15 @@ jobs:
       # reperdre sans s'en apercevoir. Il est large exprès (le runner partagé
       # varie du simple au triple) : il attrape un effondrement, pas une dérive.
       - run: npm run bench
-      # Un client sans framework grossit lentement et sans bruit. 80 ko de JS+CSS
-      # non compressés, contre ~56 aujourd'hui.
+      # Un client sans framework grossit lentement et sans bruit. Deux budgets de
+      # 80 ko non compressés : la page (JS + CSS, ce qui s'affiche d'abord) et
+      # le moteur (le Worker de simulation, qui sert aussi de fil auxiliaire).
+      # Un seul total ne disait pas lequel des deux avait grossi.
       - name: Budget de bundle
         run: |
-          size=$(cat dist/client/assets/*.js dist/client/assets/*.css | wc -c)
-          echo "bundle: $size octets (budget 81920)"
-          test "$size" -le 81920
+          page=$(cat dist/client/assets/index-*.js dist/client/assets/*.css | wc -c)
+          engine=$(cat dist/client/assets/worker-*.js | wc -c)
+          echo "page : $page octets (budget 81920)"
+          echo "moteur : $engine octets (budget 81920)"
+          test "$page" -le 81920
+          test "$engine" -le 81920

@@ -94,7 +94,7 @@ mondes partagés, bac multijoueur.
 
 | Morceau | Choix | Pourquoi |
 | --- | --- | --- |
-| Front | TypeScript + Vite, WebGL2 (canvas 2D en secours), aucun framework | 1 cellule = 1 pixel : la grille monte en textures, un shader la colorie, un seul dessin par frame. Budget de bundle en CI : 80 Kio de JS + CSS. |
+| Front | TypeScript + Vite, WebGL2 (canvas 2D en secours), aucun framework | 1 cellule = 1 pixel : la grille monte en textures, un shader la colorie, un seul dessin par frame. Budgets de bundle en CI : 80 Kio pour la page (JS + CSS), 80 Kio pour le moteur (Worker). |
 | Simulation | Web Worker | Le moteur ne partage pas le fil de la page. Coût du tick : `npm run bench`, la CI échoue au-delà de 4 ms en 320×180. |
 | Serveur | Worker Cloudflare + [Hono](https://hono.dev) | Un seul déploiement sert le site statique **et** l'API (`env.ASSETS`). |
 | Stockage | D1 en déployé, Map en mémoire en local, même interface | Voir `src/worker/store.ts`. |
