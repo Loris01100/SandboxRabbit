@@ -11,7 +11,7 @@
  * test/sandbox.ts fait jouer le protocole sans navigateur.
  */
 import { Engine } from "./engine.ts";
-import { Renderer } from "./render.ts";
+import { Renderer, type Patch } from "./render.ts";
 import { encode } from "./codec.ts";
 import { SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, weather, type Gesture } from "../gestures.ts";
@@ -55,7 +55,7 @@ export type Order =
   | ({ t: "turn" } & Turn);
 
 export type News =
-  | { t: "frame"; pixels: Uint8ClampedArray; w: number; h: number; probe: [MaterialId, number] | null }
+  | { t: "frame"; patches: Patch[]; w: number; h: number; probe: [MaterialId, number] | null }
   | { t: "stats"; filled: number }
   | { t: "grid"; full: string }
   | { t: "start"; rec: Recording }
@@ -68,9 +68,23 @@ export type News =
   | { t: "play"; on: boolean };
 
 const UNDO_MAX = 10;
+/**
+ * Mémoire que les crans d'annulation peuvent prendre, en octets. Un cran copie
+ * sept octets par cellule (matière, vie, figé, quatre de température) : 400 Ko
+ * en 320×180, mais 14,5 Mo en 1920×1080, où dix crans et leurs rétablissements
+ * pesaient près de 300 Mo. Les grandes grilles ont donc moins de crans.
+ */
+const UNDO_BYTES = 64 * 1024 * 1024;
 type Snapshot = { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array };
 
 const STATS = 500;
+/**
+ * Période de la grille encodée (`grid`), en ms.
+ * ponytail: fixe quelle que soit la taille — l'encodage coûte 13 ms en
+ * 1920×1080, qui s'ajoutent au tick quatre fois par seconde. L'espacer selon
+ * la taille, ou n'encoder qu'à la demande (sauvegarde, lien, onglet masqué),
+ * le jour où un gros incendie en grande grille saccade.
+ */
 const GRID = 250;
 const TURN = 50;
 const SUM = 60;
@@ -202,16 +216,13 @@ export class Sandbox {
       for (let n = budget.ticks; n > 0; n--) this.tick();
     }
 
-    this.renderer.draw();
+    const patches = this.renderer.draw();
     const { width: w, height: h } = this.engine;
     const { x, y } = this.cursor;
     const at = this.engine.inBounds(x, y) ? this.engine.index(x, y) : -1;
     const probe: [MaterialId, number] | null =
       at < 0 ? null : [this.engine.cells[at] as MaterialId, this.engine.temp[at]];
-    // ponytail: les pixels sont copiés (clone structuré), pas transférés — 230 ko
-    // par frame en 320×180. Passer au transfert, avec deux tampons qui font la
-    // navette, le jour où ça se voit dans un profil.
-    this.send({ t: "frame", pixels: this.renderer.pixels, w, h, probe });
+    this.send({ t: "frame", patches, w, h, probe });
 
     this.sinceStats += ms;
     if (this.sinceStats >= STATS) {
@@ -344,8 +355,13 @@ export class Sandbox {
   private snapshot(): void {
     if (this.player) return;
     this.undoStack.push(this.capture());
-    if (this.undoStack.length > UNDO_MAX) this.undoStack.shift();
+    if (this.undoStack.length > this.undoMax()) this.undoStack.shift();
     this.redoStack.length = 0; // un nouveau geste referme la branche annulée
+  }
+
+  /** Crans d'annulation tenus pour cette taille de grille : dix au plus, deux au moins (`UNDO_BYTES`). */
+  private undoMax(): number {
+    return Math.max(2, Math.min(UNDO_MAX, Math.floor(UNDO_BYTES / (7 * this.engine.cells.length))));
   }
 
   private capture(): Snapshot {

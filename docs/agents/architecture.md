@@ -28,8 +28,12 @@ flowchart LR
 ```
 
 1. **Le fil principal** (page) ne simule rien. Il gère le DOM, traduit la souris
-   en `Gesture`, envoie des **ordres** au bac et pose les pixels qu'il reçoit
-   (`present()`, un `putImageData` par rafraîchissement d'écran).
+   en `Gesture`, envoie des **ordres** au bac et pose les pixels qu'il reçoit.
+   Chaque frame n'apporte que les bandes changées (`patches`) : world.ts les
+   recopie **dès l'arrivée** dans une `ImageData` miroir (`blit()`), puis
+   `present()` repose le rectangle changé, un `putImageData` par
+   rafraîchissement d'écran. Ne jamais sauter une frame : elle ne porte que
+   ce qui a changé, et le morceau resterait en retard pour de bon.
 2. **Le Web Worker de simulation** ([sim/worker.ts](../../src/client/sim/worker.ts))
    héberge `Sandbox`, qui possède l'`Engine` et le `Renderer`. Il avance au
    temps réellement écoulé (`setTimeout` à ~60 Hz, pas de `requestAnimationFrame`)
@@ -60,7 +64,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
-| `frame` | chaque frame | pixels RGBA, taille, sonde `[matière, °C]` |
+| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,pixels}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, image entière à la première frame d'un moteur), taille, sonde `[matière, °C]` |
 | `stats` | 2 × / s | nombre de cellules pleines |
 | `grid` | 4 × / s | grille encodée complète (`full`) + version courte pour le salon (`room`) |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askClip()` |
@@ -158,7 +162,7 @@ le charger dans Node. Ce qui en a besoin (le Durable Object) vit dans
 | `GET /api/health` | état + backend (`d1` / `memory`) | — |
 | `GET /api/worlds` | 50 mondes max, `data` **coupé au premier bloc** (matière seule, pour les vignettes) | — |
 | `GET /api/worlds/:id` | monde complet, **incrémente `views`** | seul chemin de chargement depuis la galerie |
-| `POST /api/worlds` | `{name, width, height, data, goal?}` → `201 {id, token}` | débit, `data` ≤ 200 000, dimensions entières et ≤ 1 M cellules, `goal` validé par regex |
+| `POST /api/worlds` | `{name, width, height, data, goal?}` → `201 {id, token}` | débit, `data` ≤ 200 000, dimensions entières et ≤ 1920×1080 cellules (`CELLS`, la plus grande grille du menu : en ajouter une plus grande = relever ce plafond), `goal` validé par regex |
 | `DELETE /api/worlds/:id` | en-tête `x-world-token` requis | débit, `403` si mauvais jeton |
 | `GET /api/room/:id` | upgrade WebSocket vers le DO | `503` sans binding `ROOM`, débit, `426` sans upgrade |
 | `* /api/*` | `404` JSON | — |

@@ -71,32 +71,60 @@ export function askClip(x: number, y: number, x2: number, y2: number): Promise<C
   });
 }
 
-/** La dernière image reçue du bac, pas encore posée sur le canvas. */
-let pending: Extract<News, { t: "frame" }> | null = null;
+/** L'image entière du bac, tenue à jour par les bandes reçues (`blit()`). */
+let image: ImageData | null = null;
+/** Une frame est arrivée depuis le dernier `present()`. */
+let fresh = false;
+/** Le rectangle changé depuis le dernier `present()`, en pixels, bords droit et bas exclus. */
+let left = Infinity, top = Infinity, right = 0, bottom = 0;
 
 /**
- * Pose la dernière image reçue, s'il en est arrivé une depuis l'appel
- * précédent. Appelé par la boucle `requestAnimationFrame` de la page : on
- * dessine au rythme de l'écran, et deux images arrivées entre deux
- * rafraîchissements ne coûtent qu'un `putImageData`. Renvoie `true` quand une
- * image neuve a été posée — c'est ce que compte l'affichage des fps.
+ * Recopie les bandes d'une frame dans l'image, **dès leur arrivée** : une
+ * frame ne porte que ce qui a changé, en sauter une laisserait un morceau de
+ * bac en retard pour de bon — et deux frames arrivent souvent entre deux
+ * rafraîchissements, onglet en arrière-plan plus encore. Une taille nouvelle
+ * part d'une image neuve : la première frame d'un moteur neuf est entière.
+ */
+function blit(frame: Extract<News, { t: "frame" }>): void {
+  if (!image || image.width !== frame.w || image.height !== frame.h) image = new ImageData(frame.w, frame.h);
+  const { data, width } = image;
+  for (const p of frame.patches) {
+    const row = p.w * 4;
+    for (let r = 0; r < p.h; r++) data.set(p.pixels.subarray(r * row, (r + 1) * row), ((p.y + r) * width + p.x) * 4);
+    left = Math.min(left, p.x);
+    top = Math.min(top, p.y);
+    right = Math.max(right, p.x + p.w);
+    bottom = Math.max(bottom, p.y + p.h);
+  }
+  fresh = true;
+}
+
+/**
+ * Pose ce qui a changé depuis l'appel précédent. Appelé par la boucle
+ * `requestAnimationFrame` de la page : on dessine au rythme de l'écran, et
+ * tout ce qui est arrivé entre deux rafraîchissements ne coûte qu'un
+ * `putImageData`, limité au rectangle changé. Renvoie `true` quand une frame
+ * neuve est arrivée — c'est ce que compte l'affichage des fps.
+ *
+ * Le canvas suit la taille de la grille (le CSS `pixelated` met à l'échelle).
+ * Le redimensionner l'efface : on repose alors l'image entière.
  */
 export function present(): boolean {
-  if (!pending) return false;
-  const { pixels, w, h } = pending;
-  pending = null;
-  // Le canvas suit la taille de la grille : c'est le CSS (`pixelated`) qui
-  // met à l'échelle, un seul `putImageData` par frame comme avant.
-  if (canvas.width !== w) { canvas.width = w; canvas.height = h; }
-  // Le tableau vient d'un clone structuré : TypeScript lui donne un
-  // `ArrayBufferLike`, `ImageData` veut un `ArrayBuffer` — c'en est un.
-  ctx.putImageData(new ImageData(pixels as Uint8ClampedArray<ArrayBuffer>, w, h), 0, 0);
+  if (!fresh || !image) return false;
+  fresh = false;
+  if (canvas.width !== image.width || canvas.height !== image.height) {
+    canvas.width = image.width;
+    canvas.height = image.height;
+    left = 0; top = 0; right = image.width; bottom = image.height;
+  }
+  if (right > left) ctx.putImageData(image, 0, 0, left, top, right - left, bottom - top);
+  left = Infinity; top = Infinity; right = 0; bottom = 0;
   return true;
 }
 
 sim.addEventListener("message", (e: MessageEvent<News>) => {
   const news = e.data;
-  if (news.t === "frame") pending = news;
+  if (news.t === "frame") blit(news);
   if (news.t === "grid") latest = news.full;
   if (news.t === "reply") {
     waiting.get(news.ask)?.(news.value);

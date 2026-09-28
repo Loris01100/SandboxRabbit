@@ -8,8 +8,9 @@
  */
 import assert from "node:assert/strict";
 import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
+import { Renderer } from "../src/client/sim/render.ts";
 import { count } from "../src/client/challenges.ts";
-import { EMPTY, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
+import { EMPTY, FIRE, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 
 const W = 80, H = 45;
 
@@ -28,6 +29,11 @@ function run(sim: Sandbox, frames: number): void {
 const last = <T extends News["t"]>(news: News[], t: T): Extract<News, { t: T }> | undefined =>
   [...news].reverse().find((n) => n.t === t) as Extract<News, { t: T }> | undefined;
 
+type Frame = Extract<News, { t: "frame" }>;
+
+/** Pixels portés par une frame : la somme de ses bandes. */
+const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
+
 // Une frame par appel, aux dimensions de la grille.
 {
   const { sim, news } = bac();
@@ -35,7 +41,59 @@ const last = <T extends News["t"]>(news: News[], t: T): Extract<News, { t: T }> 
   sim.frame(16);
   const frame = last(news, "frame")!;
   assert.deepEqual([frame.w, frame.h], [W, H], "la frame porte la taille de la grille");
-  assert.equal(frame.pixels.length, W * H * 4, "un pixel RGBA par cellule");
+  assert.equal(area(frame), W * H, "la première frame couvre tout le bac");
+}
+
+/**
+ * Le rendu ne renvoie que les blocs changés : la page les recopie dans son
+ * image (world.ts), qui doit rester, au pixel près, ce que donnerait un rendu
+ * complet. Sinon un bloc oublié par le suivi reste en retard à l'écran.
+ */
+{
+  const { sim, news } = bac();
+  const image = new Uint8ClampedArray(W * H * 4);
+  const reçues = () => {
+    for (const n of news.splice(0)) {
+      if (n.t !== "frame") continue;
+      for (const p of n.patches) {
+        for (let r = 0; r < p.h; r++) image.set(p.pixels.subarray(r * p.w * 4, (r + 1) * p.w * 4), ((p.y + r) * W + p.x) * 4);
+      }
+    }
+  };
+  run(sim, 400);
+  reçues();
+  run(sim, 5);
+  assert.equal(news.filter((n) => n.t === "frame").reduce((s, f) => s + area(f as Frame), 0), 0, "un bac au repos n'envoie plus un pixel");
+
+  sim.order({ t: "do", g: { t: "paint", x: 70, y: 5, r: 1, id: SAND, d: 1, over: true } });
+  sim.frame(16);
+  const touchées = area(last(news, "frame")!);
+  assert.ok(touchées > 0 && touchées < (W * H) / 2, `un grain de sable ne renvoie que son coin de bac (${touchées} pixels)`);
+
+  /** Compare à un rendu témoin, tiré juste après une frame : le moteur n'a rien noté depuis, il ne vole rien au bac. */
+  const pareil = (quand: string) => {
+    reçues();
+    const témoin = new Renderer(sim.engine);
+    témoin.heatmap = sim.renderer.heatmap;
+    témoin.draw();
+    assert.deepEqual(image, témoin.pixels, `l'image recomposée est celle d'un rendu complet — ${quand}`);
+  };
+  sim.order({ t: "do", g: { t: "paint", x: 20, y: 10, r: 3, id: FIRE, d: 1, over: true } });
+  run(sim, 30);
+  pareil("un feu en cours");
+  sim.order({ t: "set", k: { running: false } });
+  sim.order({ t: "do", g: { t: "rect", x: 50, y: 20, x2: 60, y2: 25, id: WATER, over: true } });
+  sim.frame(16);
+  pareil("un geste bac en pause");
+  sim.order({ t: "set", k: { running: true, heatmap: true } });
+  run(sim, 20);
+  pareil("la vue thermique");
+  sim.order({ t: "set", k: { heatmap: false } });
+  sim.frame(16);
+  pareil("retour à la matière");
+  sim.order({ t: "set", k: { ambient: 60 } });
+  run(sim, 20);
+  pareil("une autre ambiante");
 }
 
 // La sonde suit le curseur, et se tait quand il sort du bac.
@@ -68,6 +126,23 @@ const last = <T extends News["t"]>(news: News[], t: T): Extract<News, { t: T }> 
   sim.order({ t: "edit", do: "undo" });
   sim.order({ t: "edit", do: "undo" });
   assert.equal(last(news, "say")!.text, "Rien à annuler.", "et la pile vide le dit");
+}
+
+/** En 1920×1080 un cran pèse 14,5 Mo : l'annulation en garde moins, pas dix. */
+{
+  const news: News[] = [];
+  const sim = new Sandbox(1920, 1080, (n) => news.push(n));
+  for (let n = 0; n < 8; n++) {
+    sim.order({ t: "edit", do: "snapshot" });
+    sim.order({ t: "do", g: { t: "paint", x: 100 + n * 10, y: 100, r: 3, id: SAND, d: 1, over: true } });
+  }
+  let crans = 0;
+  for (;;) {
+    sim.order({ t: "edit", do: "undo" });
+    if (last(news, "say")!.text === "Rien à annuler.") break;
+    crans++;
+  }
+  assert.equal(crans, 4, "quatre crans, soit moins de 64 Mo de copies");
 }
 
 // Charger une grille : la réponse dit si elle était lisible.
@@ -115,7 +190,7 @@ const last = <T extends News["t"]>(news: News[], t: T): Extract<News, { t: T }> 
   sim.frame(16);
   const frame = last(news, "frame")!;
   assert.deepEqual([frame.w, frame.h], [40, 30], "la frame suit la nouvelle grille");
-  assert.equal(frame.pixels.length, 40 * 30 * 4, "et le tampon de pixels avec");
+  assert.equal(area(frame), 40 * 30, "et la première frame du nouveau moteur est entière");
   assert.equal(count(sim.engine, STONE), 0, "« keep » ne regraîne pas");
 }
 

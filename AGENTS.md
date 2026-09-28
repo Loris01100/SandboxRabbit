@@ -22,7 +22,7 @@ npm install
 npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, store en mémoire
 npm run typecheck  # DEUX projets tsc : tsconfig.json (client/DOM) + tsconfig.worker.json (Worker)
 npm run check      # asserts : test/sim.ts, test/ui.ts, test/api.ts, test/sandbox.ts (Node exécute le TS)
-npm run bench      # tick du moteur sur trois tailles ; échoue au-delà de 4 ms en 320×180
+npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
 npm run build      # typecheck puis vite build
 npm run preview    # build puis wrangler dev sur le bundle
 npm run loc        # taille du projet par poste
@@ -116,6 +116,9 @@ aucun test précis.
   rejeu (`this.play(false)`).
 - `localStorage` uniquement via `read` / `write` / `forget` de ui.ts.
 - `room.ts`, `share.ts`, `theme.ts` n'importent pas main.ts (cycle).
+- Une frame ne porte que les bandes changées : world.ts les recopie toutes
+  dans son image miroir, n'en saute jamais une. Un réglage qui change
+  l'aspect sans écriture (comme `heatmap`) redessine tout.
 - 1 cellule = 1 pixel, un seul `putImageData` par frame : pas de dessin par
   cellule.
 - Pas de `style=` ni de `<script>` en ligne : la CSP les bloque.

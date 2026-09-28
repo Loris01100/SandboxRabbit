@@ -228,9 +228,13 @@ export class Engine {
   /** Vent horizontal, de -1 (plein ouest) à 1 (plein est). */
   wind = 0;
   private air = AMBIENT;
-  /** Blocs de veille par rangée (voir `CHUNK`). */
-  private readonly cols: number;
-  private readonly rows: number;
+  /** Côté d'un bloc de veille, en cellules : le rendu redessine par blocs lui aussi. */
+  readonly chunk = CHUNK;
+  /** Blocs de veille par rangée et par colonne (voir `CHUNK`). */
+  readonly cols: number;
+  readonly rows: number;
+  /** Blocs traités par un tick depuis le dernier `changed()`. */
+  private readonly shown: Uint8Array;
   /** Blocs traités à ce tick : ceux de `stir`, et leurs huit voisins. */
   private readonly awake: Uint8Array;
   /** `awake` du tick d'avant : dit quels blocs viennent de se réveiller. */
@@ -265,6 +269,7 @@ export class Engine {
     this.rows = Math.ceil(height / CHUNK);
     this.awake = new Uint8Array(this.cols * this.rows);
     this.was = new Uint8Array(this.cols * this.rows);
+    this.shown = new Uint8Array(this.cols * this.rows);
     this.stir = new Uint8Array(this.cols * this.rows).fill(1);
   }
 
@@ -305,6 +310,18 @@ export class Engine {
   wakeAll(): void {
     this.stir.fill(1);
     this.awake.fill(0);
+  }
+
+  /**
+   * Les blocs qui ont pu changer d'aspect depuis l'appel précédent, écrits
+   * dans `out` (1 = à redessiner) : ceux qu'un tick a traités, et ceux écrits
+   * depuis — un geste bac en pause. Un bloc endormi n'a pas bougé d'un pixel,
+   * ni sa matière ni sa température.
+   */
+  changed(out: Uint8Array): void {
+    const { shown, stir } = this;
+    for (let c = 0; c < shown.length; c++) out[c] = shown[c] | stir[c];
+    shown.fill(0);
   }
 
   /** Le bloc de la cellule `i` a changé : il est diffusé à ce tick et balayé au suivant, avec ses voisins. */
@@ -666,6 +683,7 @@ export class Engine {
       }
     }
     this.thermal();
+    for (let c = 0; c < awake.length; c++) if (awake[c]) this.shown[c] = 1;
   }
 
   private update(i: number, x: number, y: number, id: MaterialId): void {

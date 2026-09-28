@@ -6,7 +6,7 @@
 | --- | --- |
 | `npm run typecheck` | **deux** projets tsc : `tsconfig.json` (client, lib DOM) et `tsconfig.worker.json` (Worker, types générés, pas de DOM) |
 | `npm run check` | les quatre scripts d'`assert`, dans l'ordre : sim, ui, api, sandbox |
-| `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360 ; échoue au-delà du budget |
+| `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
 
@@ -88,6 +88,12 @@ ambiante sous zéro réveillent les blocs endormis, et un rejeu lancé sur un ba
 à moitié endormi retombe sur la même grille. Pour y poser un liquide au repos,
 le mettre dans un bassin qu'il remplit exactement : sur un sol plat, sa
 dernière rangée incomplète glisse sans fin et tient son bloc éveillé.
+
+Côté rendu, test/sandbox.ts recompose l'image comme la page (bandes recopiées
+dans un tableau miroir) et la compare, au pixel près, à un rendu témoin tout
+neuf — après un feu, un geste bac en pause, la vue thermique et une autre
+ambiante. Le témoin se tire **juste après** une frame, sinon il consomme les
+blocs changés (`engine.changed()`) à la place du bac.
 
 ## Budgets surveillés par la CI
 

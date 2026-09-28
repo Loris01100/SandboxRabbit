@@ -10,9 +10,13 @@ import { type Engine } from "./engine.ts";
  * fil principal qui en fait un `putImageData` (world.ts). C'est ce qui permet
  * de le faire tourner dans un Worker, où il n'y a pas de canvas — et ce qui le
  * rend vérifiable sous Node, qui n'en a pas non plus.
+ *
+ * Il ne redessine que les blocs de veille que le moteur dit changés
+ * (`engine.changed()`), et n'envoie qu'eux : un bac au repos en 1920×1080 ne
+ * coûte plus 8 Mo de pixels par frame, mais rien.
  */
 export class Renderer {
-  /** RGBA, une cellule par pixel : de quoi faire un `ImageData` en face. */
+  /** RGBA, une cellule par pixel : l'image entière, tenue à jour bloc par bloc. */
   readonly pixels: Uint8ClampedArray;
   private readonly buffer: Uint32Array;
   /** Couleur de base pré-calculée par matériau, au format 0xAABBGGRR. */
@@ -22,8 +26,11 @@ export class Renderer {
   private readonly grain = new Uint8Array(256);
   /** 1 pour les quatre matières dont `life` change l'aspect. Voir `draw()`. */
   private readonly glows = new Uint8Array(256);
-  /** Affiche `temp` au lieu de la matière. */
-  heatmap = false;
+  /** Blocs à redessiner à ce `draw()`. */
+  private readonly dirty: Uint8Array;
+  /** Tout redessiner au prochain `draw()` : premier dessin, vue basculée. */
+  private full = true;
+  private heat = false;
 
   private readonly engine: Engine;
 
@@ -42,16 +49,60 @@ export class Renderer {
       this.grain[m.id] = m.noise;
     }
     for (const id of [SWITCH, MAGNET, THERMITE, URANIUM]) this.glows[id] = 1;
+    this.dirty = new Uint8Array(engine.cols * engine.rows);
   }
 
-  draw(): void {
-    if (this.heatmap) { this.drawHeat(); return; }
-    const { cells, noise, frozen, life, width, temp, ambient } = this.engine;
-    const { buffer, palette, grain, glows } = this;
-    // Le seuil de lumière est le même pour tout le bac : il n'a rien à faire
-    // dans une boucle de 230 000 tours.
+  /** Affiche `temp` au lieu de la matière. La basculer redessine tout le bac. */
+  get heatmap(): boolean {
+    return this.heat;
+  }
+
+  set heatmap(on: boolean) {
+    if (on === this.heat) return;
+    this.heat = on;
+    this.full = true;
+  }
+
+  /**
+   * Redessine les blocs changés et rend ce qu'il faut reposer en face : une
+   * bande par rangée de blocs, du premier bloc changé au dernier, avec ses
+   * pixels copiés dans un tampon à elle — c'est ce tampon qui part vers la
+   * page, transféré plutôt que copié. Un bac au repos rend une liste vide.
+   */
+  draw(): Patch[] {
+    const { chunk, cols, rows, width: w, height: h, ambient } = this.engine;
+    const { dirty, pixels } = this;
+    this.engine.changed(dirty);
+    if (this.full) { dirty.fill(1); this.full = false; }
     const warm = ambient + GLOW;
-    for (let i = 0; i < cells.length; i++) {
+    const patches: Patch[] = [];
+    for (let cy = 0; cy < rows; cy++) {
+      const y0 = cy * chunk, y1 = Math.min(h, y0 + chunk);
+      let first = -1, last = -1;
+      for (let cx = 0; cx < cols; cx++) {
+        if (!dirty[cy * cols + cx]) continue;
+        if (first < 0) first = cx;
+        last = cx;
+        const x0 = cx * chunk, x1 = Math.min(w, x0 + chunk);
+        for (let y = y0; y < y1; y++) {
+          if (this.heat) this.shadeHeat(y * w + x0, y * w + x1);
+          else this.shade(y * w + x0, y * w + x1, warm);
+        }
+      }
+      if (first < 0) continue;
+      const x = first * chunk, pw = Math.min(w, (last + 1) * chunk) - x, ph = y1 - y0;
+      const strip = new Uint8ClampedArray(pw * ph * 4);
+      for (let y = y0; y < y1; y++) strip.set(pixels.subarray((y * w + x) * 4, (y * w + x + pw) * 4), (y - y0) * pw * 4);
+      patches.push({ x, y: y0, w: pw, h: ph, pixels: strip });
+    }
+    return patches;
+  }
+
+  /** Les cellules `from` à `to` (exclu) d'une rangée, en couleurs de matière. `warm` : seuil de lumière. */
+  private shade(from: number, to: number, warm: number): void {
+    const { cells, noise, frozen, life, width, temp } = this.engine;
+    const { buffer, palette, grain, glows } = this;
+    for (let i = from; i < to; i++) {
       const id = cells[i];
       const base = palette[id];
       // Lumière : `temp` est déjà diffusé par le moteur, donc l'air autour
@@ -86,12 +137,12 @@ export class Renderer {
   }
 
   /** Bleu sous l'ambiante, puis corps noir : rouge → jaune → blanc jusqu'à 1200 °C. */
-  private drawHeat(): void {
+  private shadeHeat(from: number, to: number): void {
     // Le pivot suit le climat de la scène, pas la constante : à -40 °C tout
     // était bleu uni, et la vue thermique ne montrait plus rien.
     const { temp, ambient } = this.engine;
     const { buffer } = this;
-    for (let i = 0; i < temp.length; i++) {
+    for (let i = from; i < to; i++) {
       const t = temp[i];
       let r: number, g: number, b: number;
       if (t < ambient) {
@@ -106,6 +157,15 @@ export class Renderer {
       buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
     }
   }
+}
+
+/** Un rectangle de l'image à reposer en (x, y), ses pixels RGBA rangée par rangée. */
+export interface Patch {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  pixels: Uint8ClampedArray;
 }
 
 /** Écart à l'ambiante à partir duquel une cellule commence à éclairer, en °C. */

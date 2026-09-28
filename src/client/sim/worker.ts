@@ -12,17 +12,22 @@ import { Sandbox, type News, type Order } from "./sandbox.ts";
 // `self` typé à la main : le projet compile avec la lib DOM, pas celle des
 // Workers (les deux se contredisent sur la moitié des noms globaux).
 const worker = self as unknown as {
-  postMessage(news: News): void;
+  postMessage(news: News, transfer: Transferable[]): void;
   onmessage: ((e: { data: Order | { t: "start"; w: number; h: number } }) => void) | null;
 };
 
 let bac: Sandbox | null = null;
 let last = performance.now();
 
+/** Les pixels d'une frame sont **transférés** : chaque bande a son tampon, que la page reçoit sans copie. */
+function tell(news: News): void {
+  worker.postMessage(news, news.t === "frame" ? news.patches.map((p) => p.pixels.buffer as ArrayBuffer) : []);
+}
+
 worker.onmessage = (e) => {
   const order = e.data;
   if (order.t === "start") {
-    bac = new Sandbox(order.w, order.h, (news) => worker.postMessage(news));
+    bac = new Sandbox(order.w, order.h, tell);
     return;
   }
   bac?.order(order);

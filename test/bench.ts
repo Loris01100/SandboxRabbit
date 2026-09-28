@@ -40,7 +40,7 @@ function scene(width: number, height: number): Engine {
 console.log(`${TICKS} ticks par mesure\n`);
 console.log("grille        cellules   ms/tick   ticks/s   fps à ×1");
 let budget = 0;
-for (const [w, h] of [[320, 180], [480, 270], [640, 360]] as const) {
+for (const [w, h] of [[320, 180], [480, 270], [640, 360], [1280, 720], [1920, 1080]] as const) {
   const e = scene(w, h);
   for (let t = 0; t < 30; t++) e.step(); // chauffe le JIT
   const start = performance.now();

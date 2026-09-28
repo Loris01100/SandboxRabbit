@@ -30,6 +30,13 @@ const HEADERS: Record<string, string> = {
   "referrer-policy": "strict-origin-when-cross-origin",
 };
 
+/**
+ * Cellules d'un monde au plus : la plus grande grille du menu, 1920×1080. La
+ * galerie alloue `width * height` octets pour la vignette : sans plafond, des
+ * dimensions fantaisistes la feraient tomber.
+ */
+const CELLS = 1920 * 1080;
+
 const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", async (c, next) => {
@@ -95,7 +102,7 @@ app.post("/api/worlds", async (c) => {
   // `width * height` octets pour en faire une vignette.
   if (
     !Number.isInteger(body.width) || !Number.isInteger(body.height) ||
-    body.width < 1 || body.height < 1 || body.width * body.height > 1_000_000
+    body.width < 1 || body.height < 1 || body.width * body.height > CELLS
   ) {
     return c.json({ error: "dimensions invalides" }, 400);
   }

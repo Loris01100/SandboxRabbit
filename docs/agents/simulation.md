@@ -276,11 +276,28 @@ CSS `image-rendering: pixelated`. **Pas de dessin par cellule.**
 lumière autour des sources chaudes est un sous-produit de `temp` (aucun flou).
 `thumbnail()` sert aux vignettes de la galerie.
 
+Le rendu suit les [blocs de veille](#blocs-de-veille) : `renderer.pixels`
+persiste d'une frame à l'autre, et `draw()` ne redessine que les blocs que
+`engine.changed()` désigne (traités par un tick, ou écrits depuis — un geste
+bac en pause). Il rend une bande (`Patch`) par rangée de blocs changés ; un
+bac au repos n'envoie rien.
+
+- Ce qui change l'aspect **sans écriture ni tick** doit tout redessiner :
+  basculer `heatmap` le fait (`full`). L'ambiante, qui déplace le seuil de
+  lumière et le pivot de la vue thermique, passe par `wakeAll()`. Un nouveau
+  réglage d'aspect (palette, filtre) doit faire de même.
+- Un nouveau `Renderer` dessine tout à sa première frame : c'est ce qui
+  remplit l'image neuve de la page après un changement de taille.
+- `engine.changed()` remet à zéro ce qu'il a rendu : un seul renderer par
+  moteur. Le test en tire un second (témoin) juste après une frame, quand il
+  n'y a plus rien à voler.
+
 ## Où vit quoi dans `Sandbox`
 
 [sim/sandbox.ts](../../src/client/sim/sandbox.ts) est le **seul** endroit qui
 appelle `engine.step()` (via `tick()`, météo comprise) et `Renderer.draw()`.
-Il porte aussi l'annulation (10 crans de copies des quatre tableaux), le
+Il porte aussi l'annulation (10 crans de copies des quatre tableaux, moins
+en grande grille : `UNDO_BYTES` borne les copies à 64 Mo), le
 défi en cours, l'enregistrement et le rejeu.
 
 Tout ce qui change la grille **sans passer par un geste** (annuler, vider,

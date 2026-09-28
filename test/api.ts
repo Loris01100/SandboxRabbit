@@ -34,6 +34,8 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   assert.equal((await app.request("/api/worlds", json({ ...monde, width: 1e6, height: 1e6 }), env)).status, 400);
   assert.equal((await app.request("/api/worlds", json({ ...monde, width: 0 }), env)).status, 400);
   assert.equal((await app.request("/api/worlds", json({ ...monde, height: 12.5 }), env)).status, 400);
+  assert.equal((await app.request("/api/worlds", json({ ...monde, width: 1920, height: 1080 }), env)).status, 201, "la plus grande grille du menu passe");
+  assert.equal((await app.request("/api/worlds", json({ ...monde, width: 1921, height: 1080 }), env)).status, 400, "au-delà, non");
 }
 
 // Aller-retour complet : sauvegarde, liste, suppression.
