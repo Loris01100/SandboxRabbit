@@ -144,8 +144,10 @@ Invariants :
 
 Ce que la boucle lit par cellule et par tick est **dérivé** de `MATERIALS` au
 chargement, en tableaux typés indexés par id : `KIND`, `DENSITY`, `HEAT`,
-`BOIL_AT` / `BOIL_INTO`, `FREEZE_AT` / `FREEZE_INTO` (engine.ts), `palette` et
-`grain` (render.ts). Lire `MATERIALS[id].density` dans `displaces()` ou
+`BOIL_AT` / `BOIL_INTO`, `FREEZE_AT` / `FREEZE_INTO`, `SPREAD`, `LIFE`,
+`FLAMMABLE` (engine.ts), `palette` et `grain` (render.ts). `FLAMMABLE` est en
+`Float64Array` : en 32 bits, 0,6 devient 0,60000002 et déplace les seuils de
+tirage. Lire `MATERIALS[id].density` dans `displaces()` ou
 `.noise` dans `draw()` annule le gain (le tick est passé de 1,6 à 0,7 ms en
 320×180). Une nouvelle propriété lue dans le chemin chaud mérite sa table.
 

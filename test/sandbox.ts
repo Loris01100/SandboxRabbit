@@ -145,6 +145,24 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.equal(crans, 4, "quatre crans, soit moins de 64 Mo de copies");
 }
 
+/**
+ * Un bac trop lourd pour sa frame ralentit au lieu de rattraper : une frame
+ * de 100 ms à vitesse ×4 réclame huit ticks, mais une bande d'eau qui tombe
+ * sur toute la largeur d'un 1920×1080 n'en laisse passer que ce qui tient
+ * dans `SLICE`. Sans ce plafond, la frame suivante en réclamait encore plus.
+ */
+{
+  const news: News[] = [];
+  const sim = new Sandbox(1920, 1080, (n) => news.push(n));
+  sim.order({ t: "do", g: { t: "rect", x: 0, y: 100, x2: 1919, y2: 400, id: WATER, over: false } });
+  sim.order({ t: "set", k: { speed: 4 } });
+  sim.order({ t: "rec", on: true });
+  sim.frame(100);
+  sim.order({ t: "rec", on: false });
+  const joués = last(news, "rec")!.ticks;
+  assert.ok(joués >= 1 && joués < 8, `une frame surchargée s'arrête à temps (${joués} ticks sur 8 demandés)`);
+}
+
 // Charger une grille : la réponse dit si elle était lisible.
 {
   const { sim, news } = bac();

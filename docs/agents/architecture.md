@@ -39,6 +39,10 @@ flowchart LR
    temps réellement écoulé (`setTimeout` à ~60 Hz, pas de `requestAnimationFrame`)
    et renvoie des **nouvelles**. L'échéance suivante est posée dans un
    `finally` : une exception du moteur ne coupe plus la boucle pour de bon.
+   Une frame s'accorde au plus `SLICE` (12 ms) de simulation — bac, rejeu ou
+   invité qui rattrape — et abandonne le reste de son retard : sinon une frame
+   lente en réclame plus à la suivante, et en grande grille la boucle montait
+   à huit ticks par frame. Un bac trop chargé ralentit, la page reste fluide.
 3. **Le Worker Cloudflare** sert le site statique **et** l'API — il n'y a pas
    de projet Pages séparé.
 

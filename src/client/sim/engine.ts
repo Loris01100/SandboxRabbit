@@ -118,9 +118,20 @@ const FREEZE_AT = new Float32Array(256).fill(-Infinity);
 const FREEZE_INTO = new Uint8Array(256);
 /** 1 = id présent dans `MATERIALS`. Pour ce qui lit un id ailleurs que dans `cells` (le `life` d'une source). */
 const KNOWN = new Uint8Array(256);
+/**
+ * `spread`, `life` et `flammable`, lus par chaque liquide, chaque gaz et
+ * chaque voisin d'une flamme à chaque tick : en 1920×1080, un lac qui
+ * s'étale lisait `MATERIALS[id].spread` un demi-million de fois par tick.
+ */
+const SPREAD = new Uint8Array(256);
+const LIFE = new Uint8Array(256);
+const FLAMMABLE = new Float64Array(256);
 for (const key of Object.keys(MATERIALS)) {
   const m = MATERIALS[Number(key)];
   KNOWN[m.id] = 1;
+  SPREAD[m.id] = m.spread ?? 1;
+  LIFE[m.id] = m.life ?? 0;
+  FLAMMABLE[m.id] = m.flammable ?? 0;
   KIND[m.id] = KINDS[m.kind];
   DENSITY[m.id] = m.density;
   if (m.heat !== undefined) HEAT[m.id] = m.heat;
@@ -737,7 +748,7 @@ export class Engine {
     if (this.tryMove(i, x + dir, down, id)) return;
     if (this.tryMove(i, x - dir, down, id)) return;
     // Étalement : on glisse aussi loin que possible du même côté.
-    const spread = MATERIALS[id].spread ?? 1;
+    const spread = SPREAD[id];
     let cur = i, cx = x;
     for (let s = 0; s < spread; s++) {
       if (!this.tryMove(cur, cx + dir, y, id)) break;
@@ -774,13 +785,13 @@ export class Engine {
 
   /** Décrémente la vie ; à zéro remplace par `into`. */
   private decay(i: number, id: MaterialId, into: MaterialId): boolean {
-    const max = MATERIALS[id].life ?? 0;
+    const max = LIFE[id];
     if (max === 0) return false;
     if (this.life[i] === 0) this.life[i] = max;
     if (--this.life[i] > 0) return false;
     this.wake(i);
     this.cells[i] = into;
-    this.life[i] = MATERIALS[into].life ?? 0;
+    this.life[i] = LIFE[into];
     return true;
   }
 
@@ -820,7 +831,7 @@ export class Engine {
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
-      const chance = MATERIALS[n]?.flammable;
+      const chance = FLAMMABLE[n];
       if (!chance || this.rand() > chance * boost) continue;
       // Le bois ne disparaît pas en fumée : il passe par la braise.
       this.become(nx, ny, n === WOOD && this.rand() < 0.5 ? EMBER : FIRE);

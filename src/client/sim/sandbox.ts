@@ -89,6 +89,8 @@ const GRID = 250;
 const TURN = 50;
 const SUM = 60;
 const CATCH_UP = 32;
+/** Temps de simulation qu'une frame s'accorde, en ms : de quoi rendre et répondre sous 16,7 ms. */
+const SLICE = 12;
 const FOLLOW = "Vous suivez l'hôte : c'est lui qui mène le bac.";
 
 function fingerprint(cells: Uint8Array): number {
@@ -198,22 +200,35 @@ export class Sandbox {
     }
   }
 
-  /** Avance le bac de `ms` millisecondes et peint une frame. */
+  /**
+   * Avance le bac de `ms` millisecondes et peint une frame.
+   *
+   * Au plus `SLICE` ms de simulation par frame (`late()`) : au-delà, le retard
+   * est abandonné, pas reporté. Sans ça, une frame lente en réclamait plus à
+   * la suivante — en 1920×1080, un lac qui s'étale coûte 16 ms le tick, et la
+   * boucle montait à huit ticks par frame, 130 ms entre deux images, le
+   * pinceau autant en retard. Un bac trop chargé ralentit, il ne rame plus.
+   */
   frame(ms: number): void {
     const budget = ticksFor(this.knobs.speed, ms, this.pending);
     this.pending = budget.pending;
+    const start = performance.now();
     if (this.follower) {
-      this.catchUp(this.follower);
+      this.catchUp(this.follower, start);
     } else if (this.player) {
       // Un rejeu remplace la simulation : c'est lui qui avance le bac. La pause
       // l'arrête aussi — il avançait sans elle, et « Pas à pas » n'y pouvait rien.
       if (this.knobs.running) {
         for (let n = budget.ticks; n > 0; n--) {
           if (!this.player.step()) { this.play(false); break; }
+          if (this.late(start)) break;
         }
       }
     } else if (this.knobs.running) {
-      for (let n = budget.ticks; n > 0; n--) this.tick();
+      for (let n = budget.ticks; n > 0; n--) {
+        this.tick();
+        if (this.late(start)) break;
+      }
     }
 
     const patches = this.renderer.draw();
@@ -260,7 +275,7 @@ export class Sandbox {
    * l'écart se stabilise tout seul quelle que soit la vitesse choisie par
    * l'hôte.
    */
-  private catchUp(p: Player): void {
+  private catchUp(p: Player, start: number): void {
     for (let n = Math.min(CATCH_UP, Math.ceil((p.rec.ticks - p.tick) / 3)); n > 0; n--) {
       const sum = this.checks.get(p.tick);
       if (sum !== undefined) {
@@ -271,7 +286,20 @@ export class Sandbox {
         }
       }
       if (!p.step()) return;
+      if (this.late(start)) return;
     }
+  }
+
+  /**
+   * La frame a épuisé son temps de simulation : on oublie le reliquat. Au
+   * moins un tick passe toujours — le bac avance, même lentement. Un invité en
+   * retard le reste plus longtemps, sans rien perdre : la partie de l'hôte
+   * l'attend.
+   */
+  private late(start: number): boolean {
+    if (performance.now() - start < SLICE) return false;
+    this.pending = 0;
+    return true;
   }
 
   /** Hôte : (re)part de l'état présent — un arrivant ne connaît rien d'autre. */
