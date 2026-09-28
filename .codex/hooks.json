@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash 'c:\\Dev\\SandboxRabbit\\.codex\\hooks\\doc-sync.sh'",
+            "timeout": 15,
+            "statusMessage": "Vérification de la doc…"
+          }
+        ]
+      }
+    ]
+  }
+}

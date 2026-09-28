@@ -23,23 +23,71 @@ gardant l'interface (`step`, `paint`, `cells`).
 
 Scalaires : `gravity` (±1), `wind` (-1..1), `ambient` (°C, réglage de scène —
 `AMBIENT` = 20 n'est que le défaut), `emit` (matière des `SOURCE` posées
-ensuite), `seed` et `scan` (état du xorshift, sens du balayage).
+ensuite), `seed` et `scan` (état du xorshift, sens du balayage). `gravity` et
+`ambient` sont des accesseurs : les changer réveille tout le bac.
+
+Blocs de veille (privés, un octet par bloc de 16×16) : `stir` (bloc écrit ou
+tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
+`was` (`awake` du tick d'avant). Voir [Blocs de veille](#blocs-de-veille).
 
 ## Un tick (`step()`)
 
-1. `parity ^= 1`.
+1. `parity ^= 1`, puis `rouse()` : les blocs de `stir` et leurs huit voisins
+   forment `awake` ; un bloc qui vient de se réveiller remet `clock` à
+   `parity ^ 1`.
 2. Balayage **dans le sens de la gravité** (du bas si `gravity` = 1), le sens
-   en x alternant avec `parity`. Pour chaque cellule non vide, non figée, dont
+   en x alternant avec `parity`, en sautant la portion de rangée d'un bloc
+   endormi. Pour chaque cellule non vide, non figée, dont
    `clock` ≠ `parity` : `clock = parity`, puis `update()`.
 3. `update()` : d'abord un `switch` sur les ids à règle propre (feu, lave,
    acide, TNT, étincelle…), sinon mouvement générique selon `kind`
    (`powder` / `liquid` / `gas`, `static` ne bouge pas).
 4. `thermal()` : les sources (`heat`) tirent leur cellule vers leur
    température, puis diffusion (`CONDUCTION`), retour vers `ambient`
-   (`COOLING`), et changements d'état `boil` / `freeze`. Les deux tampons
-   s'échangent.
+   (`COOLING`), et changements d'état `boil` / `freeze`, sur les seuls blocs
+   éveillés ou écrits pendant ce tick. Les deux tampons s'échangent.
 
 Toucher à l'ordre du balayage ou à `clock` introduit des dérives visibles.
+
+## Blocs de veille
+
+La grille est découpée en blocs de 16×16 (`CHUNK`). Un bloc où rien ne bouge
+n'est ni balayé ni diffusé : un bac au repos en 1920×1080 tient sous la
+milliseconde par tick, au lieu de 30. Un bloc est traité si lui ou un voisin a
+été « remué » (`stir`) depuis le dernier tick, par :
+
+- **une écriture** : `set` / `become`, `swap` (donc `tryMove`), `hurl`,
+  `relocate`, `convert`, `decay`, `charge`, `paste`, `setFrozen`, les bascules,
+  l'amorçage du C4 par `explode`. Chacune appelle `wake(i)` ;
+- **une matière active** (table `ACTIVE`) : elle agit sans que rien ne change
+  autour — gaz, créatures, lave, acide, plante, thermite, uranium, sel,
+  nanites, source, pile, braise, étincelle, aimant — plus le métal en repos
+  (`life` > 0) ;
+- **une cellule qui passe son tour** à cause de `clock` (filet : un grain
+  peint dans le vide garde l'horloge quelconque de la cellule vide) ;
+- **un liquide bloqué d'un côté mais libre de l'autre** (`canMove()`) : il ne
+  tente qu'un côté par tick, tiré au sort, et resterait suspendu ;
+- **la chaleur** : un bloc dont une cellule varie de plus de `STILL`
+  (0,001 °C/tick) reste éveillé. Un bloc refroidi recopie sa température dans
+  l'autre tampon, pour lire la même chose endormi.
+
+Invariants :
+
+- **Toute écriture dans `cells`, `life`, `temp` ou `frozen` hors des méthodes
+  du moteur est suivie de `engine.wakeAll()`** (c'est ce que fait `restore()`
+  dans sandbox.ts ; `put()` passe par `adopt()`, qui le fait). Sinon un bloc
+  endormi ignore ce qu'on vient d'y poser. Même règle pour une nouvelle
+  écriture directe dans le moteur : `this.wake(i)`.
+- **Une matière qui agit d'elle-même** (compteur dans `life`, tirage qui finit
+  par réussir, lecture au-delà des voisines immédiates) va dans `ACTIVE`. Sinon
+  son bloc s'endort et elle se fige.
+- **Déterminisme** : quels blocs dorment dépend de toute la partie. `wakeAll()`
+  remet tout à plat (tous réveillés, horloges remises), et chaque départ de
+  rejeu ou de salon passe par `put()` → `adopt()` → `wakeAll()`, chez l'hôte
+  comme chez l'invité. Un départ qui ne passerait pas par là ferait diverger
+  les tirages.
+- Un bloc endormi ne tire plus au sort : un bac au repos garde le même
+  `seed`. C'est ce que vérifie test/sim.ts.
 
 ## Invariants
 
@@ -55,7 +103,9 @@ Toucher à l'ordre du balayage ou à `clock` introduit des dérives visibles.
   comportement visible identique. C'est voulu.
 - Rejouer en cours de partie exige les tableaux **plus** `seed`, `scan` et
   `clock` (une cellule fraîchement peinte garde l'horloge de ce qui l'occupait).
-  C'est pour ça que `clock` est publique et que replay.ts la sérialise.
+  C'est pour ça que `clock` est publique et que replay.ts la sérialise. Depuis
+  les blocs de veille, `put()` remet toutes les horloges au premier tick : la
+  sérialiser ne coûte rien et reste juste si ce réveil change un jour.
 
 ### Mouvement
 

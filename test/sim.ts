@@ -1202,4 +1202,60 @@ function top(e: Engine, id: MaterialId): number {
   assert.throws(() => new Player(rec.rec, new Engine(W + 10, H, 1)), "un bac d'une autre taille est refusé, pas décalé");
 }
 
+/**
+ * Blocs de veille : un bloc où rien ne bouge n'est plus balayé. Endormi, le
+ * sable posé ne tire plus au sort — `seed` qui ne bouge plus en est la preuve
+ * visible. Tout ce qui écrit ou change la scène doit le réveiller, et un rejeu
+ * lancé sur un bac à moitié endormi doit retomber sur la même grille : quels
+ * blocs dorment dépend de toute la partie, que le lecteur ne connaît pas.
+ */
+{
+  const tas = (): Engine => {
+    const e = new Engine(W, H, 55);
+    e.rect(0, H - 2, W - 1, H - 1, STONE);
+    e.rect(8, 10, 20, 20, SAND);
+    e.rect(34, 28, 46, 37, STONE);
+    e.rect(35, 30, 45, 37, WATER);
+    for (let t = 0; t < 400; t++) e.step();
+    return e;
+  };
+
+  const repos = tas();
+  const avant = repos.seed;
+  for (let t = 0; t < 10; t++) repos.step();
+  assert.equal(repos.seed, avant, "au repos, plus aucun tirage : tous les blocs dorment");
+
+  const trou = tas();
+  const sable = count(trou, SAND);
+  trou.rect(0, H - 2, W - 1, H - 1, EMPTY);
+  for (let t = 0; t < 40; t++) trou.step();
+  assert.equal(count(trou, SAND), sable, "le sable est toujours là");
+  assert.ok(trou.cells.indexOf(SAND) > (H - 10) * W, "mais le sol retiré, le sable endormi est tombé");
+
+  const renverse = tas();
+  renverse.gravity = -1;
+  for (let t = 0; t < 60; t++) renverse.step();
+  assert.ok(renverse.cells.indexOf(SAND) < W, "retourner la gravité réveille tout : le sable monte au plafond");
+
+  const gel = tas();
+  gel.ambient = -30;
+  assert.ok(runUntil(gel, ICE, 600), "une ambiante sous zéro gèle le lac endormi");
+
+  const e = tas();
+  const rec = new Recorder(e, false);
+  const gestes: [number, Gesture][] = [
+    [5, { t: "paint", x: 14, y: H - 2, r: 2, id: EMPTY, d: 1, over: true }],
+    [30, { t: "paint", x: 40, y: 5, r: 2, id: FIRE, d: 1, over: true }],
+  ];
+  for (let t = 0; t < 120; t++) {
+    for (const [at, g] of gestes) if (at === t) { applyGesture(e, g); rec.gesture(g); }
+    rec.tick(false);
+    e.step();
+  }
+  const suivi = new Player(rec.rec, new Engine(W, H, 3));
+  while (suivi.step()) { /* jusqu'au bout */ }
+  assert.deepEqual(suivi.engine.cells, e.cells, "rejoué depuis un bac à moitié endormi, même grille");
+  assert.equal(suivi.engine.seed, e.seed, "et mêmes tirages");
+}
+
 console.log("ok — simulation conforme");

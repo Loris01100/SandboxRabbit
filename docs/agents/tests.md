@@ -80,6 +80,15 @@ Le test de rejeu qui suit vérifie qu'une partie enregistrée retombe sur la
 même grille dans un moteur neuf : il casse si une modification de la grille
 échappe à `Recorder` (voir `stamp()` dans [simulation.md](simulation.md)).
 
+La scène de l'empreinte (60×40, soit 4×3 blocs) garde tous ses blocs éveillés
+— lave, pile, thermite : les blocs de veille ne l'ont pas changée. Ce sont les
+tests « Blocs de veille », en fin de fichier, qui les couvrent : un bac au
+repos ne tire plus au sort (`seed` figé), un trou, la gravité retournée et une
+ambiante sous zéro réveillent les blocs endormis, et un rejeu lancé sur un bac
+à moitié endormi retombe sur la même grille. Pour y poser un liquide au repos,
+le mettre dans un bassin qu'il remplit exactement : sur un sol plat, sa
+dernière rangée incomplète glisse sans fin et tient son bloc éveillé.
+
 ## Budgets surveillés par la CI
 
 [.github/workflows/ci.yml](../../.github/workflows/ci.yml), à chaque push et PR,

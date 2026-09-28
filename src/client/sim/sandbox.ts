@@ -358,6 +358,7 @@ export class Sandbox {
     this.engine.life.set(state.life);
     this.engine.temp.set(state.temp);
     this.engine.frozen.set(state.frozen);
+    this.engine.wakeAll();
     // La grille change sans geste : l'enregistrement la garde en entier.
     this.stamp();
   }

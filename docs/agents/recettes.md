@@ -19,6 +19,10 @@ a bougé).
    ne part pas d'une matière simple : suivre le lapin (`creature`, `part`,
    forme en offsets, `relocate()`), décrit dans
    [simulation.md](simulation.md#créatures--le-lapin).
+   Si elle agit sans que rien ne bouge autour d'elle (compteur, tirage qui
+   finit par réussir) : son id dans la liste `ACTIVE` d'engine.ts — les gaz et
+   les créatures y sont d'office. Sinon son bloc s'endort et elle se fige (voir
+   [Blocs de veille](simulation.md#blocs-de-veille)).
 5. Un bloc d'`assert` dans [test/sim.ts](../../test/sim.ts) qui prouve son
    comportement. La forme de l'entrée est déjà relue par l'assert du
    registre : clé = `id`, `life` ≤ 250, couleur en trois canaux 0..255,
@@ -40,6 +44,9 @@ ligne dans le moteur. Voir le ciment ou le verre fondu.
   `DENSITY`) plutôt que `MATERIALS[id].xxx`.
 - Relire le tableau des usages de `life` dans [simulation.md](simulation.md)
   avant d'y écrire.
+- Écrire directement dans `cells` / `life` / `temp` (hors `set`, `swap`,
+  `convert`…) : `this.wake(i)` à côté, sinon le bloc voisin endormi ne le voit
+  pas. Une règle qui agit sans changement autour : son id dans `ACTIVE`.
 - L'empreinte de test/sim.ts va très probablement changer : voir
   [tests.md](tests.md#lempreinte-du-moteur).
 
