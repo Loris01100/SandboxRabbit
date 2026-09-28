@@ -124,7 +124,9 @@ reçoit d'un invité ; `applyGesture` le borne à cinq bits. Quand la frame port
 un héros (`hero`), ZQSD / flèches / E le pilotent au lieu de déplacer la vue,
 et `follow()` recentre la caméra sur lui à chaque image (un cinquième du
 chemin, bornes comprises). À son apparition la vue zoome à ~160 cellules de
-large (`meet()`).
+large (`meet()`). Glisser au clic du milieu (ou pincer) passe `loose` à vrai :
+`follow()` ne tourne plus, la vue reste où on l'a mise ; un clic du milieu
+sans bouger (moins de `CLICK` pixels) la raccroche, et `meet()` aussi.
 
 ## Salon partagé (bac multijoueur)
 

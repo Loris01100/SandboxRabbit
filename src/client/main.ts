@@ -252,6 +252,9 @@ let zoom = 1;
 let panX = 0;
 let panY = 0;
 let panning = false;
+/** Pixels parcourus depuis l'appui du milieu : sous `CLICK`, c'est un clic, pas un glisser. */
+let panned = 0;
+const CLICK = 4;
 
 /**
  * Pose la transformation du canvas, décalage ramené dans ses bornes
@@ -314,6 +317,13 @@ addEventListener("blur", () => { held.clear(); steer(); });
 
 /** Position du héros dans la dernière frame, en cellules ; null sans héros. Avec lui, les touches le pilotent et la caméra le suit. */
 let hero: [number, number] | null = null;
+/**
+ * Caméra décrochée du héros : elle reste où on l'a mise, le héros vit sa vie
+ * hors champ. Glisser au clic du milieu la décroche (sans ça, la vue revient
+ * sur lui à l'image suivante et on ne peut rien regarder d'autre) ; un clic du
+ * milieu sans bouger la raccroche.
+ */
+let loose = false;
 /** Commandes envoyées en dernier (bits de `PILOT`) : un geste ne part que quand elles changent. */
 let piloted = 0;
 
@@ -354,6 +364,7 @@ function follow(): void {
 
 /** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large) et la barre de statut donne les touches. */
 function meet(): void {
+  loose = false;
   if (zoomInput.checked && zoom < WIDTH / 160) {
     const r = canvas.getBoundingClientRect();
     zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(WIDTH / 160));
@@ -467,6 +478,7 @@ canvas.addEventListener("pointerdown", (e) => {
   }
   if (e.button === 1 && zoomInput.checked) {
     panning = true;
+    panned = 0;
     canvas.setPointerCapture(e.pointerId);
     e.preventDefault();
     return;
@@ -525,6 +537,7 @@ canvas.addEventListener("pointermove", (e) => {
       // ce même milieu : un seul geste pour les deux.
       panX += now.x - pinch.x;
       panY += now.y - pinch.y;
+      loose ||= hero !== null; // au doigt aussi, déplacer la vue la décroche du héros
       applyView();
       zoomAt(now.x, now.y, clampZoom(zoom * (now.gap / pinch.gap)));
       pinch = now;
@@ -534,6 +547,11 @@ canvas.addEventListener("pointermove", (e) => {
   if (panning) {
     panX += e.movementX;
     panY += e.movementY;
+    panned += Math.abs(e.movementX) + Math.abs(e.movementY);
+    if (hero && !loose && panned >= CLICK) {
+      loose = true;
+      statusEl.textContent = "Caméra décrochée du héros — clic du milieu sans bouger pour la raccrocher.";
+    }
     applyView();
     return;
   }
@@ -567,6 +585,11 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
       marqueeEl.hidden = true;
     }
     painting = false;
+    // Clic du milieu sans glisser : raccroche la caméra au héros.
+    if (panning && type === "pointerup" && panned < CLICK && hero && loose) {
+      loose = false;
+      statusEl.textContent = "Caméra raccrochée au héros.";
+    }
     panning = false;
     touches.delete((e as PointerEvent).pointerId);
     if (touches.size < 2) pinch = null;
@@ -1003,7 +1026,9 @@ function frame(now: number): void {
   // On ne compte que les images neuves venues du bac : cette boucle-ci tourne
   // à 60 Hz quoi qu'il arrive (elle ne fait presque rien), la compter
   // affichait 60 fps même quand le Worker n'en livrait que 30.
-  if (hero) follow();
+  // Avec un héros, les touches le pilotent : même décrochée, la vue ne glisse
+  // qu'à la souris.
+  if (hero) { if (!loose) follow(); }
   else if (held.size > 0) scroll();
   if (present()) frames++;
   captureFrame(); // vidéo en cours : la frame y part aussi
