@@ -3,6 +3,7 @@
  * Un `assert` par règle, pas de framework.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/client/sim/codec.ts";
 import { thumbnail } from "../src/client/sim/render.ts";
@@ -111,9 +112,10 @@ function count(e: Engine, id: MaterialId): number {
   assert.ok(runUntil(e, PLANT, 20), "la graine germe au contact de l'eau");
 }
 
-// Le TNT explose au contact du feu et entraîne ses voisins.
+// Le TNT explose au contact du feu et entraîne ses voisins. Graine fixe : au
+// hasard, une fois sur 4 000 la flamme s'envolait sans toucher la charge.
 {
-  const e = engine();
+  const e = new Engine(W, H, 1234);
   for (let x = 20; x < 40; x++) for (let y = 20; y < 26; y++) e.set(x, y, TNT);
   const before = count(e, TNT);
   e.set(20, 19, FIRE);
@@ -1392,6 +1394,20 @@ function top(e: Engine, id: MaterialId): number {
   const rejoué = new Player(rec.rec, new Engine(W, H, 5));
   while (rejoué.step()) { /* jusqu'au bout */ }
   assert.deepEqual(rejoué.engine.cells, e.cells, "une partie pilotée se rejoue au pixel près");
+}
+
+/**
+ * Les fonctions `Math` que la norme laisse « approchées selon
+ * l'implémentation » (hypot, sin, exp…) peuvent différer d'un bit entre deux
+ * navigateurs : dans le moteur, un salon Chrome + Firefox divergerait ; dans
+ * le générateur, une graine ne redonnerait plus le même monde. Aucun test de
+ * comportement ne le verrait, tous tournent sous le même V8 : on lit donc la
+ * source. `Math.sqrt`, correctement arrondie, reste permise.
+ */
+for (const fichier of ["../src/client/sim/engine.ts", "../src/client/terrain.ts"]) {
+  const source = readFileSync(new URL(fichier, import.meta.url), "utf8");
+  const approchées = source.match(/Math\.(hypot|sin|cos|tan|asin|acos|atan2?|sinh|cosh|tanh|exp|expm1|log|log1p|log2|log10|pow|cbrt)\b/g);
+  assert.equal(approchées, null, `${fichier} n'emploie aucune fonction Math approchée (${approchées?.join(", ")})`);
 }
 
 console.log("ok — simulation conforme");

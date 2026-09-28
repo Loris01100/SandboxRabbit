@@ -221,22 +221,30 @@ for (const id of [ACID, THERMITE, URANIUM, SALT, NANITE, SOURCE, BATTERY, EMBER,
  * Offsets d'un disque de rayon `radius`, du bord vers le centre — l'ordre dans
  * lequel le souffle doit traiter ses cellules. Mis en cache : les explosions
  * n'utilisent qu'une poignée de rayons.
+ *
+ * Appartenance et ordre se décident sur la distance **au carré**, un entier
+ * exact ; le tri est stable, les égalités gardent l'ordre du balayage. La
+ * distance elle-même vient de `Math.sqrt`, correctement arrondie partout.
+ * C'était `hypot()`, que la norme laisse « approchée selon
+ * l'implémentation » : un bit d'écart entre Chrome et Firefox déplaçait la
+ * portée d'un débris, et un salon mixte divergeait à la première explosion.
  */
 const DISCS = new Map<number, [number, number, number][]>();
 
 function disc(radius: number): [number, number, number][] {
   const known = DISCS.get(radius);
   if (known) return known;
-  const cells: [number, number, number][] = [];
+  const cells: [number, number, number, number][] = [];
   for (let y = -radius; y <= radius; y++) {
     for (let x = -radius; x <= radius; x++) {
-      const d = Math.hypot(x, y);
-      if (d <= radius) cells.push([x, y, d]);
+      const d2 = x * x + y * y;
+      if (d2 <= radius * radius) cells.push([x, y, Math.sqrt(d2), d2]);
     }
   }
-  cells.sort((a, b) => b[2] - a[2]);
-  DISCS.set(radius, cells);
-  return cells;
+  cells.sort((a, b) => b[3] - a[3]);
+  const out = cells.map(([x, y, d]): [number, number, number] => [x, y, d]);
+  DISCS.set(radius, out);
+  return out;
 }
 
 /** Morceau de grille découpé puis reposé ailleurs (copier / coller). */

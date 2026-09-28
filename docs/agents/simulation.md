@@ -107,6 +107,13 @@ Invariants :
   lui, sur un xorshift à lui semé par la graine du monde : un monde est une
   grille posée d'un coup (`stamp()`), un invité le reçoit tout fait et ne
   rejoue pas sa construction — elle ne doit donc rien prendre au tirage du bac.
+- **Mêmes calculs dans tous les navigateurs.** + − × ÷ et `Math.sqrt` sont
+  arrondis exactement par IEEE 754 ; `hypot`, `sin`, `exp`, `pow`, `log`…
+  sont « approchés selon l'implémentation » et peuvent différer d'un bit
+  entre Chrome et Firefox. Interdits dans engine.ts et terrain.ts : `disc()`
+  employait `hypot`, et un salon mixte pouvait diverger à la première
+  explosion. Les tests tournent tous sous V8 et ne le verraient pas — test/sim.ts
+  lit donc la source.
 - Changer **l'ordre** des tirages d'une règle change l'empreinte, même à
   comportement visible identique. C'est voulu.
 - Rejouer en cours de partie exige les tableaux **plus** `seed`, `scan` et

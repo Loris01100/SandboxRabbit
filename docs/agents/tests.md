@@ -105,6 +105,15 @@ tirages**. Quand le changement est voulu :
 Si elle change alors qu'on n'a pas touché au moteur : c'est un bug, pas une
 empreinte à recopier.
 
+En fin de fichier, un test **lit la source** d'engine.ts et de terrain.ts et
+refuse toute fonction `Math` approchée (`hypot`, `sin`, `exp`…) : leur résultat
+peut différer d'un bit entre navigateurs, ce qu'aucun test de comportement ne
+voit sous un seul V8. Un commentaire qui cite `Math.hypot` le ferait échouer :
+écrire `hypot()`.
+
+Les tests à tirage sensible prennent une graine fixe (`new Engine(W, H, 1234)`)
+plutôt qu'`engine()` : le TNT, au hasard, échouait une fois sur 4 000.
+
 Le test de rejeu qui suit vérifie qu'une partie enregistrée retombe sur la
 même grille dans un moteur neuf : il casse si une modification de la grille
 échappe à `Recorder` (voir `stamp()` dans [simulation.md](simulation.md)).

@@ -87,6 +87,10 @@ aucun test précis.
 - Tout tirage au sort du moteur (et de la météo) passe par `engine.rand()`,
   **jamais** `Math.random()`. Seule exception : terrain.ts a son propre
   tirage, semé par la graine — bâtir un monde ne doit pas décaler celui du bac.
+- Pas de fonction `Math` « approchée selon l'implémentation » (`hypot`, `sin`,
+  `exp`, `pow`…) dans engine.ts ni terrain.ts : un bit d'écart entre
+  navigateurs fait diverger un salon. `Math.sqrt` est permise. test/sim.ts lit
+  la source et le vérifie.
 - Déplacements via `tryMove()`, `y + this.gravity` et `drift()`. Exceptions :
   `MAGNET`, et le lapin qui bouge ses neuf cellules d'un bloc (`relocate()`).
 - Une règle transforme un voisin avec `become()`, pas `set()` (qui libère le
