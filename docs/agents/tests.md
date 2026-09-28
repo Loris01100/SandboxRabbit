@@ -9,6 +9,7 @@
 | `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
+| `npm run directions` | mesure de décision, pas un test : voir [Choisir une direction](#choisir-une-direction) |
 
 Il n'y a **pas de framework de test** ni de linter. Node ≥ 24 exécute le
 TypeScript directement.
@@ -19,6 +20,34 @@ TypeScript directement.
 | [test/ui.ts](../../test/ui.ts) | logique pure du panneau | `ui.ts` |
 | [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, routage des messages du salon | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
 | [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles | `Sandbox` avec un rappel `send` qui empile |
+
+## Choisir une direction
+
+Les grands mondes animés butent sur un seul cœur de processeur. `npm run
+directions` ([test/directions.ts](../../test/directions.ts)) mesure, sur la
+machine qui le lance, ce que rapporterait chaque piste — il n'échoue jamais et
+n'est pas dans la CI :
+
+1. **le vrai moteur** sur une scène chargée en 1920×1080 (eau, sable, feu),
+   décomposé en règles, chaleur (`thermal()` chronométré à part) et rendu ;
+2. **deux noyaux** qui résument ce travail
+   ([directions-kernels.ts](../../test/directions-kernels.ts)) : le sable qui
+   tombe et la diffusion de la chaleur, sur un cœur puis sur 2, 4, 8… cœurs
+   ([directions-worker.ts](../../test/directions-worker.ts) : damier de blocs
+   64×64 en quatre phases, `SharedArrayBuffer`, barrière `Atomics`, tirage
+   haché par (bloc, tick) pour rester déterministe) ;
+3. **une projection** : le vrai moteur, règles et chaleur divisées par le gain
+   mesuré sur les noyaux, rendu inchangé ;
+4. **la carte graphique**, qui ne se mesure que dans un navigateur :
+   [test/gpu.html](../../test/gpu.html) pendant `npm run dev`
+   (http://localhost:5173/test/gpu.html). Mêmes noyaux en WebGPU, le sable
+   reformulé en blocs de Margolus (sans balayage ni horloge — la réécriture
+   qu'imposerait le moteur), en 1920×1080, 4K et 8K.
+
+Les noyaux sont un **minorant** : le vrai moteur a cinquante matières, des
+créatures et des explosions. La dernière ligne du rapport compare le coût par
+cellule du noyau sable et celui du moteur réel par cellule éveillée : c'est le
+facteur à appliquer aux gains du GPU pour estimer le moteur complet.
 
 ## Contrainte : Node **dépouille** le TypeScript, il ne le compile pas
 

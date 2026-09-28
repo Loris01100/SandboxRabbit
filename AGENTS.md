@@ -23,6 +23,7 @@ npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, st
 npm run typecheck  # DEUX projets tsc : tsconfig.json (client/DOM) + tsconfig.worker.json (Worker)
 npm run check      # asserts : test/sim.ts, test/ui.ts, test/api.ts, test/sandbox.ts (Node exécute le TS)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
+npm run directions # mesure de décision : 1 cœur, N cœurs, projection (GPU : test/gpu.html sous npm run dev)
 npm run build      # typecheck puis vite build
 npm run preview    # build puis wrangler dev sur le bundle
 npm run loc        # taille du projet par poste

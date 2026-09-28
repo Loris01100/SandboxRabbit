@@ -128,6 +128,7 @@ npm run dev        # http://localhost:5173 — front + Worker dans workerd, avec
 npm run typecheck  # client et worker ont chacun leur tsconfig (DOM vs runtime Workers)
 npm run check      # auto-vérifications : simulation, panneau, API, protocole du bac (test/*.ts, Node exécute le TS tel quel)
 npm run bench      # coût du tick sur cinq tailles de grille ; échoue au-delà de 4 ms en 320×180
+npm run directions # que rapporteraient plusieurs cœurs ? (la carte graphique : test/gpu.html sous npm run dev)
 npm run loc        # taille du projet par poste
 npm run build      # typecheck puis vite build
 npm run preview    # build puis exécution du Worker en local
