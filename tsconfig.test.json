@@ -1,0 +1,16 @@
+{
+  // Les scripts de test/ (sauf api.ts, voir tsconfig.test-worker.json) : Node
+  // les exécute en retirant les types sans les vérifier — un champ disparu
+  // (`frame.pixels`) n'y était vu qu'à l'exécution, et jamais dans un script
+  // qui ne tourne pas en CI (test/gpu.ts). Types Node + DOM : les tests
+  // chargent src/client, et gpu.ts tourne dans un navigateur. `test` seul :
+  // les modules de src/client n'y entrent que par import, le reste est à
+  // tsconfig.json. Côté page, écrire `window.setTimeout` : avec les types
+  // Node, `setTimeout` rend un objet, pas un nombre.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"]
+  },
+  "include": ["test"],
+  "exclude": ["test/api.ts"]
+}

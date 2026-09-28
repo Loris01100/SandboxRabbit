@@ -4,7 +4,7 @@
 
 | Commande | Ce qu'elle vérifie |
 | --- | --- |
-| `npm run typecheck` | **deux** projets tsc : `tsconfig.json` (client, lib DOM) et `tsconfig.worker.json` (Worker, types générés, pas de DOM) |
+| `npm run typecheck` | **quatre** projets tsc : `tsconfig.json` (client, lib DOM), `tsconfig.worker.json` (Worker, types générés, pas de DOM), `tsconfig.test.json` (tout `test/` sauf api.ts : types Node + DOM) et `tsconfig.test-worker.json` (test/api.ts : types Node + Worker). Node exécute les tests **sans** vérifier leurs types : sans ces deux derniers, un champ disparu n'y était vu qu'à l'exécution, et jamais dans test/gpu.ts, qui ne tourne pas en CI |
 | `npm run check` | les cinq scripts d'`assert`, dans l'ordre : sim, ui, api, sandbox, pool |
 | `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |

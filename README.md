@@ -126,7 +126,7 @@ Rust sur Cloudflare passe par WebAssembly. Deux usages possibles :
 ```bash
 npm install        # Node ≥ 24 (exécution native du TypeScript)
 npm run dev        # http://localhost:5173 — front + Worker dans workerd, avec HMR, store en mémoire
-npm run typecheck  # client et worker ont chacun leur tsconfig (DOM vs runtime Workers)
+npm run typecheck  # client, worker et tests ont chacun leur tsconfig (DOM, runtime Workers, Node)
 npm run check      # auto-vérifications : simulation, panneau, API, protocole du bac, moteur multi-fils (test/*.ts, Node exécute le TS tel quel)
 npm run bench      # coût du tick sur cinq tailles de grille ; échoue au-delà de 4 ms en 320×180
 npm run directions # que rapporteraient plusieurs cœurs ? (la carte graphique : test/gpu.html sous npm run dev)

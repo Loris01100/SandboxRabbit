@@ -1,0 +1,11 @@
+{
+  // test/api.ts à part : il charge le code du Worker, dont les types
+  // (worker-configuration.d.ts) contredisent ceux du DOM. Types Node en plus,
+  // pour `node:assert` — ici seulement, pas dans tsconfig.worker.json, où ils
+  // laisseraient passer du code Node dans le Worker.
+  "extends": "./tsconfig.worker.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["test/api.ts", "src/worker", "worker-configuration.d.ts"]
+}

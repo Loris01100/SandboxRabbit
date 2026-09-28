@@ -20,10 +20,16 @@ const json = (body: unknown) => ({
 });
 const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
 
+/** Un monde tel que l'API le rend (lecture) ou le crée (`id` + `token`, une seule fois). */
+type Monde = { id: string; token: string; data: string; views: number; goal?: string | null };
+
+/** Le corps JSON d'une réponse, à la forme attendue : sous les types du Worker, `json()` rend `unknown`. */
+const body = async <T,>(res: Response | Promise<Response>): Promise<T> => (await (await res).json()) as T;
+
 {
   const res = await app.request("/api/health", {}, env);
   assert.equal(res.status, 200);
-  assert.equal((await res.json()).storage, "memory", "sans binding DB, store mémoire");
+  assert.equal((await body<{ storage: string }>(res)).storage, "memory", "sans binding DB, store mémoire");
 }
 
 // Corps invalide et monde trop lourd sont refusés avant d'atteindre le store.
@@ -42,12 +48,12 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
 {
   const created = await app.request("/api/worlds", json(monde), env);
   assert.equal(created.status, 201);
-  const { id, token } = await created.json();
+  const { id, token } = await body<Monde>(created);
   assert.ok(token, "la sauvegarde rend le jeton de suppression, une seule fois");
   const mien = { method: "DELETE", headers: { "x-world-token": token } };
 
-  const list = await (await app.request("/api/worlds", {}, env)).json();
-  const found = list.find((w: { id: string }) => w.id === id);
+  const list = await body<Monde[]>(app.request("/api/worlds", {}, env));
+  const found = list.find((w) => w.id === id)!;
   assert.ok(found, "le monde sauvegardé apparaît dans la liste");
   assert.equal(found.data, monde.data, "la liste porte la grille : la galerie n'a qu'une requête à faire");
 
@@ -55,10 +61,10 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   // températures, qui pèsent un cinquième d'un monde en feu.
   {
     const vivant = { ...monde, data: "AQE=.AQE=.AQE=.AQE=" };
-    const { id: chaud, token: sien } = await (await app.request("/api/worlds", json(vivant), env)).json();
-    const liste = await (await app.request("/api/worlds", {}, env)).json();
-    assert.equal(liste.find((w: { id: string }) => w.id === chaud).data, "AQE=", "la liste s'arrête au premier bloc");
-    const entier = await (await app.request(`/api/worlds/${chaud}`, {}, env)).json();
+    const { id: chaud, token: sien } = await body<Monde>(app.request("/api/worlds", json(vivant), env));
+    const liste = await body<Monde[]>(app.request("/api/worlds", {}, env));
+    assert.equal(liste.find((w) => w.id === chaud)!.data, "AQE=", "la liste s'arrête au premier bloc");
+    const entier = await body<Monde>(app.request(`/api/worlds/${chaud}`, {}, env));
     assert.equal(entier.data, vivant.data, "le monde entier, lui, garde son état vivant");
     await app.request(`/api/worlds/${chaud}`, { method: "DELETE", headers: { "x-world-token": sien } }, env);
   }
@@ -67,9 +73,9 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   assert.equal(found.views, 0, "un monde neuf n'a pas de vue");
   await app.request(`/api/worlds/${id}`, {}, env);
   await app.request(`/api/worlds/${id}`, {}, env);
-  const seen = await (await app.request("/api/worlds", {}, env)).json();
-  assert.equal(seen.find((w: { id: string }) => w.id === id).views, 2, "deux chargements, deux vues");
-  assert.equal(seen.find((w: { id: string }) => w.id === id).token, undefined, "le jeton ne ressort jamais de la lecture");
+  const seen = await body<Monde[]>(app.request("/api/worlds", {}, env));
+  assert.equal(seen.find((w) => w.id === id)!.views, 2, "deux chargements, deux vues");
+  assert.equal(seen.find((w) => w.id === id)!.token, undefined, "le jeton ne ressort jamais de la lecture");
   assert.equal((await app.request(`/api/worlds/${id}`, {}, env)).status, 200);
   assert.equal(((await (await app.request(`/api/worlds/${id}`, {}, env)).json()) as { token?: string }).token, undefined, "ni du monde entier");
 
@@ -79,16 +85,16 @@ const monde = { name: "test", width: 4, height: 4, data: "AQE=" };
   assert.ok(await (await app.request(`/api/worlds/${id}`, {}, env)).json(), "toujours là après deux tentatives");
 
   assert.equal((await app.request(`/api/worlds/${id}`, mien, env)).status, 204);
-  const after = await (await app.request("/api/worlds", {}, env)).json();
-  assert.equal(after.find((w: { id: string }) => w.id === id), undefined, "supprimé de la liste");
+  const after = await body<Monde[]>(app.request("/api/worlds", {}, env));
+  assert.equal(after.find((w) => w.id === id), undefined, "supprimé de la liste");
   assert.equal((await app.request(`/api/worlds/${id}`, {}, env)).status, 404);
 }
 
 // Un objectif mal formé est refusé ; bien formé, il revient avec le monde.
 {
   assert.equal((await app.request("/api/worlds", json({ ...monde, goal: "gagne !" }), env)).status, 400);
-  const { id, token } = await (await app.request("/api/worlds", json({ ...monde, name: "défi", goal: "ge:12:600" }), env)).json();
-  const world = await (await app.request(`/api/worlds/${id}`, {}, env)).json();
+  const { id, token } = await body<Monde>(app.request("/api/worlds", json({ ...monde, name: "défi", goal: "ge:12:600" }), env));
+  const world = await body<Monde>(app.request(`/api/worlds/${id}`, {}, env));
   assert.equal(world.goal, "ge:12:600", "l'objectif voyage avec le monde");
   await app.request(`/api/worlds/${id}`, { method: "DELETE", headers: { "x-world-token": token } }, env);
 }

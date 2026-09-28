@@ -20,7 +20,7 @@ README, commentaires du code, messages d'`assert` et UI sont **en français**.
 ```bash
 npm install
 npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, store en mémoire
-npm run typecheck  # DEUX projets tsc : tsconfig.json (client/DOM) + tsconfig.worker.json (Worker)
+npm run typecheck  # QUATRE projets tsc : client (DOM), Worker, tests (Node + DOM), test/api.ts (Node + Worker)
 npm run check      # asserts : test/sim.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts (Node exécute le TS)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
 npm run directions # mesure de décision : 1 cœur, N cœurs, projection (GPU : test/gpu.html sous npm run dev)
@@ -214,7 +214,7 @@ agents appliquent la règle d'eux-mêmes.
 
 ## Avant de rendre la main
 
-1. `npm run typecheck` (les deux projets).
+1. `npm run typecheck` (les quatre projets, tests compris).
 2. `npm run check`.
 3. `npm run bench` si le moteur ou le rendu a bougé.
 4. `npm run build` si des dépendances, index.html ou le CSS ont changé (budget

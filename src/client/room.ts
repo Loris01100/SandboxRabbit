@@ -161,7 +161,7 @@ roomButton.addEventListener("click", () => {
     }
     if (msg.type === "do" && host && msg.g) onApply(msg.g);
     if (msg.type === "sync" && host && !resync) {
-      resync = setTimeout(restart, Math.max(0, lastStart + RESYNC - Date.now()));
+      resync = window.setTimeout(restart, Math.max(0, lastStart + RESYNC - Date.now()));
     }
   });
   // Une connexion qui échoue déclenche « error » puis « close » : sans ce
