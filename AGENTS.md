@@ -21,7 +21,7 @@ README, commentaires du code, messages d'`assert` et UI sont **en français**.
 npm install
 npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, store en mémoire
 npm run typecheck  # DEUX projets tsc : tsconfig.json (client/DOM) + tsconfig.worker.json (Worker)
-npm run check      # asserts : test/sim.ts, test/ui.ts, test/api.ts, test/sandbox.ts (Node exécute le TS)
+npm run check      # asserts : test/sim.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts (Node exécute le TS)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
 npm run directions # mesure de décision : 1 cœur, N cœurs, projection (GPU : test/gpu.html sous npm run dev)
 npm run build      # typecheck puis vite build
@@ -61,8 +61,9 @@ src/client/
   ui.ts                  logique pure du panneau + read/write/forget (localStorage)
   room.ts share.ts theme.ts   salon, galerie/exports, jour-nuit (reçoivent leurs dépendances par init…())
   sim/
-    worker.ts            entrée du Web Worker, cadence ~60 Hz
+    worker.ts            entrée du Web Worker, cadence ~60 Hz ; se relance en fils auxiliaires
     sandbox.ts           Sandbox : moteur, rendu, annulation, défis, rejeu ; Order / News
+    pool.ts              fils auxiliaires du moteur (mémoire partagée, Atomics)   (pur)
     engine.ts            l'automate cellulaire (tableaux plats)
     materials.ts         MATERIALS, CATEGORIES, PALETTE, SHORTCUTS
     render.ts            cellules → ImageData, vue thermique, vignettes
@@ -106,7 +107,13 @@ aucun test précis.
 - `engine.temp` est réassigné à chaque tick : ne pas en garder de référence.
 - Ne pas toucher à l'ordre du balayage, à `clock`, ni à l'ordre bord → centre
   d'`explode()`.
-- Un nouvel explosif = un nouveau **déclencheur**.
+- Un nouvel explosif = un nouveau **déclencheur**. Une règle ne fait jamais
+  sauter directement : `blast()`, et la matière dans `EXPLOSIVE`.
+- Multi-fils : **une règle ne lit ni n'écrit à plus de 15 cellules** de sa
+  cellule (le damier ne protège pas au-delà) ; plus loin, on diffère comme
+  `blast()`. Jamais d'état partagé tiré ou modifié pendant le damier. Le
+  résultat ne doit pas dépendre du nombre de fils : test/pool.ts compare 1 et
+  4 fils au bit près.
 - Blocs de veille : une écriture directe dans les tableaux appelle
   `this.wake(i)` dans le moteur, `engine.wakeAll()` ailleurs ; une matière qui
   agit sans que rien ne bouge autour va dans `ACTIVE`. Sinon son bloc s'endort

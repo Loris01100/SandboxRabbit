@@ -40,7 +40,16 @@ flowchart LR
    retard pour de bon. La vue thermique ne regarde que la page : `order()`
    relève `heatmap` au passage et fait tout recolorier.
 2. **Le Web Worker de simulation** ([sim/worker.ts](../../src/client/sim/worker.ts))
-   héberge `Sandbox`, qui possède l'`Engine` et le `Renderer`. Il avance au
+   héberge `Sandbox`, qui possède l'`Engine` et le `Tracker`. Quand la page
+   est isolée (`crossOriginIsolated`, en-têtes COOP/COEP posés par app.ts et
+   par vite.config.ts), il lance aussi des **fils auxiliaires** — lui-même,
+   relancé par `import.meta.url` (le premier message dit le rôle : `start`
+   pour le bac, une mémoire de moteur pour un auxiliaire ; un fichier à part
+   embarquait une seconde copie du moteur), jusqu'à sept — que
+   [sim/pool.ts](../../src/client/sim/pool.ts) fait travailler sur la
+   mémoire partagée du moteur — voir « Plusieurs fils » dans
+   [simulation.md](simulation.md). Sans isolation, le moteur tourne seul, au
+   même résultat. Il avance au
    temps réellement écoulé (`setTimeout` à ~60 Hz, pas de `requestAnimationFrame`)
    et renvoie des **nouvelles**. L'échéance suivante est posée dans un
    `finally` : une exception du moteur ne coupe plus la boucle pour de bon.
@@ -70,13 +79,14 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | `goal` `{goal}` | Objectif d'un monde-défi (`ge:12:600`) |
 | `cursor` `{x,y}` | Position de la sonde |
 | `clip` `{ask,…}` | Découpe un rectangle, répond par `reply` |
+| `grid` `{ask}` | Répond par `reply` : la grille entière encodée à l'instant (`askGrid()` de world.ts) — ce que sauvegarde et lien doivent porter |
 | `rec` / `play` `{on}` | Enregistrement / rejeu. Le rejeu obéit à la pause ; à sa fin, le moteur reprend les réglages du panneau (`knobs`) |
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
 | `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,noise?}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y]` ou `null` (la caméra le suit) |
 | `stats` | 2 × / s | nombre de cellules pleines |
-| `grid` | 4 × / s | grille encodée complète (`full`) + version courte pour le salon (`room`) |
+| `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`, `latestGrid()`), pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askClip()` |
 | `say` | à la demande | message pour la barre de statut |
 | `won` | à la demande | le défi en cours est réussi (vérifié toutes les 500 ms dans le Worker) |

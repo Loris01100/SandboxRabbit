@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
 import { Renderer } from "../src/client/sim/render.ts";
+import { decode } from "../src/client/sim/codec.ts";
 import { count } from "../src/client/challenges.ts";
 import { EMPTY, FIRE, HERO, PILOT, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 
@@ -257,7 +258,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.equal(count(sim.engine, STONE), 0, "« keep » ne regraîne pas");
 }
 
-// Les réglages passent au moteur, la grille encodée revient quatre fois par seconde.
+// Les réglages passent au moteur ; la copie de secours de la grille part quand le bac change.
 {
   const { sim, news } = bac();
   sim.order({ t: "set", k: { wind: 0.5, ambient: -30, gravity: -1 } });
@@ -265,7 +266,17 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.equal(sim.engine.ambient, -30, "l'ambiante aussi");
   assert.equal(sim.engine.gravity, -1, "et la gravité");
   run(sim, 20);
-  assert.ok(last(news, "grid")!.full.length > 0, "la grille complète part pour la sauvegarde");
+  assert.ok(last(news, "grid")!.full.length > 0, "la copie de secours part quand le bac a changé");
+}
+
+/** Sauvegarde et lien demandent une grille fraîche : l'ordre `grid` rend celle de l'instant, décodable en la même matière. */
+{
+  const { sim, news } = bac();
+  sim.order({ t: "do", g: { t: "rect", x: 2, y: 2, x2: 9, y2: 4, id: WATER, over: true } });
+  sim.order({ t: "grid", ask: 42 });
+  const reply = last(news, "reply")!;
+  assert.equal(reply.ask, 42, "la réponse porte la question");
+  assert.deepEqual(decode(reply.value as string, W * H), sim.engine.cells, "la grille de l'instant, geste compris");
 }
 
 /**

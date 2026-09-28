@@ -46,6 +46,11 @@ ligne dans le moteur. Voir le ciment ou le verre fondu.
   `DENSITY`) plutôt que `MATERIALS[id].xxx`.
 - Relire le tableau des usages de `life` dans [simulation.md](simulation.md)
   avant d'y écrire.
+- **Portée ≤ 15 cellules** autour de la cellule traitée, en lecture comme en
+  écriture : au-delà, le damier multi-fils ne protège plus (voir « Plusieurs
+  fils » dans [simulation.md](simulation.md)). Une explosion passe par
+  `this.blast()`, pas `explode()`. test/pool.ts compare 1 et 4 fils : le
+  lancer, et y ajouter la nouvelle matière si sa scène ne la réveille pas.
 - Écrire directement dans `cells` / `life` / `temp` (hors `set`, `swap`,
   `convert`…) : `this.wake(i)` à côté, sinon le bloc voisin endormi ne le voit
   pas. Une règle qui agit sans changement autour : son id dans `ACTIVE`.

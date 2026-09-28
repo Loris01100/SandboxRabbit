@@ -5,7 +5,7 @@
 | Commande | Ce qu'elle vérifie |
 | --- | --- |
 | `npm run typecheck` | **deux** projets tsc : `tsconfig.json` (client, lib DOM) et `tsconfig.worker.json` (Worker, types générés, pas de DOM) |
-| `npm run check` | les quatre scripts d'`assert`, dans l'ordre : sim, ui, api, sandbox |
+| `npm run check` | les cinq scripts d'`assert`, dans l'ordre : sim, ui, api, sandbox, pool |
 | `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
@@ -20,6 +20,7 @@ TypeScript directement.
 | [test/ui.ts](../../test/ui.ts) | logique pure du panneau | `ui.ts` |
 | [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, routage des messages du salon | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
 | [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles | `Sandbox` avec un rappel `send` qui empile |
+| [test/pool.ts](../../test/pool.ts) | le moteur sur plusieurs fils : 400 ticks d'une partie chargée (monde généré, feu, explosifs, uranium, héros piloté) sur 1 fil et sur 4, **identiques au bit près** ; rebranchement sur un autre moteur | `Engine`, `Pool`, fils `worker_threads` ([test/helper.ts](../../test/helper.ts)) |
 
 ## Choisir une direction
 

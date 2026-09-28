@@ -6,7 +6,7 @@
  * deux gestes dont il a besoin (charger une grille, lancer un défi) plutôt que
  * d'importer main.ts, ce qui bouclerait.
  */
-import { HEIGHT, WIDTH, canvas, latestGrid } from "./world.ts";
+import { HEIGHT, WIDTH, askGrid, canvas } from "./world.ts";
 import { thumbnail } from "./sim/render.ts";
 import { decode } from "./sim/codec.ts";
 import { EMPTY, MATERIALS, PALETTE } from "./sim/materials.ts";
@@ -194,7 +194,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
   // en 640×360 passait le plafond, et la sauvegarde échouait sans dire
   // pourquoi. On garde alors la matière et le figé — les deux premiers blocs du
   // codec, ce que reçoit déjà un invité de salon.
-  let data = latestGrid();
+  let data = await askGrid();
   const alive = data.length <= HEAVY;
   if (!alive) data = data.split(".").slice(0, 2).join(".");
   if (data.length > HEAVY) {
@@ -226,7 +226,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
 // bac 320 se décale d'une ligne à chaque rangée. Le `~` n'est pas échappé par
 // `encodeURIComponent`, et le codec n'en produit jamais.
 document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", async () => {
-  location.hash = encodeURIComponent(`${WIDTH}~${latestGrid()}`);
+  location.hash = encodeURIComponent(`${WIDTH}~${await askGrid()}`);
   try {
     await navigator.clipboard.writeText(location.href);
     statusEl.textContent = "Lien copié.";

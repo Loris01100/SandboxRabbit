@@ -937,8 +937,8 @@ function loadWorld(world: string): void {
 // déclenchent vraiment quand l'onglet part en arrière-plan.
 addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "hidden") return;
-  // La grille du bac, telle qu'il l'a envoyée il y a moins d'un quart de
-  // seconde : rien à demander, personne ne répondrait — la page s'en va.
+  // La copie de secours du bac (quelques secondes de retard au pire, en grande
+  // grille) : rien à demander, personne ne répondrait — la page s'en va.
   const grid = latestGrid();
   // Sa largeur avec, comme dans un lien : sans elle, un défi (320) rangé
   // depuis un bac réglé en 480 revenait cisaillé à la visite suivante.

@@ -621,12 +621,12 @@ function count(e: Engine, id: MaterialId): number {
   for (let x = 26; x < 34; x++) for (let y = 22; y < 30; y++) e.set(x, y, URANIUM);
   const stone = count(e, STONE);
   let hot = 0;
-  for (let t = 0; t < 200 && count(e, URANIUM) > 0; t++) {
+  for (let t = 0; t < 200 && count(e, URANIUM) > 8; t++) {
     e.step();
     hot = Math.max(hot, e.temp[e.index(30, 26)]);
   }
   assert.ok(hot > 300, `le tas chauffe avant de sauter (${hot | 0} °C)`);
-  assert.equal(count(e, URANIUM), 0, "le tas a sauté");
+  assert.ok(count(e, URANIUM) <= 8, `le tas a sauté (${count(e, URANIUM)} grains projetés restent, isolés : ils ne s'emballent plus)`);
   assert.ok(count(e, STONE) < stone - 50, `le souffle creuse (${stone - count(e, STONE)})`);
   assert.ok(count(e, FALLOUT) > 20, `il reste des retombées (${count(e, FALLOUT)})`);
 }
@@ -1130,7 +1130,7 @@ function top(e: Engine, id: MaterialId): number {
   };
 
   const empreinte = fingerprint(run(1234));
-  assert.equal(empreinte, "624b539a", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
+  assert.equal(empreinte, "94ca9ece", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
   assert.equal(fingerprint(run(1234)), empreinte, "et rejouable : deux fois la même graine, la même grille");
   assert.notEqual(fingerprint(run(9876)), empreinte, "une autre graine donne une autre partie");
 }
@@ -1206,9 +1206,9 @@ function top(e: Engine, id: MaterialId): number {
 }
 
 /**
- * Blocs de veille : un bloc où rien ne bouge n'est plus balayé. Endormi, le
- * sable posé ne tire plus au sort — `seed` qui ne bouge plus en est la preuve
- * visible. Tout ce qui écrit ou change la scène doit le réveiller, et un rejeu
+ * Blocs de veille : un bloc où rien ne bouge n'est plus balayé — `busy`, le
+ * nombre de blocs éveillés, tombe à zéro au repos. Tout ce qui écrit ou
+ * change la scène doit le réveiller, et un rejeu
  * lancé sur un bac à moitié endormi doit retomber sur la même grille : quels
  * blocs dorment dépend de toute la partie, que le lecteur ne connaît pas.
  */
@@ -1224,9 +1224,10 @@ function top(e: Engine, id: MaterialId): number {
   };
 
   const repos = tas();
-  const avant = repos.seed;
+  const avant = repos.cells.slice();
   for (let t = 0; t < 10; t++) repos.step();
-  assert.equal(repos.seed, avant, "au repos, plus aucun tirage : tous les blocs dorment");
+  assert.equal(repos.busy, 0, "au repos, tous les blocs dorment");
+  assert.deepEqual(repos.cells, avant, "et rien n'a bougé");
 
   const trou = tas();
   const sable = count(trou, SAND);

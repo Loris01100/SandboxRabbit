@@ -33,21 +33,64 @@ tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
 ## Un tick (`step()`)
 
 1. `parity ^= 1`, puis `rouse()` : les blocs de `stir` et leurs huit voisins
-   forment `awake` ; un bloc qui vient de se réveiller remet `clock` à
-   `parity ^ 1`.
-2. Balayage **dans le sens de la gravité** (du bas si `gravity` = 1), le sens
-   en x alternant avec `parity`, en sautant la portion de rangée d'un bloc
-   endormi. Pour chaque cellule non vide, non figée, dont
-   `clock` ≠ `parity` : `clock = parity`, puis `update()`.
+   forment `awake` (`busy` en compte le nombre) ; un bloc qui vient de se
+   réveiller remet `clock` à `parity ^ 1`.
+2. **Le damier** : la grille est découpée en blocs de 32×32 (`PART`), traités
+   en quatre phases — (x pair, y pair), (impair, pair), (pair, impair),
+   (impair, impair). Chaque bloc (`block()`) est balayé **dans le sens de la
+   gravité**, le sens en x alternant avec `parity`, en sautant la portion de
+   rangée d'un bloc de veille endormi. Pour chaque cellule non vide, non
+   figée, dont `clock` ≠ `parity` : `clock = parity`, puis `update()`.
 3. `update()` : d'abord un `switch` sur les ids à règle propre (feu, lave,
    acide, TNT, étincelle…), sinon mouvement générique selon `kind`
    (`powder` / `liquid` / `gas`, `static` ne bouge pas).
-4. `thermal()` : les sources (`heat`) tirent leur cellule vers leur
-   température, puis diffusion (`CONDUCTION`), retour vers `ambient`
-   (`COOLING`), et changements d'état `boil` / `freeze`, sur les seuls blocs
-   éveillés ou écrits pendant ce tick. Les deux tampons s'échangent.
+4. `settle()` : les explosions mises de côté pendant le damier (`blast()`),
+   jouées une à une dans l'ordre du balayage. Une charge déjà emportée par
+   une voisine ne saute plus (`EXPLOSIVE`).
+5. `thermal()`, en trois passes par bloc de veille éveillé ou écrit : les
+   sources (`heat`) tirent leur cellule vers leur température
+   (`heatChunk`), puis diffusion (`CONDUCTION`), retour vers `ambient`
+   (`COOLING`) et changements d'état `boil` / `freeze` (`diffuseChunk`),
+   puis recopie des blocs refroidis (`settleChunk`). Les tampons s'échangent.
 
-Toucher à l'ordre du balayage ou à `clock` introduit des dérives visibles.
+Chaque passe (une phase du damier, une passe de chaleur) est une liste de
+travaux (`jobs`) que `run()` fait seul ou répartit entre les fils du `pool` —
+voir [Plusieurs fils](#plusieurs-fils). Toucher à l'ordre du balayage ou à
+`clock` introduit des dérives visibles.
+
+## Plusieurs fils
+
+Le moteur peut se faire aider par des fils auxiliaires
+([pool.ts](../../src/client/sim/pool.ts)) qui partagent sa mémoire
+(`engine.memory`, des `SharedArrayBuffer` quand la page est isolée par
+COOP/COEP) et exécutent une part de chaque passe (`engine.job()`). Sur la
+scène 1080p chargée : 25,7 ms par tick sur un fil, 7,6 ms sur quatre, 5,6 ms
+sur huit.
+
+**Invariant central : le résultat ne dépend pas du nombre de fils.** Un hôte
+à huit cœurs et un invité à deux restent en phase ; un navigateur sans
+mémoire partagée simule seul, à l'identique ; test/pool.ts compare 1 et 4 fils
+au bit près. Ce qui le garantit — et ce qu'une nouvelle règle doit respecter :
+
+- **Portée ≤ 15 cellules.** Deux blocs d'une même phase sont séparés d'un
+  bloc entier (32 cellules) : une règle qui lit ou écrit à plus de 15
+  cellules de sa cellule peut croiser celle d'un autre fil. Les plus longues
+  aujourd'hui : regard du lapin (8), accouplement (6), aimant (6), lapin qui
+  bouge ou naît (≤ 6). Au-delà — les explosions, qui projettent à `r × 2,5` —
+  passer par `blast()` : la demande est mise de côté et jouée par `settle()`.
+- **Tirage par bloc.** `block()` repart de `mix(graine du tick, bloc)` ;
+  `settle()` d'une graine à lui ; l'état global avance d'un cran par tick
+  (`xorshift`), quoi que les blocs aient tiré. Jamais d'état partagé tiré
+  pendant le damier.
+- **Écritures partagées idempotentes** : `stir` (des 1), `awake[c]` du seul
+  bloc de veille traité, `hero` et le compteur d'explosions par `Atomics`.
+- **Réglages publiés** : un fil auxiliaire relit gravité, vent, ambiante,
+  matière des sources, commandes du héros, parité, graine et tampon de
+  température courant dans `params` (`sync()`) avant chaque travail.
+
+Le pool s'attache quand ses fils sont prêts (`bind()`), et se rattache à
+chaque nouveau moteur (changement de taille) ; en attendant, le moteur fait
+tout seul. Une passe de moins de quatre travaux ne réveille personne.
 
 ## Blocs de veille
 
@@ -90,15 +133,16 @@ Invariants :
   rejeu ou de salon passe par `put()` → `adopt()` → `wakeAll()`, chez l'hôte
   comme chez l'invité. Un départ qui ne passerait pas par là ferait diverger
   les tirages.
-- Un bloc endormi ne tire plus au sort : un bac au repos garde le même
-  `seed`. C'est ce que vérifie test/sim.ts.
+- Un bac au repos a `busy` = 0 : plus un bloc balayé. C'est ce que vérifie
+  test/sim.ts (le tirage, lui, avance d'un cran par tick quoi qu'il arrive).
 
 ## Invariants
 
 ### Reproductibilité
 
-- **Tout tirage passe par `engine.rand()`** (xorshift32 semé au constructeur),
-  jamais `Math.random()`. Un `Math.random()` dans une règle casse le rejeu et
+- **Tout tirage passe par `engine.rand()`** (xorshift32 : semé au
+  constructeur entre les ticks, par bloc pendant le damier — voir
+  [Plusieurs fils](#plusieurs-fils)), jamais `Math.random()`. Un `Math.random()` dans une règle casse le rejeu et
   la comparaison avec un futur moteur WASM. L'empreinte de test/sim.ts ne
   l'attrape que si sa scène réveille la règle fautive ; sinon **aucun test ne
   le voit**. Même règle hors du moteur pour ce qui fait partie de la partie
@@ -227,6 +271,11 @@ explosif = ajouter un déclencheur, sinon c'est du TNT repeint.
 | `URANIUM` | masse (≥ `CRITICAL` voisins identiques), sans rien d'extérieur |
 | `THERMITE` | l'anti-explosif : perce au lieu de souffler |
 
+- Une règle ne fait jamais sauter directement : elle **demande** l'explosion
+  (`blast(x, y, r)`, `blast(…, NUKE, true)` pour le nucléaire), jouée à la fin
+  du damier par `settle()`. Un souffle porte bien au-delà des 15 cellules que
+  le damier garantit (voir [Plusieurs fils](#plusieurs-fils)). Un nouvel
+  explosif ajoute sa matière à `EXPLOSIVE`, sinon sa demande est ignorée.
 - `explode()` **projette** (`hurl()`) au lieu d'effacer, et traite le disque
   **du bord vers le centre** (sinon les cellules partent vers des places pas
   encore libérées). `hurl()` ne dépose que sur du vide : la matière est

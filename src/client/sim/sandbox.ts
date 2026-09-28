@@ -12,6 +12,7 @@
  */
 import { Engine } from "./engine.ts";
 import { Tracker, type Patch } from "./render.ts";
+import type { Pool } from "./pool.ts";
 import { encode } from "./codec.ts";
 import { HERO, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, weather, type Gesture } from "../gestures.ts";
@@ -50,6 +51,7 @@ export type Order =
   | { t: "goal"; goal: string | null }
   | { t: "cursor"; x: number; y: number }
   | { t: "clip"; ask: number; x: number; y: number; x2: number; y2: number }
+  | { t: "grid"; ask: number }
   | { t: "rec"; on: boolean }
   | { t: "play"; on: boolean }
   | { t: "host"; on: boolean }
@@ -81,13 +83,15 @@ type Snapshot = { cells: Uint8Array; life: Uint8Array; temp: Float32Array; froze
 
 const STATS = 500;
 /**
- * Période de la grille encodée (`grid`), en ms.
- * ponytail: fixe quelle que soit la taille — l'encodage coûte 13 ms en
- * 1920×1080, qui s'ajoutent au tick quatre fois par seconde. L'espacer selon
- * la taille, ou n'encoder qu'à la demande (sauvegarde, lien, onglet masqué),
- * le jour où un gros incendie en grande grille saccade.
+ * Période de la copie de secours (`grid`), en ms, pour 640×360 ou moins ;
+ * elle s'allonge avec la taille (`GRID_CELLS`) : l'encodage coûte 13 ms en
+ * 1920×1080, ce qui saccadait un gros incendie quatre fois par seconde. Et
+ * elle n'est refaite que si le bac a changé. Sauvegarde et lien, eux,
+ * demandent une grille fraîche (ordre `grid`) ; seule la mise de côté d'un
+ * onglet masqué s'en sert, faute de pouvoir attendre une réponse.
  */
 const GRID = 250;
+const GRID_CELLS = 640 * 360;
 const TURN = 50;
 const SUM = 60;
 const CATCH_UP = 32;
@@ -105,6 +109,7 @@ export class Sandbox {
   engine: Engine;
   /** Les blocs changés depuis la frame d'avant, découpés pour la page qui les colorie. */
   tracker: Tracker;
+  private readonly pool: Pool | null;
   knobs: Knobs = {
     wind: 0, ambient: 20, gravity: 1, emit: WATER,
     weather: false, speed: 1, running: true, heatmap: false,
@@ -123,6 +128,8 @@ export class Sandbox {
   private pending = 0;
   private sinceStats = 0;
   private sinceGrid = 0;
+  /** Le bac a changé depuis la dernière copie de secours (`grid`) : un ordre, ou un tick où quelque chose était éveillé. */
+  private touched = true;
   /**
    * Hôte d'un salon : la partie diffusée aux invités. C'est un enregistrement
    * comme un autre, vidé à chaque envoi — chaque invité simule de son côté en
@@ -136,14 +143,23 @@ export class Sandbox {
   private checks = new Map<number, number>();
   private lost = false;
 
-  constructor(width: number, height: number, send: (news: News) => void) {
+  /**
+   * `pool` : les fils auxiliaires du moteur, s'il y en a (sim/worker.ts). Il
+   * est rattaché à chaque nouveau moteur — bac neuf, autre taille — et s'y
+   * attache quand ses fils sont prêts ; en attendant, le moteur tourne seul,
+   * au même résultat.
+   */
+  constructor(width: number, height: number, send: (news: News) => void, pool: Pool | null = null) {
     this.engine = new Engine(width, height);
     this.tracker = new Tracker(this.engine);
     this.send = send;
+    this.pool = pool;
+    void this.pool?.bind(this.engine);
     seed(this.engine);
   }
 
   order(o: Order): void {
+    if (o.t !== "cursor" && o.t !== "clip" && o.t !== "grid") this.touched = true;
     if (this.follower && (o.t === "do" || o.t === "edit" || o.t === "scene" || o.t === "terrain" || o.t === "load"
       || o.t === "goal" || o.t === "rec" || o.t === "play")) {
       if (o.t !== "do" && !(o.t === "edit" && o.do === "snapshot")) this.send({ t: "say", text: FOLLOW });
@@ -198,9 +214,18 @@ export class Sandbox {
         });
         return;
       }
+      case "grid":
+        this.send({ t: "reply", ask: o.ask, value: this.encoded() });
+        return;
       case "rec": return this.record(o.on);
       case "play": return this.play(o.on);
     }
+  }
+
+  /** La grille entière encodée, état vivant compris : ce que sauvegarde un monde ou porte un lien. */
+  private encoded(): string {
+    const { cells, frozen, life, temp } = this.engine;
+    return encode(cells, frozen, life, temp);
   }
 
   /**
@@ -254,11 +279,12 @@ export class Sandbox {
       if (this.won?.(this.engine)) { this.won = null; this.send({ t: "won" }); }
     }
 
+    if (this.engine.busy > 0) this.touched = true;
     this.sinceGrid += ms;
-    if (this.sinceGrid >= GRID) {
+    if (this.touched && this.sinceGrid >= GRID * Math.max(1, this.engine.cells.length / GRID_CELLS)) {
       this.sinceGrid = 0;
-      const { cells, frozen, life, temp } = this.engine;
-      this.send({ t: "grid", full: encode(cells, frozen, life, temp) });
+      this.touched = false;
+      this.send({ t: "grid", full: this.encoded() });
     }
 
     this.sinceTurn += ms;
@@ -488,6 +514,7 @@ export class Sandbox {
     this.engine = new Engine(width, height);
     Object.assign(this.engine, { wind, ambient, gravity, emit });
     this.tracker = new Tracker(this.engine);
+    void this.pool?.bind(this.engine);
     // Les crans n'ont plus la bonne longueur, et l'enregistrement en cours ne
     // décrit plus rien de rejouable.
     this.undoStack.length = 0;

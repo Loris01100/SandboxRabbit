@@ -218,6 +218,66 @@ for (const key of Object.keys(MATERIALS)) {
 for (const id of [ACID, THERMITE, URANIUM, SALT, NANITE, SOURCE, BATTERY, EMBER, SPARK, MAGNET]) ACTIVE[id] = 1;
 
 /**
+ * Côté d'un bloc du damier, en cellules : deux blocs de veille. Un tick traite
+ * les blocs en quatre phases — (x pair, y pair), (impair, pair), (pair,
+ * impair), (impair, impair) — et deux blocs d'une même phase sont séparés
+ * d'au moins un bloc entier. Une règle qui lit et écrit à moins de
+ * `PART / 2` cellules de la sienne ne peut donc jamais croiser celle d'un
+ * autre bloc de sa phase : c'est ce qui permet de les confier à des fils
+ * différents. Les plus longues portées (regard du lapin, 8 ; aimant, 6) y
+ * tiennent ; les explosions, non — elles sont différées (`blast`).
+ */
+const PART_SHIFT = 5;
+const PART = 1 << PART_SHIFT;
+
+/** 1 = matière qui peut demander une explosion (`blast`) : si elle n'est plus là au moment de la jouer, l'explosion n'a plus lieu. */
+const EXPLOSIVE = new Uint8Array(256);
+for (const id of [TNT, NITRO, C4, MINE, URANIUM]) EXPLOSIVE[id] = 1;
+
+/** Les travaux que `run()` répartit entre les fils, exécutés par `job()`. */
+export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, stop: 9 } as const;
+/** Cases de `control` (Int32 partagé) : génération, travail, prochain, finis, nombre, différés, héros. */
+export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6 } as const;
+/** Cases de `params` (Float64 partagé) : ce qu'un fil auxiliaire recopie avant chaque travail (`sync`). */
+const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pilot: 6, flip: 7 } as const;
+
+/**
+ * La mémoire d'un bac, partageable entre fils : tout ce qu'un travail lit ou
+ * écrit. `SharedArrayBuffer` quand la page est isolée (en-têtes COOP/COEP),
+ * `ArrayBuffer` sinon — le moteur tourne alors sur un seul fil, **au même
+ * résultat** : le partage ne change que la vitesse.
+ */
+export interface Memory {
+  width: number;
+  height: number;
+  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "jobs" | "control" | "params", ArrayBufferLike>;
+}
+
+/** Le constructeur de tampon à employer : partagé si la plateforme le permet (Node, page isolée). */
+const Shareable: new (bytes: number) => ArrayBufferLike =
+  typeof SharedArrayBuffer !== "undefined" && (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated !== false
+    ? SharedArrayBuffer
+    : ArrayBuffer;
+
+/** Mélange 32 bits (finale de murmur3) : une graine par bloc et par tick, tirée de celle du tick, sans suite partagée. */
+function mix(h: number): number {
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) || 1;
+}
+
+/** Un pas de xorshift32 : l'état global du tirage avance d'un cran par tick, quoi que les blocs aient tiré. */
+function xorshift(s: number): number {
+  s ^= s << 13; s >>>= 0;
+  s ^= s >>> 17;
+  s ^= s << 5;
+  return (s >>> 0) || 1;
+}
+
+/**
  * Offsets d'un disque de rayon `radius`, du bord vers le centre — l'ordre dans
  * lequel le souffle doit traiter ses cellules. Mis en cache : les explosions
  * n'utilisent qu'une poignée de rayons.
@@ -279,6 +339,31 @@ export class Engine {
   /** Réassigné à chaque tick : les deux tampons de diffusion s'échangent. */
   temp: Float32Array;
   private tempNext: Float32Array;
+  private readonly tempA: Float32Array;
+  private readonly tempB: Float32Array;
+  /** Tout ce que les fils partagent (voir `Memory`) : à passer à `Pool.bind()`. */
+  readonly memory: Memory;
+  /** Coordination des fils (`CTL`), lue et écrite par `Atomics`. */
+  readonly control: Int32Array;
+  /** Réglages du tick recopiés par les fils auxiliaires (`PARAM`). */
+  private readonly params: Float64Array;
+  /** Liste des travaux de la passe en cours : blocs du damier, ou blocs de veille pour la chaleur. */
+  readonly jobs: Int32Array;
+  /** Explosions différées du tick : (cellule, rayon | 256 si nucléaire), jouées par `settle()`. */
+  private readonly later: Int32Array;
+  /**
+   * Les fils auxiliaires, quand il y en a : posé par `Pool.bind()` une fois
+   * qu'ils sont prêts. Sans lui, `run()` fait tout le travail ici, au même
+   * résultat.
+   */
+  pool: { run(engine: Engine, kind: number, count: number): void } | null = null;
+  /** Blocs de veille éveillés au dernier tick : 0 = bac au repos. */
+  busy = 0;
+  /** Graine du tick en cours, d'où chaque bloc tire la sienne (`block()`). */
+  private tickSeed = 1;
+  /** Blocs du damier par rangée et par colonne (voir `PART`). */
+  private readonly parts: number;
+  private readonly partRows: number;
   /** Publique pour le rejeu : sans elle, une partie ne repart pas au même tick. */
   readonly clock: Uint8Array;
   /** 1 = cellule figée : elle ne bouge plus et rien ne peut la pousser. */
@@ -316,29 +401,62 @@ export class Engine {
   private moving = 0;
   /** Commandes tenues par le joueur (bits de `PILOT`) : tous les héros du bac y obéissent. */
   pilot = 0;
-  /** Index du cœur du dernier héros mis à jour, -1 s'il n'y en a jamais eu : la caméra le suit. À vérifier (`cells[hero] === HERO`), il a pu mourir depuis. */
-  hero = -1;
 
-  constructor(width: number, height: number, seed = (Math.random() * 0x1_0000_0000) >>> 0) {
+  /**
+   * Un bac neuf, ou — avec `memory` — une **vue** sur la mémoire d'un autre :
+   * celle d'un fil auxiliaire (pool.ts), qui ne fait que les travaux qu'on lui
+   * confie (`job()`), réglages recopiés de `params` (`sync()`).
+   */
+  constructor(width: number, height: number, seed = (Math.random() * 0x1_0000_0000) >>> 0, memory?: Memory) {
     // Un xorshift32 meurt sur 0 : toute graine nulle devient 1.
     this.state = seed >>> 0 || 1;
     this.width = width;
     this.height = height;
     const n = width * height;
-    this.cells = new Uint8Array(n);
-    this.life = new Uint8Array(n);
-    this.temp = new Float32Array(n).fill(this.ambient);
-    this.tempNext = new Float32Array(n);
-    this.clock = new Uint8Array(n);
-    this.frozen = new Uint8Array(n);
-    this.noise = new Int8Array(n);
-    for (let i = 0; i < n; i++) this.noise[i] = ((this.rand() * 255) | 0) - 128;
     this.cols = Math.ceil(width / CHUNK);
     this.rows = Math.ceil(height / CHUNK);
-    this.awake = new Uint8Array(this.cols * this.rows);
-    this.was = new Uint8Array(this.cols * this.rows);
-    this.shown = new Uint8Array(this.cols * this.rows);
-    this.stir = new Uint8Array(this.cols * this.rows).fill(1);
+    this.parts = Math.ceil(width / PART);
+    this.partRows = Math.ceil(height / PART);
+    const chunks = this.cols * this.rows;
+    const b = memory?.buffers ?? {
+      cells: new Shareable(n), life: new Shareable(n), tempA: new Shareable(n * 4), tempB: new Shareable(n * 4),
+      clock: new Shareable(n), frozen: new Shareable(n), noise: new Shareable(n),
+      awake: new Shareable(chunks), stir: new Shareable(chunks),
+      later: new Shareable(Math.max(64, n >> 2) * 8), jobs: new Shareable(chunks * 4),
+      control: new Shareable(8 * 4), params: new Shareable(8 * 8),
+    };
+    this.memory = { width, height, buffers: b };
+    this.cells = new Uint8Array(b.cells);
+    this.life = new Uint8Array(b.life);
+    this.tempA = new Float32Array(b.tempA);
+    this.tempB = new Float32Array(b.tempB);
+    this.temp = this.tempA;
+    this.tempNext = this.tempB;
+    this.clock = new Uint8Array(b.clock);
+    this.frozen = new Uint8Array(b.frozen);
+    this.noise = new Int8Array(b.noise);
+    this.awake = new Uint8Array(b.awake);
+    this.stir = new Uint8Array(b.stir);
+    this.later = new Int32Array(b.later);
+    this.jobs = new Int32Array(b.jobs);
+    this.control = new Int32Array(b.control);
+    this.params = new Float64Array(b.params);
+    this.was = new Uint8Array(chunks);
+    this.shown = new Uint8Array(chunks);
+    if (memory) return;
+    this.temp.fill(this.ambient);
+    for (let i = 0; i < n; i++) this.noise[i] = ((this.rand() * 255) | 0) - 128;
+    this.stir.fill(1);
+    this.hero = -1;
+  }
+
+  /** Index du cœur du dernier héros posé ou mis à jour, -1 s'il n'y en a jamais eu : la caméra le suit. À vérifier (`cells[hero] === HERO`), il a pu mourir depuis. Partagé : un fil auxiliaire peut l'écrire. */
+  get hero(): number {
+    return Atomics.load(this.control, CTL.hero);
+  }
+
+  set hero(at: number) {
+    Atomics.store(this.control, CTL.hero, at);
   }
 
   /** Sens de la gravité : 1 vers le bas, -1 vers le haut. La retourner réveille tout le bac. */
@@ -422,7 +540,9 @@ export class Engine {
     }
     stir.fill(0);
     const before = this.parity ^ 1;
+    this.busy = 0;
     for (let c = 0; c < awake.length; c++) {
+      if (awake[c]) this.busy++;
       if (!awake[c] || was[c]) continue;
       const x0 = (c % cols) << SHIFT, y0 = ((c / cols) | 0) << SHIFT;
       const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
@@ -714,8 +834,118 @@ export class Engine {
   }
 
   /**
-   * Un tick. Le balayage garde son ordre — sens de la gravité, x alterné —
-   * mais saute la portion de rangée d'un bloc endormi (`rouse()`).
+   * Un tick, en passes que `run()` peut répartir entre plusieurs fils :
+   *
+   * 1. `rouse()` : quels blocs de veille sont éveillés ;
+   * 2. le damier : quatre phases de blocs `PART`×`PART` (`block()`), deux
+   *    blocs d'une même phase ne se touchant jamais ;
+   * 3. `settle()` : les explosions mises de côté, une à une, dans l'ordre des
+   *    cellules — elles portent trop loin pour le damier ;
+   * 4. la chaleur, en trois passes par bloc de veille (`thermal()`).
+   *
+   * **Le résultat ne dépend pas du nombre de fils** : chaque bloc a un seul
+   * fil, tire au sort depuis sa propre graine (`mix(graine du tick, bloc)`),
+   * et ne touche aucun bloc de sa phase. Un hôte à huit cœurs et un invité à
+   * deux restent en phase ; un navigateur sans mémoire partagée fait tout ici,
+   * à l'identique. L'état global du tirage avance d'un cran par tick
+   * (`xorshift`), quoi que les blocs aient tiré.
+   */
+  step(): void {
+    this.parity ^= 1;
+    this.rouse();
+    const tick = this.state;
+    this.tickSeed = mix(tick);
+    Atomics.store(this.control, CTL.later, 0);
+    this.publish();
+    for (let p = 0; p < 4; p++) {
+      const count = this.phase(p & 1, p >> 1);
+      if (count > 0) this.run(JOB.cells, count);
+    }
+    this.state = mix(tick ^ 0x5bd1e995);
+    this.settle();
+    this.state = xorshift(tick);
+    this.thermal();
+    const { awake, shown } = this;
+    for (let c = 0; c < awake.length; c++) if (awake[c]) shown[c] = 1;
+  }
+
+  /**
+   * Recopie dans `params` ce que les fils auxiliaires doivent connaître du
+   * tick : parité, graine, gravité, vent, ambiante, matière des sources,
+   * commandes du héros, et lequel des deux tampons de température est courant.
+   */
+  private publish(): void {
+    const p = this.params;
+    p[PARAM.parity] = this.parity;
+    p[PARAM.seed] = this.tickSeed;
+    p[PARAM.gravity] = this.fall;
+    p[PARAM.wind] = this.wind;
+    p[PARAM.ambient] = this.air;
+    p[PARAM.emit] = this.emit;
+    p[PARAM.pilot] = this.pilot;
+    p[PARAM.flip] = this.temp === this.tempA ? 0 : 1;
+  }
+
+  /**
+   * Fil auxiliaire : reprend les réglages publiés (`publish`) avant un
+   * travail. Sans passer par les accesseurs — changer la gravité ici
+   * réveillerait tout le bac, et ce n'est pas à lui de le faire.
+   */
+  sync(): void {
+    const p = this.params;
+    this.parity = p[PARAM.parity];
+    this.tickSeed = p[PARAM.seed];
+    this.fall = p[PARAM.gravity] as 1 | -1;
+    this.wind = p[PARAM.wind];
+    this.air = p[PARAM.ambient];
+    this.emit = p[PARAM.emit];
+    this.pilot = p[PARAM.pilot];
+    const flip = p[PARAM.flip] === 1;
+    this.temp = flip ? this.tempB : this.tempA;
+    this.tempNext = flip ? this.tempA : this.tempB;
+  }
+
+  /**
+   * Fait les `count` premiers travaux de `jobs` : ici, ou répartis entre les
+   * fils du `pool` s'il y en a — et s'il y a de quoi : une passe de moins de
+   * quatre travaux ne vaut pas de réveiller qui que ce soit.
+   */
+  private run(kind: number, count: number): void {
+    if (this.pool && count >= 4) { this.pool.run(this, kind, count); return; }
+    for (let k = 0; k < count; k++) this.job(kind, this.jobs[k]);
+  }
+
+  /** Un travail : un bloc du damier, ou un bloc de veille pour l'une des trois passes de la chaleur. Appelé par `run()` et par les fils du pool. */
+  job(kind: number, item: number): void {
+    switch (kind) {
+      case JOB.cells: this.block(item); return;
+      case JOB.heat: this.heatChunk(item); return;
+      case JOB.diffuse: this.diffuseChunk(item); return;
+      case JOB.settle: this.settleChunk(item); return;
+    }
+  }
+
+  /** Range dans `jobs` les blocs de la phase (px, py) qui ont au moins un bloc de veille éveillé ; en rend le nombre. */
+  private phase(px: number, py: number): number {
+    const { parts, partRows, cols, rows, awake, jobs } = this;
+    let count = 0;
+    for (let by = py; by < partRows; by += 2) {
+      for (let bx = px; bx < parts; bx += 2) {
+        const cx = bx << 1, cy = by << 1;
+        const right = cx + 1 < cols, below = cy + 1 < rows;
+        if (awake[cy * cols + cx] || (right && awake[cy * cols + cx + 1])
+          || (below && awake[(cy + 1) * cols + cx]) || (right && below && awake[(cy + 1) * cols + cx + 1])) {
+          jobs[count++] = by * parts + bx;
+        }
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Balaie le bloc `b` du damier : dans le sens de la gravité, le sens en x
+   * alternant d'un tick à l'autre, en sautant la portion de rangée d'un bloc
+   * de veille endormi. Le tirage repart de la graine du bloc.
    *
    * Une cellule qui passe son tour à cause de `clock` tient son bloc éveillé
    * au tick suivant. Un bloc qui a dormi n'a plus touché à ses horloges, et
@@ -723,21 +953,21 @@ export class Engine {
    * peint dans le vide), la moitié du temps tout le bloc passait son tour,
    * n'écrivait rien, et se rendormait — le sable restait collé au plafond.
    */
-  step(): void {
-    this.parity ^= 1;
-    this.rouse();
+  private block(b: number): void {
     const { width: w, height: h, cells, frozen, clock, life, awake, stir, cols, parity } = this;
+    const x0 = (b % this.parts) << PART_SHIFT, y0 = ((b / this.parts) | 0) << PART_SHIFT;
+    const x1 = Math.min(w, x0 + PART), y1 = Math.min(h, y0 + PART);
+    this.state = mix(this.tickSeed ^ Math.imul(b + 1, 0x9e3779b1));
     const leftToRight = parity === 0;
     const down = this.fall === 1;
-    // On balaie dans le sens de la gravité : la matière tombe d'abord.
-    for (let k = 0; k < h; k++) {
-      const y = down ? h - 1 - k : k;
+    for (let k = y0; k < y1; k++) {
+      const y = down ? y1 - 1 - (k - y0) : k;
       const row = (y >> SHIFT) * cols;
-      for (let j = 0; j < w; j++) {
-        const x = leftToRight ? j : w - 1 - j;
+      for (let j = x0; j < x1; j++) {
+        const x = leftToRight ? j : x1 - 1 - (j - x0);
         const c = row + (x >> SHIFT);
         if (!awake[c]) {
-          j = leftToRight ? x | (CHUNK - 1) : w - 1 - (x & ~(CHUNK - 1));
+          j = leftToRight ? x | (CHUNK - 1) : x1 - 1 - (x & ~(CHUNK - 1)) + x0;
           continue;
         }
         const i = y * w + x;
@@ -750,8 +980,57 @@ export class Engine {
         this.update(i, x, y, id);
       }
     }
-    this.thermal();
-    for (let c = 0; c < awake.length; c++) if (awake[c]) this.shown[c] = 1;
+  }
+
+  /**
+   * Met une explosion de côté : elle porte jusqu'à `r × 2,5` cellules, bien
+   * au-delà de ce que le damier garantit (`PART`). Elle sera jouée par
+   * `settle()` à la fin de la phase, dans l'ordre des cellules — le même
+   * quel que soit le fil qui l'a demandée. `nuke` : avec les retombées.
+   */
+  private blast(x: number, y: number, r: number, nuke = false): void {
+    const k = Atomics.add(this.control, CTL.later, 1);
+    if (2 * k + 1 >= this.later.length) return;
+    this.later[2 * k] = y * this.width + x;
+    this.later[2 * k + 1] = r | (nuke ? 256 : 0);
+  }
+
+  /**
+   * Joue les explosions mises de côté pendant le damier, dans l'ordre du
+   * balayage — sens de la gravité, x alterné —, puis par rayon : un ordre qui
+   * ne dépend ni des fils ni de leur vitesse. Trié par simple numéro de
+   * cellule, le tas d'uranium sautait par le haut et projetait ses grains
+   * dans le sol ; par le bas, comme avant, il souffle vers le vide.
+   * Une charge que l'explosion d'une voisine a déjà emportée ne saute plus —
+   * sans ça, les trente-six cellules d'un tas d'uranium arrivées ensemble à
+   * l'emballement sautaient chacune, et chaque souffle relançait l'uranium
+   * projeté par le précédent au lieu de l'avoir emporté.
+   *
+   * ponytail: au-delà de `later` (un quart de la grille), les explosions en
+   * trop sont perdues, et lesquelles dépend des fils. Il faudrait un quart du
+   * bac qui saute au même tick.
+   */
+  private settle(): void {
+    const count = Math.min(Atomics.load(this.control, CTL.later), this.later.length >> 1);
+    if (count === 0) return;
+    const { width: w, height: h } = this;
+    const down = this.fall === 1, leftToRight = this.parity === 0;
+    const order = new Float64Array(count);
+    for (let k = 0; k < count; k++) {
+      const at = this.later[2 * k], x = at % w, y = (at / w) | 0;
+      const rank = (down ? h - 1 - y : y) * w + (leftToRight ? x : w - 1 - x);
+      order[k] = rank * 512 + this.later[2 * k + 1];
+    }
+    order.sort();
+    for (let k = 0; k < count; k++) {
+      const rank = Math.floor(order[k] / 512), code = order[k] - rank * 512;
+      const ry = Math.floor(rank / w), rx = rank - ry * w;
+      const y = down ? h - 1 - ry : ry, x = leftToRight ? rx : w - 1 - rx;
+      const at = y * w + x;
+      if (!EXPLOSIVE[this.cells[at]]) continue;
+      if (code & 256) this.nuke(x, y);
+      else this.explode(x, y, code);
+    }
   }
 
   private update(i: number, x: number, y: number, id: MaterialId): void {
@@ -943,7 +1222,7 @@ export class Engine {
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
-      if (n === FIRE || n === LAVA) { this.explode(x, y); return; }
+      if (n === FIRE || n === LAVA) { this.blast(x, y, 7); return; }
     }
   }
 
@@ -956,7 +1235,7 @@ export class Engine {
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
-      if (n === FIRE || n === LAVA) { this.explode(x, y, 5); return; }
+      if (n === FIRE || n === LAVA) { this.blast(x, y, 5); return; }
     }
     const down = y + this.gravity;
     if (this.tryMove(i, x, down, NITRO)) {
@@ -964,7 +1243,7 @@ export class Engine {
       if (this.life[j] < SHOCK) this.life[j]++;
       return;
     }
-    if (this.life[i] >= SHOCK) { this.explode(x, y, 5); return; }
+    if (this.life[i] >= SHOCK) { this.blast(x, y, 5); return; }
     this.life[i] = 0; // elle s'est arrêtée : le compteur repart de zéro
     this.updateLiquid(i, x, y, NITRO);
   }
@@ -975,10 +1254,10 @@ export class Engine {
    * parte en entier sans dépendre des flammes.
    */
   private updateC4(i: number, x: number, y: number): void {
-    if (this.life[i] === 1) { this.explode(x, y, 9); return; }
+    if (this.life[i] === 1) { this.blast(x, y, 9); return; }
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
-      if (this.get(nx, ny) === SPARK) { this.explode(x, y, 9); return; }
+      if (this.get(nx, ny) === SPARK) { this.blast(x, y, 9); return; }
     }
   }
 
@@ -987,7 +1266,7 @@ export class Engine {
     const above = y - this.gravity;
     if (!this.inBounds(x, above)) return;
     const kind = MATERIALS[this.cells[this.index(x, above)]].kind;
-    if (kind === "powder" || kind === "liquid") this.explode(x, y, 6);
+    if (kind === "powder" || kind === "liquid") this.blast(x, y, 6);
   }
 
   /**
@@ -1027,7 +1306,7 @@ export class Engine {
       if (this.get(nx, ny) === URANIUM) mass++;
     }
     if (mass >= CRITICAL) {
-      if (++this.life[i] >= MELTDOWN) { this.nuke(x, y); return; }
+      if (++this.life[i] >= MELTDOWN) { this.blast(x, y, NUKE, true); return; }
     } else if (this.life[i] > 0) this.life[i]--;
     this.temp[i] = Math.max(this.temp[i], 60 + this.life[i] * 6);
     this.updatePowder(i, x, y, URANIUM);
@@ -1239,7 +1518,7 @@ export class Engine {
       const nx = x + NX[k], ny = y + NY[k];
       if (!this.inBounds(nx, ny)) continue;
       const n = this.cells[this.index(nx, ny)];
-      if (n === TNT) this.explode(nx, ny);
+      if (n === TNT) this.blast(nx, ny, 7);
       else if (n !== C4) this.charge(nx, ny); // le C4 se déclenche seul en voyant l'étincelle
     }
     this.ignite(x, y, 3);
@@ -1280,57 +1559,76 @@ export class Engine {
    * être active et loin de son équilibre.
    */
   private thermal(): void {
-    const { width: w, height: h, cells, temp, tempNext, ambient, cols, awake, stir } = this;
-    const n = awake.length;
-    for (let c = 0; c < n; c++) awake[c] |= stir[c];
-    for (let c = 0; c < n; c++) {
-      if (!awake[c]) continue;
-      const x0 = (c % cols) << SHIFT, y0 = ((c / cols) | 0) << SHIFT;
-      const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
-      for (let y = y0; y < y1; y++) {
-        for (let i = y * w + x0, end = y * w + x1; i < end; i++) {
-          const heat = HEAT[cells[i]];
-          // Une source tire vers sa température sans l'imposer : une flamme peut
-          // encore faire fondre la glace qu'elle touche. (NaN = ne chauffe pas.)
-          if (heat === heat) temp[i] += (heat - temp[i]) * 0.5;
-        }
-      }
+    const { awake, stir, jobs } = this;
+    let count = 0;
+    for (let c = 0; c < awake.length; c++) {
+      awake[c] |= stir[c];
+      if (awake[c]) jobs[count++] = c;
     }
-    for (let c = 0; c < n; c++) {
-      if (!awake[c]) continue;
-      const x0 = (c % cols) << SHIFT, y0 = ((c / cols) | 0) << SHIFT;
-      const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
-      let still = true;
-      for (let y = y0; y < y1; y++) {
-        for (let x = x0; x < x1; x++) {
-          const i = y * w + x;
-          const t = temp[i];
-          const sum =
-            (y > 0 ? temp[i - w] : t) + (y < h - 1 ? temp[i + w] : t) +
-            (x > 0 ? temp[i - 1] : t) + (x < w - 1 ? temp[i + 1] : t);
-          const next = t + CONDUCTION * (sum - 4 * t) + COOLING * (ambient - t);
-          tempNext[i] = next;
-          const id = cells[i];
-          const heat = HEAT[id];
-          const moved = next - (heat === heat ? 2 * t - heat : t);
-          if (moved > STILL || moved < -STILL) still = false;
-          if (next > BOIL_AT[id]) this.convert(i, BOIL_INTO[id]);
-          else if (next < FREEZE_AT[id]) this.convert(i, FREEZE_INTO[id]);
-        }
-      }
-      if (still) awake[c] = 2;
-      else stir[c] = 1;
-    }
-    for (let c = 0; c < n; c++) {
-      if (awake[c] !== 2) continue;
-      const x0 = (c % cols) << SHIFT, y0 = ((c / cols) | 0) << SHIFT;
-      const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
-      for (let y = y0; y < y1; y++) {
-        for (let i = y * w + x0, end = y * w + x1; i < end; i++) temp[i] = tempNext[i];
-      }
-    }
-    this.temp = tempNext;
+    this.publish();
+    this.run(JOB.heat, count);
+    this.run(JOB.diffuse, count);
+    this.run(JOB.settle, count);
+    const temp = this.temp;
+    this.temp = this.tempNext;
     this.tempNext = temp;
+  }
+
+  /**
+   * Passe 1 de la chaleur : les sources du bloc `c` tirent leur cellule vers
+   * leur température. Toutes doivent l'avoir fait avant que la diffusion ne
+   * lise les voisines — d'où une passe à part, et une barrière entre les deux.
+   */
+  private heatChunk(c: number): void {
+    const { width: w, cells, temp } = this;
+    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(this.height, y0 + CHUNK);
+    for (let y = y0; y < y1; y++) {
+      for (let i = y * w + x0, end = y * w + x1; i < end; i++) {
+        const heat = HEAT[cells[i]];
+        // Une source tire vers sa température sans l'imposer : une flamme peut
+        // encore faire fondre la glace qu'elle touche. (NaN = ne chauffe pas.)
+        if (heat === heat) temp[i] += (heat - temp[i]) * 0.5;
+      }
+    }
+  }
+
+  /** Passe 2 : diffusion du bloc `c` vers l'autre tampon, changements d'état, et le bloc dit s'il est refroidi (`awake[c] = 2`). */
+  private diffuseChunk(c: number): void {
+    const { width: w, height: h, cells, temp, tempNext, ambient, awake, stir } = this;
+    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
+    let still = true;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = y * w + x;
+        const t = temp[i];
+        const sum =
+          (y > 0 ? temp[i - w] : t) + (y < h - 1 ? temp[i + w] : t) +
+          (x > 0 ? temp[i - 1] : t) + (x < w - 1 ? temp[i + 1] : t);
+        const next = t + CONDUCTION * (sum - 4 * t) + COOLING * (ambient - t);
+        tempNext[i] = next;
+        const id = cells[i];
+        const heat = HEAT[id];
+        const moved = next - (heat === heat ? 2 * t - heat : t);
+        if (moved > STILL || moved < -STILL) still = false;
+        if (next > BOIL_AT[id]) this.convert(i, BOIL_INTO[id]);
+        else if (next < FREEZE_AT[id]) this.convert(i, FREEZE_INTO[id]);
+      }
+    }
+    if (still) awake[c] = 2;
+    else stir[c] = 1;
+  }
+
+  /** Passe 3 : un bloc refroidi recopie sa nouvelle température dans l'autre tampon, pour lire la même chose endormi. */
+  private settleChunk(c: number): void {
+    if (this.awake[c] !== 2) return;
+    const { width: w, temp, tempNext } = this;
+    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(this.height, y0 + CHUNK);
+    for (let y = y0; y < y1; y++) {
+      for (let i = y * w + x0, end = y * w + x1; i < end; i++) temp[i] = tempNext[i];
+    }
   }
 
   /** Retourne le pôle de l'aimant sous le curseur : attirer ↔ repousser. */

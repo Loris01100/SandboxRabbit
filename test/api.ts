@@ -131,6 +131,8 @@ assert.equal((await app.request("/api/room/public", {}, env)).status, 503);
   assert.equal(page.status, 200, "la page passe par le fallback ASSETS");
   assert.equal(page.headers.get("cache-control"), "no-cache", "le HTML est revérifié à chaque visite");
   assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  assert.equal(page.headers.get("cross-origin-opener-policy"), "same-origin", "COOP : la page isolée, condition de la mémoire partagée");
+  assert.equal(page.headers.get("cross-origin-embedder-policy"), "require-corp", "COEP : sans lui, le moteur reste sur un seul fil");
 
   const file = await app.request("/assets/index-abc123.js", {}, assets);
   assert.match(file.headers.get("cache-control") ?? "", /immutable/, "un fichier hashé se garde un an");

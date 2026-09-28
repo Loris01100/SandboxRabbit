@@ -22,12 +22,19 @@ export interface Env {
  * websocket vers le même hôte pour le bac partagé — d'où `connect-src 'self'`.
  * `form-action` est laissé libre : le seul <form> de la page est un
  * `method="dialog"` qui ne navigue nulle part.
+ *
+ * COOP + COEP isolent la page (`crossOriginIsolated`) : c'est la condition de
+ * `SharedArrayBuffer`, donc du moteur sur plusieurs fils (sim/pool.ts). Rien
+ * ne vient d'une autre origine, `require-corp` ne bloque donc rien. Aussi posés
+ * par Vite en développement (vite.config.ts).
  */
 const HEADERS: Record<string, string> = {
   "content-security-policy":
     "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
   "x-content-type-options": "nosniff",
   "referrer-policy": "strict-origin-when-cross-origin",
+  "cross-origin-opener-policy": "same-origin",
+  "cross-origin-embedder-policy": "require-corp",
 };
 
 /**

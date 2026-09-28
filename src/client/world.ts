@@ -51,10 +51,11 @@ export function listen(fn: (news: News) => void): void {
 }
 
 /**
- * La dernière grille encodée reçue du bac (état vivant compris), rafraîchie
- * quatre fois par seconde. Sauvegarder, partager ou ranger le bac dans la
- * mémoire locale n'a donc pas à attendre le Worker — ce qui compte quand la
- * page part en arrière-plan et qu'aucune promesse ne sera tenue.
+ * La copie de secours de la grille (état vivant compris), refaite par le bac
+ * quand il a changé — toutes les 250 ms en 640×360, plus rarement au-delà.
+ * Elle sert à ranger le bac dans la mémoire locale quand la page part en
+ * arrière-plan, sans attendre le Worker : aucune promesse n'y serait tenue.
+ * Sauvegarder et partager demandent une grille fraîche (`askGrid`).
  */
 let latest = "";
 export const latestGrid = (): string => latest;
@@ -69,6 +70,19 @@ export function askLoad(data: string, quiet = false): Promise<boolean> {
   return new Promise((resolve) => {
     waiting.set(ask, resolve as (value: unknown) => void);
     order({ t: "load", data, ask, quiet });
+  });
+}
+
+/**
+ * La grille entière, encodée à l'instant par le bac : ce que sauvegarder ou
+ * partager doit porter. `latestGrid()` n'est qu'une copie de secours, refaite
+ * de loin en loin — jusqu'à deux secondes de retard en 1920×1080.
+ */
+export function askGrid(): Promise<string> {
+  const ask = ++asked;
+  return new Promise((resolve) => {
+    waiting.set(ask, resolve as (value: unknown) => void);
+    order({ t: "grid", ask });
   });
 }
 
