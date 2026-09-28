@@ -448,4 +448,16 @@ function filmé(): { sim: Sandbox; news: News[] } {
   assert.equal(last(news, "won"), undefined, "l'objectif d'un monde ne suit pas dans le suivant");
 }
 
+// Un défi se bâtit à 20 °C : l'ambiante baissée avant de lancer « Grand froid »
+// bâtissait le lac déjà gelé, gagné au premier tick.
+{
+  const { sim } = bac();
+  sim.order({ t: "size", w: 320, h: 180, keep: true });
+  sim.order({ t: "set", k: { ambient: -60 } });
+  sim.order({ t: "scene", name: "Grand froid" });
+  assert.ok(count(sim.engine, WATER) > 0, "le lac est bâti liquide");
+  assert.equal(sim.engine.temp[sim.engine.index(160, 150)], 20, "à 20 °C");
+  assert.equal(sim.engine.ambient, -60, "et l'ambiante du panneau revient aussitôt");
+}
+
 console.log("ok — protocole du bac conforme");

@@ -100,6 +100,8 @@ const CATCH_UP = 32;
 /** Temps de simulation qu'une frame s'accorde, en ms : de quoi rendre et répondre sous 16,7 ms. */
 const SLICE = 12;
 const FOLLOW = "Vous suivez l'hôte : c'est lui qui mène le bac.";
+/** Ambiante à laquelle se bâtit un défi : celle d'un bac neuf. */
+const AMBIENT = 20;
 
 function fingerprint(cells: Uint8Array): number {
   let h = 0x811c9dc5;
@@ -467,8 +469,14 @@ export class Sandbox {
     if (!found) return;
     this.play(false); // la scène remplace la grille du rejeu : il s'arrête
     this.snapshot();
+    // Un défi se bâtit à 20 °C quelle que soit l'ambiante du panneau, rendue
+    // aussitôt : baisser l'ambiante *avant* de lancer « Grand froid » bâtissait
+    // le lac déjà gelé, défi gagné au premier tick.
+    const { ambient } = this.engine;
+    if (challenge) this.engine.ambient = AMBIENT;
     this.engine.clear();
     found.build(this.engine);
+    this.engine.ambient = ambient;
     this.stamp();
     this.won = challenge ? challenge.won : null;
   }

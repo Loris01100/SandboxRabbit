@@ -85,6 +85,8 @@ n'exprime pas : une entrée dans `CHALLENGES` de
 Les boutons, le chrono, le record et la détection (toutes les 500 ms, dans le
 Worker) sont génériques. test/sim.ts construit déjà chaque défi : vérifier
 qu'il ne démarre pas gagné. Mettre à jour la liste des défis du README.
+`scene()` de sandbox.ts bâtit un défi à 20 °C (`AMBIENT`), l'ambiante du
+panneau rendue ensuite : `build` n'a pas à s'en soucier.
 
 Un **décor** sans objectif (bouton « Surprise ») : même forme dans `SCENES`,
 sans `goal` ni `won`.
@@ -158,7 +160,9 @@ Un nouveau fichier `migrations/000N_quoi.sql` (commentaire en tête : la
 commande d'application, et pourquoi). Jamais de retouche d'une migration
 existante. Les colonnes ajoutées doivent tolérer les lignes existantes (`NULL`
 ou `DEFAULT`). Puis, au déploiement :
-`npx wrangler d1 migrations apply sandbox-rabbit --remote`.
+`npx wrangler d1 migrations apply sandbox-rabbit --remote`. En local aussi,
+`--local` : `npm run dev` et `npm run preview` ont leur propre D1, et une
+route sur une table absente y répond 500.
 
 ## Changer un binding Cloudflare
 

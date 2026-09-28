@@ -213,7 +213,10 @@ tout passe.
 
 [src/worker/store.ts](../../src/worker/store.ts) : `createStore(env)` rend D1 si
 `env.DB` existe, sinon une `Map` en mémoire (bouchon non partagé, vit dans
-l'isolate). En local (`npm run dev`, `test/api.ts`), c'est le bouchon.
+l'isolate). `test/api.ts` n'a pas de binding : c'est le bouchon. `npm run dev`
+et `npm run preview`, eux, ont un D1 local (`/api/health` répond `d1`) : y
+appliquer les migrations avec `--local`, sinon une route sur une table neuve
+répond 500.
 
 - Le `token` de suppression est tiré côté serveur, rendu **une seule fois** par
   le `POST`, et ne sort d'aucune lecture (`shown()` en mémoire, colonnes

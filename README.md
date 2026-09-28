@@ -84,7 +84,7 @@ mondes partagés, bac multijoueur.
 | Plein écran | Bouton « Plein écran » : `requestFullscreen()` sur le canvas, le CSS `pixelated` fait la mise à l'échelle et le rendu ne change pas d'une ligne. |
 | Image PNG | Le bac est réexporté ×4 sans lissage (`imageSmoothingEnabled = false`) et téléchargé : un PNG net, pas une capture d'écran floue. |
 | Ligne & remplissage | `Maj` + clic trace une ligne droite depuis le dernier point posé, clic droit remplit toute la poche de matière identique sous le curseur. |
-| Défis | Sept scènes prêtes à jouer (Débâcle, Mèche lente, Court-circuit, Puits, Désamorçage, Coup de grisou, Jardin) avec leur objectif et sa détection de victoire, construites en code dans `challenges.ts`. |
+| Défis | Sept scènes prêtes à jouer (Débâcle, Mèche lente, Court-circuit, Puits, Désamorçage, Coup de grisou, Jardin) avec leur objectif et sa détection de victoire, construites en code dans `challenges.ts`. Un défi se bâtit toujours à 20 °C, quelle que soit l'ambiante réglée : baissée avant de lancer « Grand froid », elle bâtissait le lac déjà gelé. |
 | Familles | La barre d'outils est découpée en `<details>` repliables (`CATEGORIES` dans `materials.ts`) : une famille ouverte à la fois suffit à tenir dans le panneau. Les raccourcis 1..9 / 0 restent sur les dix classiques, indépendamment de l'ordre d'affichage. |
 | Pinceau | Rayon de 1 à 64 cellules (`[` et `]`) : 64 pour qu'un geste compte encore en 1920×1080. Case « Ne pas remplacer » : on ne peint que le vide, la matière déjà posée est préservée (la gomme efface toujours), case « Gomme sélective » : la gomme ne retire que la dernière matière choisie. Clic maintenu = dépôt continu, même sans bouger la souris. Une créature (le lapin) fait exception : un clic en pose une, sans trait ni dépôt continu, et le cercle d'aperçu prend sa taille. |
 | Lien | Le bouton « Lien » met le monde entier dans l'URL (RLE + base64, ~1 ko) et le copie. La largeur de la grille passe devant (`#320~…`) : le bac du visiteur s'y met, sinon un monde 480 relu dans un bac 320 se décale d'une ligne à chaque rangée. |
@@ -159,8 +159,10 @@ vivant compris : un monde 320×180 pèse de quelques centaines d'octets au repos
 ## Base de données (D1)
 
 D1 est branché : le binding `DB` est déclaré dans `wrangler.jsonc`, et
-`createStore()` l'utilise dès qu'il existe (en déployé). En local (`npm run dev`,
-tests), c'est une `Map` en mémoire qui répond, sans rien partager.
+`createStore()` l'utilise dès qu'il existe. `npm run dev` et `npm run preview`
+ont le leur, un D1 local (`.wrangler/`) : y appliquer aussi les migrations,
+avec `--local`. Les tests (`test/api.ts`) n'ont pas de binding : c'est une
+`Map` en mémoire qui répond, sans rien partager.
 
 Le schéma évolue par fichiers numérotés dans `migrations/` — un nouveau fichier
 par changement, jamais de retouche d'un ancien :
@@ -193,13 +195,12 @@ Deux pistes distinctes, à ne pas confondre :
 **Social et contenu**
 
 - *Rejeu exportable* — fait : en lien ou en fichier (voir « Rejeu » plus
-  haut). C'est la pièce qu'attend le classement.
-- *Classement vérifié des défis*, ensuite : le serveur ne croit pas un temps
-  annoncé, il rejoue la partie reçue avec le même moteur (déterministe, un seul
-  tirage semé) et constate lui-même le défi réussi et le tick atteint. Réservé
-  au 320×180 : rejouer coûte du temps de calcul, et celui permis à une requête
-  d'un Worker Cloudflare est borné — une grande grille ou une longue partie
-  n'y tiendrait pas.
+  haut).
+- *Classement vérifié des défis* — écarté : le serveur rejouerait chaque
+  partie pour constater lui-même la victoire, mais c'est ~0,5 ms par tick en
+  320×180 sous workerd, ~9 s de calcul pour 5 min de partie. L'offre gratuite
+  des Workers accorde 10 ms par requête : il faudrait l'offre payante. Un
+  classement qui croirait le temps annoncé se tricherait d'une requête.
 
 **Dette connue** : les `ponytail:` du code (perte de contexte WebGL, encodage
 de la grille, gravité inversée des créatures…). `/ponytail-debt` en fait la

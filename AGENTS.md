@@ -19,7 +19,7 @@ README, commentaires du code, messages d'`assert` et UI sont **en français**.
 
 ```bash
 npm install
-npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, store en mémoire
+npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, D1 local (migrations : --local)
 npm run typecheck  # QUATRE projets tsc : client (DOM), Worker, tests (Node + DOM), test/api.ts (Node + Worker)
 npm run check      # asserts : test/sim.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts (Node exécute le TS)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
