@@ -52,7 +52,8 @@ fonctionnalité) : le tenir à jour quand un comportement visible change.
 index.html               tout le DOM de la page (panneau, dialogues, raccourcis)
 src/client/
   main.ts                câblage DOM, souris, zoom, réglages, défis, boucle rAF ; gesture()
-  world.ts               canvas + porte unique vers le Worker : order(), listen(), askLoad(), askClip()
+  world.ts               canvas + porte unique vers le Worker : order(), listen(), askLoad(), askClip() ; miroir de la grille
+  screen.ts              colorie le miroir : shader WebGL2, secours 2D
   gestures.ts            Gesture + applyGesture(engine, g) + météo          (pur)
   replay.ts              Recorder / Player                                  (pur)
   challenges.ts          défis et décors bâtis en code                      (pur)
@@ -120,10 +121,13 @@ aucun test précis.
 - `localStorage` uniquement via `read` / `write` / `forget` de ui.ts.
 - `room.ts`, `share.ts`, `theme.ts` n'importent pas main.ts (cycle).
 - Une frame ne porte que les bandes changées : world.ts les recopie toutes
-  dans son image miroir, n'en saute jamais une. Un réglage qui change
-  l'aspect sans écriture (comme `heatmap`) redessine tout.
-- 1 cellule = 1 pixel, un seul `putImageData` par frame : pas de dessin par
-  cellule.
+  dans son miroir, n'en saute jamais une. Un réglage qui change l'aspect sans
+  écriture (comme `heatmap`) fait tout recolorier.
+- 1 cellule = 1 pixel, un seul envoi à l'écran par frame (`screen.paint`) :
+  pas de dessin par cellule.
+- Le coloriage existe en deux copies : le shader de screen.ts et `Renderer`
+  de render.ts (secours sans WebGL2, tests). Un aspect se change des deux
+  côtés.
 - Pas de `style=` ni de `<script>` en ligne : la CSP les bloque.
 - Données externes (galerie, lien, pair de salon) : `engine.adopt()` et
   `known()` écartent les ids inconnus, `disc()` borne les rayons,

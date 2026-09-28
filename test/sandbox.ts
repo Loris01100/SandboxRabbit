@@ -45,38 +45,56 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
 }
 
 /**
- * Le rendu ne renvoie que les blocs changés : la page les recopie dans son
- * image (world.ts), qui doit rester, au pixel près, ce que donnerait un rendu
- * complet. Sinon un bloc oublié par le suivi reste en retard à l'écran.
+ * Les frames ne portent que les blocs changés : la page les recopie dans son
+ * miroir (world.ts), qui doit rester, cellule pour cellule, la grille du
+ * moteur — sinon un bloc oublié par le suivi reste en retard à l'écran. Et ce
+ * miroir se colorie comme le moteur lui-même (`Renderer`, le secours sans
+ * WebGL2 et la copie du shader).
  */
 {
   const { sim, news } = bac();
-  const image = new Uint8ClampedArray(W * H * 4);
+  const n = W * H;
+  const miroir = {
+    width: W, height: H, ambient: 20,
+    cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
+    noise: new Int8Array(n), temp: new Int16Array(n),
+  };
   const reçues = () => {
-    for (const n of news.splice(0)) {
-      if (n.t !== "frame") continue;
-      for (const p of n.patches) {
-        for (let r = 0; r < p.h; r++) image.set(p.pixels.subarray(r * p.w * 4, (r + 1) * p.w * 4), ((p.y + r) * W + p.x) * 4);
+    for (const f of news.splice(0)) {
+      if (f.t !== "frame") continue;
+      miroir.ambient = f.ambient;
+      for (const p of f.patches) {
+        for (let r = 0; r < p.h; r++) {
+          const from = r * p.w, to = (p.y + r) * W + p.x;
+          miroir.cells.set(p.cells.subarray(from, from + p.w), to);
+          miroir.life.set(p.life.subarray(from, from + p.w), to);
+          miroir.frozen.set(p.frozen.subarray(from, from + p.w), to);
+          miroir.temp.set(p.temp.subarray(from, from + p.w), to);
+          if (p.noise) miroir.noise.set(p.noise.subarray(from, from + p.w), to);
+        }
       }
     }
   };
   run(sim, 400);
   reçues();
   run(sim, 5);
-  assert.equal(news.filter((n) => n.t === "frame").reduce((s, f) => s + area(f as Frame), 0), 0, "un bac au repos n'envoie plus un pixel");
+  assert.equal(news.filter((f) => f.t === "frame").reduce((s, f) => s + area(f as Frame), 0), 0, "un bac au repos n'envoie plus une cellule");
 
   sim.order({ t: "do", g: { t: "paint", x: 70, y: 5, r: 1, id: SAND, d: 1, over: true } });
   sim.frame(16);
   const touchées = area(last(news, "frame")!);
-  assert.ok(touchées > 0 && touchées < (W * H) / 2, `un grain de sable ne renvoie que son coin de bac (${touchées} pixels)`);
+  assert.ok(touchées > 0 && touchées < (W * H) / 2, `un grain de sable ne renvoie que son coin de bac (${touchées} cellules)`);
 
-  /** Compare à un rendu témoin, tiré juste après une frame : le moteur n'a rien noté depuis, il ne vole rien au bac. */
+  /** Le miroir recomposé est-il la grille du moteur ? Températures au degré, comme elles voyagent. */
   const pareil = (quand: string) => {
     reçues();
-    const témoin = new Renderer(sim.engine);
-    témoin.heatmap = sim.renderer.heatmap;
-    témoin.draw();
-    assert.deepEqual(image, témoin.pixels, `l'image recomposée est celle d'un rendu complet — ${quand}`);
+    const e = sim.engine;
+    assert.deepEqual(miroir.cells, e.cells, `même matière — ${quand}`);
+    assert.deepEqual(miroir.life, e.life, `même état vivant — ${quand}`);
+    assert.deepEqual(miroir.frozen, e.frozen, `même figé — ${quand}`);
+    assert.deepEqual(miroir.noise, e.noise, `même grain — ${quand}`);
+    assert.deepEqual(miroir.temp, Int16Array.from(e.temp, Math.round), `mêmes températures, au degré — ${quand}`);
+    assert.equal(miroir.ambient, e.ambient, `même ambiante — ${quand}`);
   };
   sim.order({ t: "do", g: { t: "paint", x: 20, y: 10, r: 3, id: FIRE, d: 1, over: true } });
   run(sim, 30);
@@ -85,15 +103,16 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   sim.order({ t: "do", g: { t: "rect", x: 50, y: 20, x2: 60, y2: 25, id: WATER, over: true } });
   sim.frame(16);
   pareil("un geste bac en pause");
-  sim.order({ t: "set", k: { running: true, heatmap: true } });
-  run(sim, 20);
-  pareil("la vue thermique");
-  sim.order({ t: "set", k: { heatmap: false } });
-  sim.frame(16);
-  pareil("retour à la matière");
-  sim.order({ t: "set", k: { ambient: 60 } });
+  sim.order({ t: "set", k: { running: true, ambient: 60 } });
   run(sim, 20);
   pareil("une autre ambiante");
+
+  const page = new Renderer(miroir), moteur = new Renderer(sim.engine);
+  page.draw();
+  moteur.draw();
+  let écarts = 0;
+  for (let i = 0; i < page.pixels.length; i++) if (Math.abs(page.pixels[i] - moteur.pixels[i]) > 2) écarts++;
+  assert.ok(écarts < page.pixels.length / 1000, `le miroir se colorie comme le moteur, à l'arrondi des températures près (${écarts} canaux écartés)`);
 }
 
 // La sonde suit le curseur, et se tait quand il sort du bac.

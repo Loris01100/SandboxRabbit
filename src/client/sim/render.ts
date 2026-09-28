@@ -2,105 +2,175 @@ import { EMPTY, MAGNET, MATERIALS, SWITCH, THERMITE, URANIUM } from "./materials
 import { type Engine } from "./engine.ts";
 
 /**
- * Rendu 1 cellule = 1 pixel dans un tableau de pixels, puis mise à l'échelle
- * par le CSS (`image-rendering: pixelated`). C'est de loin le plus rapide :
- * aucun appel de dessin par cellule.
- *
- * Le renderer ne connaît **pas** de canvas : il remplit `pixels`, et c'est le
- * fil principal qui en fait un `putImageData` (world.ts). C'est ce qui permet
- * de le faire tourner dans un Worker, où il n'y a pas de canvas — et ce qui le
- * rend vérifiable sous Node, qui n'en a pas non plus.
- *
- * Il ne redessine que les blocs de veille que le moteur dit changés
- * (`engine.changed()`), et n'envoie qu'eux : un bac au repos en 1920×1080 ne
- * coûte plus 8 Mo de pixels par frame, mais rien.
+ * Ce qu'il faut pour colorier un bac : la grille et son état, sans le moteur.
+ * Le moteur l'est (le Worker, les tests), le miroir de la page aussi
+ * (world.ts) — c'est ce qui laisse colorier aussi bien d'un côté que de
+ * l'autre. `temp` : en °C, flottants dans le moteur, arrondis dans le miroir.
  */
-export class Renderer {
-  /** RGBA, une cellule par pixel : l'image entière, tenue à jour bloc par bloc. */
-  readonly pixels: Uint8ClampedArray;
-  private readonly buffer: Uint32Array;
-  /** Couleur de base pré-calculée par matériau, au format 0xAABBGGRR. */
-  private readonly palette = new Uint32Array(256);
-  /** Grain par matériau, sorti du registre comme la couleur : une lecture de
-   *  tableau typé par pixel et par frame, au lieu d'une propriété d'objet. */
-  private readonly grain = new Uint8Array(256);
-  /** 1 pour les quatre matières dont `life` change l'aspect. Voir `draw()`. */
-  private readonly glows = new Uint8Array(256);
-  /** Blocs à redessiner à ce `draw()`. */
-  private readonly dirty: Uint8Array;
-  /** Tout redessiner au prochain `draw()` : premier dessin, vue basculée. */
-  private full = true;
-  private heat = false;
+export interface Grid {
+  width: number;
+  height: number;
+  ambient: number;
+  cells: Uint8Array;
+  life: Uint8Array;
+  frozen: Uint8Array;
+  noise: Int8Array;
+  temp: ArrayLike<number>;
+}
 
+/**
+ * Une bande de bac à reposer en (x, y) : les données brutes de ses cellules,
+ * rangée par rangée, pas des pixels. C'est la carte graphique de la page qui
+ * les colorie (screen.ts) ; la température y voyage arrondie au degré, de quoi
+ * la lumière et la vue thermique. `noise`, fixe pour un moteur, ne voyage
+ * qu'avec la première frame.
+ */
+export interface Patch {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  cells: Uint8Array;
+  life: Uint8Array;
+  frozen: Uint8Array;
+  temp: Int16Array;
+  noise?: Int8Array;
+}
+
+/**
+ * Le suivi des blocs changés, côté Worker. Il ne colorie rien : il découpe
+ * dans le moteur les blocs que `engine.changed()` désigne, une bande par
+ * rangée de blocs — du premier changé au dernier — et la page les repose
+ * dans son miroir. Un bac au repos rend une liste vide ; la première frame
+ * d'un moteur est entière, grain compris.
+ *
+ * Colorier ici coûtait 6 ms par tick en 1920×1080 chargé (npm run
+ * directions) : c'est le shader de la page qui le fait maintenant.
+ */
+export class Tracker {
   private readonly engine: Engine;
+  private readonly dirty: Uint8Array;
+  private full = true;
 
-  // Champ déclaré à la main plutôt qu'en paramètre-propriété : Node exécute le
-  // TypeScript en le dépouillant, et cette syntaxe-là est la seule qu'il refuse
-  // (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`) — elle mettait ce module hors de
-  // portée de `node test/…`.
   constructor(engine: Engine) {
     this.engine = engine;
-    this.pixels = new Uint8ClampedArray(engine.width * engine.height * 4);
-    this.buffer = new Uint32Array(this.pixels.buffer);
-    for (const key of Object.keys(MATERIALS)) {
-      const m = MATERIALS[Number(key)];
-      const [r, g, b] = m.color;
-      this.palette[m.id] = 0xff000000 | (b << 16) | (g << 8) | r;
-      this.grain[m.id] = m.noise;
-    }
-    for (const id of [SWITCH, MAGNET, THERMITE, URANIUM]) this.glows[id] = 1;
     this.dirty = new Uint8Array(engine.cols * engine.rows);
   }
 
-  /** Affiche `temp` au lieu de la matière. La basculer redessine tout le bac. */
-  get heatmap(): boolean {
-    return this.heat;
-  }
-
-  set heatmap(on: boolean) {
-    if (on === this.heat) return;
-    this.heat = on;
-    this.full = true;
-  }
-
-  /**
-   * Redessine les blocs changés et rend ce qu'il faut reposer en face : une
-   * bande par rangée de blocs, du premier bloc changé au dernier, avec ses
-   * pixels copiés dans un tampon à elle — c'est ce tampon qui part vers la
-   * page, transféré plutôt que copié. Un bac au repos rend une liste vide.
-   */
-  draw(): Patch[] {
-    const { chunk, cols, rows, width: w, height: h, ambient } = this.engine;
-    const { dirty, pixels } = this;
+  take(): Patch[] {
+    const { chunk, cols, rows, width: w, height: h, cells, life, frozen, temp, noise } = this.engine;
+    const { dirty } = this;
     this.engine.changed(dirty);
-    if (this.full) { dirty.fill(1); this.full = false; }
-    const warm = ambient + GLOW;
+    const full = this.full;
+    if (full) { dirty.fill(1); this.full = false; }
     const patches: Patch[] = [];
     for (let cy = 0; cy < rows; cy++) {
-      const y0 = cy * chunk, y1 = Math.min(h, y0 + chunk);
       let first = -1, last = -1;
       for (let cx = 0; cx < cols; cx++) {
         if (!dirty[cy * cols + cx]) continue;
         if (first < 0) first = cx;
         last = cx;
-        const x0 = cx * chunk, x1 = Math.min(w, x0 + chunk);
-        for (let y = y0; y < y1; y++) {
-          if (this.heat) this.shadeHeat(y * w + x0, y * w + x1);
-          else this.shade(y * w + x0, y * w + x1, warm);
-        }
       }
       if (first < 0) continue;
-      const x = first * chunk, pw = Math.min(w, (last + 1) * chunk) - x, ph = y1 - y0;
-      const strip = new Uint8ClampedArray(pw * ph * 4);
-      for (let y = y0; y < y1; y++) strip.set(pixels.subarray((y * w + x) * 4, (y * w + x + pw) * 4), (y - y0) * pw * 4);
-      patches.push({ x, y: y0, w: pw, h: ph, pixels: strip });
+      const x = first * chunk, y0 = cy * chunk;
+      const pw = Math.min(w, (last + 1) * chunk) - x, ph = Math.min(h, y0 + chunk) - y0;
+      const p: Patch = {
+        x, y: y0, w: pw, h: ph,
+        cells: new Uint8Array(pw * ph), life: new Uint8Array(pw * ph),
+        frozen: new Uint8Array(pw * ph), temp: new Int16Array(pw * ph),
+      };
+      if (full) p.noise = new Int8Array(pw * ph);
+      for (let r = 0; r < ph; r++) {
+        const from = (y0 + r) * w + x, to = r * pw;
+        p.cells.set(cells.subarray(from, from + pw), to);
+        p.life.set(life.subarray(from, from + pw), to);
+        p.frozen.set(frozen.subarray(from, from + pw), to);
+        p.noise?.set(noise.subarray(from, from + pw), to);
+        for (let k = 0; k < pw; k++) p.temp[to + k] = Math.max(-32768, Math.min(32767, Math.round(temp[from + k])));
+      }
+      patches.push(p);
     }
     return patches;
+  }
+}
+
+/**
+ * Couleur et grain de chaque matière, 256 × RGBA : rouge, vert, bleu, grain.
+ * La table du shader (screen.ts) et celle de `Renderer` : une seule source.
+ */
+export function palette(): Uint8Array {
+  const out = new Uint8Array(256 * 4);
+  for (const key of Object.keys(MATERIALS)) {
+    const m = MATERIALS[Number(key)];
+    out.set([m.color[0], m.color[1], m.color[2], m.noise], m.id * 4);
+  }
+  return out;
+}
+
+/** Les quatre matières dont `life` change l'aspect, dans l'ordre qu'attend le shader. */
+export const GLOWING = [URANIUM, THERMITE, SWITCH, MAGNET] as const;
+
+/** Écart à l'ambiante à partir duquel une cellule commence à éclairer, en °C. */
+export const GLOW = 40;
+
+/**
+ * Rendu 1 cellule = 1 pixel dans un tableau de pixels, puis mise à l'échelle
+ * par le CSS (`image-rendering: pixelated`). Aucun appel de dessin par cellule.
+ *
+ * C'est la **copie en JavaScript** du shader de screen.ts : le secours d'une
+ * page sans WebGL2, et ce que lisent les tests et `npm run directions`, qui
+ * n'ont pas de carte graphique. Les deux doivent colorier pareil — une règle
+ * d'aspect changée ici l'est là-bas aussi.
+ */
+export class Renderer {
+  /** RGBA, une cellule par pixel. */
+  readonly pixels: Uint8ClampedArray;
+  private readonly buffer: Uint32Array;
+  /** Couleur de base pré-calculée par matériau, au format 0xAABBGGRR. */
+  private readonly palette = new Uint32Array(256);
+  /** Grain par matériau : une lecture de tableau typé par pixel, au lieu d'une propriété d'objet. */
+  private readonly grain = new Uint8Array(256);
+  /** 1 pour les quatre matières dont `life` change l'aspect. Voir `shade()`. */
+  private readonly glows = new Uint8Array(256);
+  /** Affiche `temp` au lieu de la matière. */
+  heatmap = false;
+
+  private readonly grid: Grid;
+
+  // Champ déclaré à la main plutôt qu'en paramètre-propriété : Node exécute le
+  // TypeScript en le dépouillant, et cette syntaxe-là est la seule qu'il refuse
+  // (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`) — elle mettait ce module hors de
+  // portée de `node test/…`.
+  constructor(grid: Grid) {
+    this.grid = grid;
+    this.pixels = new Uint8ClampedArray(grid.width * grid.height * 4);
+    this.buffer = new Uint32Array(this.pixels.buffer);
+    const table = palette();
+    for (let id = 0; id < 256; id++) {
+      this.palette[id] = 0xff000000 | (table[id * 4 + 2] << 16) | (table[id * 4 + 1] << 8) | table[id * 4];
+      this.grain[id] = table[id * 4 + 3];
+    }
+    for (const id of GLOWING) this.glows[id] = 1;
+  }
+
+  /** Tout le bac. */
+  draw(): void {
+    this.paint(0, 0, this.grid.width, this.grid.height);
+  }
+
+  /** Le rectangle de (x0, y0) à (x1, y1) exclus. */
+  paint(x0: number, y0: number, x1: number, y1: number): void {
+    const w = this.grid.width;
+    const warm = this.grid.ambient + GLOW;
+    for (let y = y0; y < y1; y++) {
+      if (this.heatmap) this.shadeHeat(y * w + x0, y * w + x1);
+      else this.shade(y * w + x0, y * w + x1, warm);
+    }
   }
 
   /** Les cellules `from` à `to` (exclu) d'une rangée, en couleurs de matière. `warm` : seuil de lumière. */
   private shade(from: number, to: number, warm: number): void {
-    const { cells, noise, frozen, life, width, temp } = this.engine;
+    const { cells, noise, frozen, life, width, temp } = this.grid;
     const { buffer, palette, grain, glows } = this;
     for (let i = from; i < to; i++) {
       const id = cells[i];
@@ -140,7 +210,7 @@ export class Renderer {
   private shadeHeat(from: number, to: number): void {
     // Le pivot suit le climat de la scène, pas la constante : à -40 °C tout
     // était bleu uni, et la vue thermique ne montrait plus rien.
-    const { temp, ambient } = this.engine;
+    const { temp, ambient } = this.grid;
     const { buffer } = this;
     for (let i = from; i < to; i++) {
       const t = temp[i];
@@ -158,18 +228,6 @@ export class Renderer {
     }
   }
 }
-
-/** Un rectangle de l'image à reposer en (x, y), ses pixels RGBA rangée par rangée. */
-export interface Patch {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  pixels: Uint8ClampedArray;
-}
-
-/** Écart à l'ambiante à partir duquel une cellule commence à éclairer, en °C. */
-const GLOW = 40;
 
 /** Réchauffe une couleur 0xAABBGGRR vers l'orange d'une flamme. */
 function light(color: number, amount: number): number {

@@ -11,7 +11,7 @@
  * test/sandbox.ts fait jouer le protocole sans navigateur.
  */
 import { Engine } from "./engine.ts";
-import { Renderer, type Patch } from "./render.ts";
+import { Tracker, type Patch } from "./render.ts";
 import { encode } from "./codec.ts";
 import { HERO, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, weather, type Gesture } from "../gestures.ts";
@@ -57,7 +57,7 @@ export type Order =
   | ({ t: "turn" } & Turn);
 
 export type News =
-  | { t: "frame"; patches: Patch[]; w: number; h: number; probe: [MaterialId, number] | null; hero: [number, number] | null }
+  | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number] | null }
   | { t: "stats"; filled: number }
   | { t: "grid"; full: string }
   | { t: "start"; rec: Recording }
@@ -103,7 +103,8 @@ function fingerprint(cells: Uint8Array): number {
 
 export class Sandbox {
   engine: Engine;
-  renderer: Renderer;
+  /** Les blocs changés depuis la frame d'avant, découpés pour la page qui les colorie. */
+  tracker: Tracker;
   knobs: Knobs = {
     wind: 0, ambient: 20, gravity: 1, emit: WATER,
     weather: false, speed: 1, running: true, heatmap: false,
@@ -137,7 +138,7 @@ export class Sandbox {
 
   constructor(width: number, height: number, send: (news: News) => void) {
     this.engine = new Engine(width, height);
-    this.renderer = new Renderer(this.engine);
+    this.tracker = new Tracker(this.engine);
     this.send = send;
     seed(this.engine);
   }
@@ -160,9 +161,8 @@ export class Sandbox {
         return;
       case "set": {
         Object.assign(this.knobs, o.k);
-        const { wind, ambient, gravity, emit, heatmap } = this.knobs;
+        const { wind, ambient, gravity, emit } = this.knobs;
         if (!this.follower) Object.assign(this.engine, { wind, ambient, gravity, emit });
-        this.renderer.heatmap = heatmap;
         return;
       }
       case "host": return this.host(o.on);
@@ -234,7 +234,7 @@ export class Sandbox {
       }
     }
 
-    const patches = this.renderer.draw();
+    const patches = this.tracker.take();
     const { width: w, height: h } = this.engine;
     const { x, y } = this.cursor;
     const at = this.engine.inBounds(x, y) ? this.engine.index(x, y) : -1;
@@ -242,7 +242,7 @@ export class Sandbox {
       at < 0 ? null : [this.engine.cells[at] as MaterialId, this.engine.temp[at]];
     const heart = this.engine.hero;
     const hero: [number, number] | null = heart >= 0 && this.engine.cells[heart] === HERO ? [heart % w, (heart / w) | 0] : null;
-    this.send({ t: "frame", patches, w, h, probe, hero });
+    this.send({ t: "frame", patches, w, h, ambient: this.engine.ambient, probe, hero });
 
     this.sinceStats += ms;
     if (this.sinceStats >= STATS) {
@@ -487,8 +487,7 @@ export class Sandbox {
     const { wind, ambient, gravity, emit } = this.engine;
     this.engine = new Engine(width, height);
     Object.assign(this.engine, { wind, ambient, gravity, emit });
-    this.renderer = new Renderer(this.engine);
-    this.renderer.heatmap = this.knobs.heatmap;
+    this.tracker = new Tracker(this.engine);
     // Les crans n'ont plus la bonne longueur, et l'enregistrement en cours ne
     // décrit plus rien de rejouable.
     this.undoStack.length = 0;

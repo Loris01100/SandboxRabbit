@@ -312,28 +312,36 @@ aux mêmes touches.
 
 ## Rendu
 
-[render.ts](../../src/client/sim/render.ts) : 1 cellule = 1 pixel dans un
-`ImageData`, un seul `putImageData` par frame côté page, mise à l'échelle par
-CSS `image-rendering: pixelated`. **Pas de dessin par cellule.**
-`renderer.heatmap` bascule sur une palette de `temp` dans la même boucle. La
-lumière autour des sources chaudes est un sous-produit de `temp` (aucun flou).
-`thumbnail()` sert aux vignettes de la galerie.
+1 cellule = 1 pixel, mise à l'échelle par CSS `image-rendering: pixelated`.
+**Pas de dessin par cellule.** Le Worker ne colorie plus : c'était 6 ms par
+tick en 1920×1080 chargé (`npm run directions`).
 
-Le rendu suit les [blocs de veille](#blocs-de-veille) : `renderer.pixels`
-persiste d'une frame à l'autre, et `draw()` ne redessine que les blocs que
-`engine.changed()` désigne (traités par un tick, ou écrits depuis — un geste
-bac en pause). Il rend une bande (`Patch`) par rangée de blocs changés ; un
-bac au repos n'envoie rien.
-
-- Ce qui change l'aspect **sans écriture ni tick** doit tout redessiner :
-  basculer `heatmap` le fait (`full`). L'ambiante, qui déplace le seuil de
-  lumière et le pivot de la vue thermique, passe par `wakeAll()`. Un nouveau
-  réglage d'aspect (palette, filtre) doit faire de même.
-- Un nouveau `Renderer` dessine tout à sa première frame : c'est ce qui
-  remplit l'image neuve de la page après un changement de taille.
-- `engine.changed()` remet à zéro ce qu'il a rendu : un seul renderer par
-  moteur. Le test en tire un second (témoin) juste après une frame, quand il
-  n'y a plus rien à voler.
+- **Worker** : `Tracker` ([render.ts](../../src/client/sim/render.ts)) suit
+  les [blocs de veille](#blocs-de-veille). À chaque frame il découpe les blocs
+  que `engine.changed()` désigne (traités par un tick, ou écrits depuis — un
+  geste bac en pause), une bande (`Patch`) par rangée de blocs changés, en
+  données brutes : matière, `life`, figé, température arrondie au degré
+  (`Int16`). Un bac au repos n'envoie rien ; la première frame d'un moteur est
+  entière et porte le grain (`noise`, fixe pour un moteur).
+- **Page** : le miroir de world.ts est colorié par
+  [screen.ts](../../src/client/screen.ts), un shader WebGL2 sur des textures
+  entières (`texSubImage2D` du rectangle changé), ou sans WebGL2 par
+  `Renderer` puis `putImageData`.
+- **Deux copies d'une même règle** : `Renderer.shade()` / `shadeHeat()` et le
+  shader de screen.ts. Mêmes constantes (`GLOW`, `GLOWING`, `palette()`
+  partagées), mêmes arrondis. Changer un aspect (couleur tirée de `life`,
+  lumière, vue thermique) = changer les deux. `Renderer` sert au secours, aux
+  tests et à `npm run directions` ; le test du miroir (test/sandbox.ts)
+  vérifie qu'un miroir se colorie comme le moteur.
+- Ce qui change l'aspect **sans écriture ni tick** : la vue thermique ne
+  regarde que la page (`order()` de world.ts la relève et fait tout
+  recolorier) ; l'ambiante (seuil de lumière, pivot de la vue thermique)
+  passe par `wakeAll()` et voyage avec la frame. Un nouveau réglage d'aspect
+  doit faire l'un ou l'autre.
+- `engine.changed()` remet à zéro ce qu'il a rendu : un seul `Tracker` par
+  moteur.
+- `thumbnail()` sert aux vignettes de la galerie ; la lumière autour des
+  sources chaudes reste un sous-produit de `temp` (aucun flou).
 
 ## Où vit quoi dans `Sandbox`
 

@@ -28,12 +28,17 @@ flowchart LR
 ```
 
 1. **Le fil principal** (page) ne simule rien. Il gère le DOM, traduit la souris
-   en `Gesture`, envoie des **ordres** au bac et pose les pixels qu'il reçoit.
-   Chaque frame n'apporte que les bandes changées (`patches`) : world.ts les
-   recopie **dès l'arrivée** dans une `ImageData` miroir (`blit()`), puis
-   `present()` repose le rectangle changé, un `putImageData` par
-   rafraîchissement d'écran. Ne jamais sauter une frame : elle ne porte que
-   ce qui a changé, et le morceau resterait en retard pour de bon.
+   en `Gesture`, envoie des **ordres** au bac et **colorie** la grille.
+   Chaque frame n'apporte que les bandes changées (`patches`), en données
+   brutes — matière, `life`, figé, température au degré, et le grain avec la
+   première frame d'un moteur. world.ts les recopie **dès l'arrivée** dans un
+   miroir de la grille (`blit()`), puis `present()` fait colorier le
+   rectangle changé par [screen.ts](../../src/client/screen.ts) : un shader
+   WebGL2 sur des textures entières, ou, sans WebGL2, `Renderer` puis un
+   `putImageData`. Un envoi à l'écran par rafraîchissement. Ne jamais sauter
+   une frame : elle ne porte que ce qui a changé, et le morceau resterait en
+   retard pour de bon. La vue thermique ne regarde que la page : `order()`
+   relève `heatmap` au passage et fait tout recolorier.
 2. **Le Web Worker de simulation** ([sim/worker.ts](../../src/client/sim/worker.ts))
    héberge `Sandbox`, qui possède l'`Engine` et le `Renderer`. Il avance au
    temps réellement écoulé (`setTimeout` à ~60 Hz, pas de `requestAnimationFrame`)
@@ -69,7 +74,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
-| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,pixels}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, image entière à la première frame d'un moteur), taille, sonde `[matière, °C]`, `hero` `[x, y]` ou `null` (la caméra le suit) |
+| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,noise?}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y]` ou `null` (la caméra le suit) |
 | `stats` | 2 × / s | nombre de cellules pleines |
 | `grid` | 4 × / s | grille encodée complète (`full`) + version courte pour le salon (`room`) |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askClip()` |
@@ -226,7 +231,8 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
 | [main.ts](../../src/client/main.ts) | palette, souris, zoom et caméra (bornes par `clampPan`, ZQSD / WASD / flèches tenues, `+` / `-`), réglages, défis, boucle rAF, câblage de tout le DOM | non |
-| [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker | non |
+| [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille | non |
+| [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières), secours 2D par `Renderer` | non |
 | [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence), accès `localStorage` tolérant | **oui** (test/ui.ts) |
 | [gestures.ts](../../src/client/gestures.ts) | `Gesture` + `applyGesture(engine, g)` + météo | **oui** |
 | [replay.ts](../../src/client/replay.ts) | `Recorder` / `Player` | **oui** |

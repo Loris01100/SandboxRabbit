@@ -3,7 +3,9 @@
  * mesure, sur la machine qui le lance, ce que rapporterait chaque piste.
  *
  * 1. Le vrai moteur, sur une scène chargée en 1920×1080 : combien coûtent les
- *    règles, la chaleur et le rendu. C'est ce qu'il faut accélérer.
+ *    règles, la chaleur et l'envoi à la page (`Tracker`, les bandes de blocs
+ *    changés — le coloriage, lui, est fait par la carte graphique de la page).
+ *    C'est ce qu'il faut accélérer.
  * 2. Deux noyaux qui résument ce travail (directions-kernels.ts) — le sable
  *    qui tombe, la diffusion de la chaleur — sur un cœur, puis sur 2, 4, 8…
  *    cœurs (damier de blocs, mémoire partagée, tirage par bloc). Le rapport
@@ -17,7 +19,7 @@
 import { availableParallelism } from "node:os";
 import { Worker } from "node:worker_threads";
 import { Engine } from "../src/client/sim/engine.ts";
-import { Renderer } from "../src/client/sim/render.ts";
+import { Tracker } from "../src/client/sim/render.ts";
 import { FIRE, SAND as REAL_SAND, STONE as REAL_STONE, WATER, WOOD } from "../src/client/sim/materials.ts";
 import { diffuseRows, phaseBlocks, sandBlock, scene } from "./directions-kernels.ts";
 
@@ -43,7 +45,7 @@ function realEngine(): { rules: number; heat: number; render: number; awake: num
   e.rect(20 * s, 70 * s, 300 * s, 90 * s, REAL_SAND, false);
   e.rect(100 * s, 95 * s, 220 * s, 120 * s, WOOD, false);
   e.paint(160 * s, 94 * s, 4, FIRE);
-  const r = new Renderer(e);
+  const r = new Tracker(e);
   const proto = Engine.prototype as unknown as { thermal: () => void };
   const thermal = proto.thermal;
   let heat = 0;
@@ -52,14 +54,14 @@ function realEngine(): { rules: number; heat: number; render: number; awake: num
     thermal.call(this);
     heat += performance.now() - t0;
   };
-  for (let t = 0; t < 50; t++) { e.step(); r.draw(); }
+  for (let t = 0; t < 50; t++) { e.step(); r.take(); }
   heat = 0;
   let total = 0, render = 0, awake = 0;
   for (let t = 0; t < TICKS; t++) {
     const t0 = performance.now();
     e.step();
     const t1 = performance.now();
-    r.draw();
+    r.take();
     render += performance.now() - t1;
     total += t1 - t0;
     for (const a of (e as unknown as { awake: Uint8Array }).awake) if (a) awake++;
@@ -131,7 +133,7 @@ console.log(`Machine : ${cores} cœurs logiques. Grille ${W}×${H}, ${TICKS} tic
 
 const real = realEngine();
 console.log("1. Le vrai moteur, scène chargée (eau, sable, feu)");
-console.log(`   règles ${ms(real.rules)} · chaleur ${ms(real.heat)} · rendu ${ms(real.render)} · blocs éveillés ${(real.awake * 100).toFixed(0)} %`);
+console.log(`   règles ${ms(real.rules)} · chaleur ${ms(real.heat)} · envoi ${ms(real.render)} · blocs éveillés ${(real.awake * 100).toFixed(0)} %`);
 const frame = real.rules + real.heat + real.render;
 console.log(`   total ${ms(frame)} par tick → ${Math.min(60, 1000 / frame).toFixed(0)} ticks/s affichés (60 visés)\n`);
 
@@ -152,6 +154,6 @@ for (const n of counts) {
 console.log("\n3. Projection sur le vrai moteur");
 const projected = real.rules / best.sand + real.heat / best.heat + real.render;
 console.log(`   un cœur        : ${ms(frame)} par tick`);
-console.log(`   ${best.n} cœurs${" ".repeat(Math.max(0, 8 - String(best.n).length))}: ${ms(projected)} par tick (règles ÷${best.sand.toFixed(1)}, chaleur ÷${best.heat.toFixed(1)}, rendu inchangé)`);
+console.log(`   ${best.n} cœurs${" ".repeat(Math.max(0, 8 - String(best.n).length))}: ${ms(projected)} par tick (règles ÷${best.sand.toFixed(1)}, chaleur ÷${best.heat.toFixed(1)}, envoi inchangé)`);
 console.log(`   ns par cellule, noyau sable sur un cœur : ${((one.sand * 1e6) / N).toFixed(1)} — le vrai moteur en coûte ${((real.rules * 1e6) / (N * Math.max(real.awake, 1e-6))).toFixed(1)} par cellule éveillée`);
 console.log("\n4. Carte graphique : `npm run dev`, puis ouvrir http://localhost:5173/test/gpu.html");
