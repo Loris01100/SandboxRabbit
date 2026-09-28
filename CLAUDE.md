@@ -13,6 +13,8 @@ fichiers-là, pas celui-ci.
   seul AGENTS.md est chargé d'office, les guides ne le sont pas.
 - Pour une tâche couverte par [docs/agents/recettes.md](docs/agents/recettes.md),
   suivre la recette et sa liste de ce qu'on oublie.
+- `/ponytail-debt` ([.claude/skills/ponytail-debt/](.claude/skills/ponytail-debt/SKILL.md))
+  liste la dette connue : tous les `ponytail:` du code, sans rien modifier.
 - Chaque modification de code met à jour au moins un `.md` (table
   « Documentation à tenir à jour » d'AGENTS.md). Le hook `Stop` de
   [.claude/settings.json](.claude/settings.json) le vérifie : s'il bloque, mettre

@@ -190,6 +190,10 @@ Deux pistes distinctes, à ne pas confondre :
   Il faudrait alors déclarer le binding (optionnel, `AI?: Ai`) dans l'interface
   `Env` de `src/worker/app.ts`.
 
+**Dette connue** : les `ponytail:` du code (perte de contexte WebGL, encodage
+de la grille, gravité inversée des créatures…). `/ponytail-debt` en fait la
+liste complète sous Claude Code ; ailleurs, `grep -rn "ponytail:" src test`.
+
 ## Contribuer
 
 Les consignes de développement — architecture, invariants du moteur, recettes

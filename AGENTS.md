@@ -175,7 +175,8 @@ aucun test précis.
   densité et le ton des commentaires existants.
 - `ponytail:` en tête d'un commentaire marque un raccourci assumé et sa limite
   (« à revoir le jour où… »). En ajouter un plutôt que de laisser une dette
-  implicite.
+  implicite. La liste complète : `grep -rn -A4 "ponytail:" src test index.html`
+  (`/ponytail-debt` sous Claude Code) ; le README la résume sous « Dette connue ».
 - Pas de framework UI, DOM impératif, éléments récupérés par
   `querySelector<…>("#id")!`. Pas de dépendance client sans raison forte : la
   CI tient deux budgets de 80 Kio, la page (JS + CSS) et le moteur (Worker).
