@@ -3,7 +3,8 @@ import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PILOT, SAND, SHORTCUTS, SOURCE, S
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
 import { clampPan, panAfterZoom, pushRecent, read, write } from "./ui.ts";
-import { captureFrame, initShare } from "./share.ts";
+import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
+import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
 import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, onResize, order, present, resize, type ClipData } from "./world.ts";
 import type { Knobs } from "./sim/sandbox.ts";
@@ -918,6 +919,7 @@ initShare({
     if (goal !== undefined) order({ t: "goal", goal });
     startChallenge(c);
   },
+  watch: (rec) => watch(rec),
 });
 
 /* -------------------------------------------------------------------- scène */
@@ -931,7 +933,9 @@ const BAC = "sandbox-rabbit:bac";
 const kept = read(BAC);
 // `quiet` : rien à annuler avant le premier geste. À défaut des deux, le bac a
 // déjà graîné sa cuvette tout seul.
-if (location.hash.length > 1) loadHash(location.hash.slice(1));
+// Un lien de rejeu pose sa propre grille : le bac gardé ne servirait à rien.
+if (location.hash.startsWith(`#${FILM_LINK}`)) void openFilmLink(location.hash.slice(FILM_LINK.length + 1));
+else if (location.hash.length > 1) loadHash(location.hash.slice(1));
 else if (kept) loadWorld(kept);
 
 function loadHash(raw: string): void {
@@ -979,16 +983,15 @@ addEventListener("visibilitychange", () => {
  * (replay.ts). Une partie de dix minutes tient en quelques kilo-octets, et le
  * rejeu retombe sur la même grille au pixel près.
  *
- * ponytail: en mémoire seulement — rien ne s'exporte ni ne s'importe. Ajouter
- * un fichier ou un lien le jour où on veut échanger des parties ; ce sera un
- * JSON venu d'ailleurs, donc à valider comme une grille de la galerie.
+ * Il s'exporte en lien ou en fichier, et s'importe de même (share.ts) : venu
+ * d'ailleurs, il passe d'abord par `vet()` de replay.ts.
  */
 
 const recButton = document.querySelector<HTMLButtonElement>("#rec")!;
 const playbackButton = document.querySelector<HTMLButtonElement>("#replay")!;
 
-playbackButton.addEventListener("click", () => {
-  if (playing) { order({ t: "play", on: false }); return; }
+/** Lance le rejeu que garde le bac. */
+function playFilm(): void {
   if (!film) return;
   // Les scènes ont leur taille : un rejeu 480 dans un bac 320 se décalerait.
   if (film.w !== WIDTH) fit(film.w);
@@ -997,7 +1000,24 @@ playbackButton.addEventListener("click", () => {
   set({ running });
   playButton.textContent = "Pause";
   order({ t: "play", on: true });
+}
+
+playbackButton.addEventListener("click", () => {
+  if (playing) { order({ t: "play", on: false }); return; }
+  playFilm();
 });
+
+/**
+ * Un rejeu importé (lien, fichier) : il remplace le film du bac et se joue
+ * aussitôt — on l'a ouvert pour le regarder.
+ */
+function watch(rec: Recording): void {
+  if (guest) { statusEl.textContent = FOLLOW; return; }
+  film = { w: rec.w, h: rec.h };
+  playbackButton.disabled = false;
+  order({ t: "reel", rec });
+  playFilm();
+}
 
 recButton.addEventListener("click", () => {
   if (playing) return; // on n'enregistre pas un rejeu

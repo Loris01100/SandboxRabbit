@@ -15,6 +15,7 @@
  */
 import type { News, Order } from "./sim/sandbox.ts";
 import type { Grid } from "./sim/render.ts";
+import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
 
 export const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
@@ -83,6 +84,15 @@ export function askGrid(): Promise<string> {
   return new Promise((resolve) => {
     waiting.set(ask, resolve as (value: unknown) => void);
     order({ t: "grid", ask });
+  });
+}
+
+/** Le dernier rejeu enregistré ou importé, pour l'exporter ; null s'il n'y en a pas. */
+export function askFilm(): Promise<Recording | null> {
+  const ask = ++asked;
+  return new Promise((resolve) => {
+    waiting.set(ask, resolve as (value: unknown) => void);
+    order({ t: "film", ask });
   });
 }
 

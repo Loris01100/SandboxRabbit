@@ -13,7 +13,7 @@
 import { type Engine } from "./sim/engine.ts";
 import { applyGesture, weather, type Gesture } from "./gestures.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./sim/codec.ts";
-import { type MaterialId } from "./sim/materials.ts";
+import { MATERIALS, type MaterialId } from "./sim/materials.ts";
 
 /** Les réglages de scène qui changent la simulation (pas le rendu). */
 export interface Scene {
@@ -220,5 +220,139 @@ export class Player {
     this.engine.step();
     this.tick++;
     return true;
+  }
+}
+
+/* ------------------------------------------------------ export et import */
+
+/** Le plus grand bac du sélecteur : un rejeu plus grand ne vient pas d'ici. */
+const CELLS_MAX = 1920 * 1080;
+/**
+ * Poids maximal d'un rejeu importé, JSON décompressé, en octets. Une partie de
+ * dix minutes en pèse quelques dizaines de kilo-octets ; sans plafond, un lien
+ * de quelques kilo-octets pouvait se décompresser en gigaoctets.
+ */
+export const FILM_MAX = 8 * 1024 * 1024;
+
+type Field = "n" | "b" | "s";
+/** Les champs de chaque geste et leur type : nombre fini, booléen, texte. */
+const FIELDS: Record<Gesture["t"], Record<string, Field>> = {
+  paint: { x: "n", y: "n", r: "n", id: "n", d: "n", over: "b" },
+  fill: { x: "n", y: "n", id: "n" },
+  rect: { x: "n", y: "n", x2: "n", y2: "n", id: "n", over: "b" },
+  frozen: { x: "n", y: "n", r: "n", on: "b" },
+  toggle: { x: "n", y: "n" },
+  clip: { x: "n", y: "n", w: "n", h: "n", cells: "s", life: "s" },
+  pilot: { keys: "n" },
+};
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const int = (v: unknown): v is number => Number.isSafeInteger(v);
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const typed = (v: unknown, f: Field): boolean => (f === "n" ? finite(v) : f === "b" ? typeof v === "boolean" : typeof v === "string");
+
+/**
+ * Une grille encodée qu'on saura poser : `atob` lève sur un caractère hors
+ * base64, et une levée au milieu d'un rejeu arrêterait le bac en plein tick.
+ */
+function readable(data: unknown, n: number): data is string {
+  if (typeof data !== "string") return false;
+  try {
+    decode(data, n); decodeFrozen(data, n); decodeLife(data, n); decodeTemp(data, n);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isScene(s: unknown): s is Scene {
+  return isObject(s) && finite(s.wind) && finite(s.ambient) && (s.gravity === 1 || s.gravity === -1)
+    && int(s.emit) && MATERIALS[s.emit as MaterialId] !== undefined && typeof s.weather === "boolean"
+    && (s.pilot === undefined || int(s.pilot));
+}
+
+/**
+ * Un geste qu'`applyGesture` saura appliquer sans lever. Il écarte déjà les
+ * coordonnées non entières et les ids inconnus, et `disc()` borne les rayons :
+ * reste à garantir les types, et un morceau collé lisible.
+ */
+function isGesture(g: unknown, n: number): g is Gesture {
+  if (!isObject(g) || typeof g.t !== "string" || !Object.hasOwn(FIELDS, g.t)) return false;
+  const fields = FIELDS[g.t as Gesture["t"]];
+  for (const k in fields) if (!typed(g[k], fields[k])) return false;
+  if (g.t === "paint" && g.only !== undefined && !finite(g.only)) return false;
+  if (g.t === "clip" && int(g.w) && int(g.h) && g.w * g.h > 0 && g.w * g.h <= n) {
+    return readable(g.cells, g.w * g.h) && readable(g.life, g.w * g.h);
+  }
+  return true;
+}
+
+/**
+ * Passe au crible un enregistrement venu d'ailleurs (lien, fichier) : rendu
+ * tel quel s'il se rejoue sans lever, null sinon. C'est une partie qu'on n'a
+ * pas jouée, rejouée dans notre bac : comme une grille de la galerie, `adopt()`
+ * en écartera les ids inconnus à la pose — ici on s'assure qu'aucun champ ne
+ * fera tomber le `Player` en route.
+ */
+export function vet(raw: unknown): Recording | null {
+  if (!isObject(raw) || raw.v !== 1) return null;
+  const { w, h, seed, scan, grid, clock, scene, beats, ticks } = raw;
+  if (!int(w) || !int(h) || w <= 0 || h <= 0 || w * h > CELLS_MAX) return null;
+  const n = w * h;
+  if (!int(seed) || !int(scan) || !int(ticks) || ticks < 0) return null;
+  if (!readable(grid, n) || !readable(clock, n) || !isScene(scene) || !Array.isArray(beats)) return null;
+  // Le lecteur avance un curseur : des beats dans le désordre seraient sautés.
+  let last = 0;
+  for (const b of beats as unknown[]) {
+    if (!isObject(b) || !int(b.at) || b.at < last || b.at > ticks) return null;
+    last = b.at;
+    if ("g" in b) { if (!isGesture(b.g, n)) return null; }
+    else if ("scene" in b) { if (!isScene(b.scene)) return null; }
+    else if (!readable(b.grid, n) || !readable(b.clock, n)) return null;
+  }
+  return { v: 1, w, h, seed, scan, grid, clock, scene, beats: beats as Beat[], ticks };
+}
+
+/** Un rejeu en fichier : le JSON tel quel. Null s'il est trop lourd, illisible ou mal formé. */
+export function parse(json: string): Recording | null {
+  if (json.length > FILM_MAX) return null;
+  try {
+    return vet(JSON.parse(json));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Un rejeu pour un lien : le JSON compressé (deflate, natif du navigateur),
+ * en base64 url comme les grilles du codec. Le JSON répète ses clés à chaque
+ * geste : la compression le ramène à peu près au poids de la grille de départ.
+ */
+export async function pack(rec: Recording): Promise<string> {
+  const stream = new Blob([JSON.stringify(rec)]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+  const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 4096) binary += String.fromCharCode(...bytes.subarray(i, i + 4096));
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+/** L'inverse de `pack()`, plafonné à `FILM_MAX` pendant la décompression. Null si le lien est abîmé. */
+export async function unpack(text: string): Promise<Recording | null> {
+  try {
+    const binary = atob(text.replaceAll("-", "+").replaceAll("_", "/"));
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > FILM_MAX) { await reader.cancel(); return null; }
+      chunks.push(value);
+    }
+    return parse(await new Blob(chunks as BlobPart[]).text());
+  } catch {
+    return null;
   }
 }

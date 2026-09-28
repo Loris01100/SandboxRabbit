@@ -81,13 +81,15 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | `clip` `{ask,…}` | Découpe un rectangle, répond par `reply` |
 | `grid` `{ask}` | Répond par `reply` : la grille entière encodée à l'instant (`askGrid()` de world.ts) — ce que sauvegarde et lien doivent porter |
 | `rec` / `play` `{on}` | Enregistrement / rejeu. Le rejeu obéit à la pause ; à sa fin, le moteur reprend les réglages du panneau (`knobs`) |
+| `film` `{ask}` | Répond par `reply` : le dernier rejeu enregistré ou importé (`Recording`), ou `null` (`askFilm()` de world.ts) — ce qu'exportent lien et fichier |
+| `reel` `{rec}` | Remplace le rejeu du bac par un rejeu importé, **déjà passé par `vet()`** côté page ; arrête le rejeu en cours. Refusé à un invité |
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
 | `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,noise?}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y]` ou `null` (la caméra le suit) |
 | `stats` | 2 × / s | nombre de cellules pleines |
 | `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`, `latestGrid()`), pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
-| `reply` | à la demande | réponse numérotée à `askLoad()` / `askClip()` |
+| `reply` | à la demande | réponse numérotée à `askLoad()` / `askGrid()` / `askClip()` / `askFilm()` |
 | `say` | à la demande | message pour la barre de statut |
 | `won` | à la demande | le défi en cours est réussi (vérifié toutes les 500 ms dans le Worker) |
 | `rec` / `play` | à la demande | fin d'enregistrement, début/fin de rejeu |
@@ -155,7 +157,7 @@ sans bouger (moins de `CLICK` pixels) la raccroche, et `meet()` aussi.
   sinon les invités divergent. Un rejeu local est refusé tant qu'il y a du
   monde (il avancerait le bac hors de la partie).
 - Un invité refuse tout ordre qui toucherait à son bac (`do`, `edit`, `scene`,
-  `load`, `goal`, `rec`, `play`) : ses gestes partent à l'hôte et lui
+  `load`, `goal`, `rec`, `play`, `reel`) : ses gestes partent à l'hôte et lui
   reviennent dans la partie, après un aller-retour (pas de prédiction). Ses
   réglages restent dans le panneau et rentrent au moteur quand il part.
 - Filet : une empreinte FNV de `cells` par seconde (`sums`). Un invité qui ne
@@ -251,7 +253,7 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | [challenges.ts](../../src/client/challenges.ts) | défis et décors bâtis en code | **oui** |
 | [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
 | [room.ts](../../src/client/room.ts) | salon côté navigateur | non |
-| [share.ts](../../src/client/share.ts) | galerie, PNG, vidéo, lien | non |
+| [share.ts](../../src/client/share.ts) | galerie, PNG, vidéo, lien ; export / import du rejeu | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
 | [theme.ts](../../src/client/theme.ts) | jour / nuit | non |
 | [sim/*](../../src/client/sim/) | moteur, rendu, codec, registre, bac | **oui** |
 
@@ -266,6 +268,23 @@ recharge le monde par `GET /api/worlds/:id` — ne pas « optimiser » en
 réutilisant la copie en main, c'est ce chemin qui compte les vues. Le `×` de
 suppression n'apparaît que sur les cartes dont on détient le jeton. Un monde
 qui porte un `goal` devient un `Challenge` par `challengeOf()`.
+
+### Rejeu exporté
+
+Aussi dans share.ts. « Lien du rejeu » et « Fichier du rejeu » demandent le
+film au bac (`askFilm()`) : le fichier est le JSON du `Recording`
+(`bac-….rejeu.json`), le lien le porte compressé — `pack()` de replay.ts,
+deflate natif (`CompressionStream`) puis base64 url, derrière `#rejeu~` pour
+ne pas le prendre pour un monde (`#320~…`). « Ouvrir un rejeu » lit un
+fichier ; main.ts reconnaît `#rejeu~` à l'ouverture de la page. Dans les deux
+cas, le texte passe par `parse()` / `unpack()`, qui finissent par `vet()` :
+version, taille, types de chaque champ, grilles et morceaux collés
+décodables, réglages de scène plausibles, beats dans l'ordre des ticks —
+tout ce qui ferait lever le `Player` en plein tick. Plafond `FILM_MAX`
+(8 Mo de JSON), vérifié **pendant** la décompression (lien) : quelques
+kilo-octets de lien ne se déplient pas en gigaoctets. Le rejeu validé part au
+bac par `watch()` (rappel passé à `initShare()`) : ordre `reel`, puis lecture
+comme au bouton « Rejouer », taille du bac ajustée (`fit()`).
 
 Les modules périphériques (`room`, `share`, `theme`) ne doivent **pas**
 importer main.ts (cycle) : main.ts leur passe ce dont ils ont besoin par un

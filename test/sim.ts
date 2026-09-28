@@ -9,7 +9,7 @@ import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/cli
 import { thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, weather, type Gesture } from "../src/client/gestures.ts";
-import { Player, Recorder, put } from "../src/client/replay.ts";
+import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
 import { terrain } from "../src/client/terrain.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
@@ -1203,6 +1203,37 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(hash(bis), empreinte, "rejouable autant de fois qu'on veut");
 
   assert.throws(() => new Player(rec.rec, new Engine(W + 10, H, 1)), "un bac d'une autre taille est refusé, pas décalé");
+
+  // Exporté puis réimporté — en fichier (JSON) comme en lien (compressé) —, il
+  // rejoue la même partie. Un rejeu venu d'ailleurs passe par `vet()` : tout
+  // ce qui ferait lever le lecteur en plein tick est refusé à l'entrée.
+  const fichier = parse(JSON.stringify(rec.rec));
+  assert.ok(fichier, "un rejeu exporté en fichier se relit");
+  const lien = await unpack(await pack(rec.rec));
+  assert.ok(lien, "un rejeu exporté en lien se relit");
+  assert.deepEqual(lien, rec.rec, "le lien rend l'enregistrement à l'identique");
+  const relu = new Player(fichier, new Engine(W, H, 7));
+  while (relu.step()) { /* jusqu'au bout */ }
+  assert.equal(hash(relu.engine), empreinte, "un rejeu importé retombe sur la même grille");
+
+  const abîmé = (patch: object): Recording | null => vet({ ...structuredClone(rec.rec), ...patch });
+  assert.equal(parse("{pas du json"), null, "un fichier qui n'est pas du JSON est refusé");
+  assert.equal(abîmé({ v: 2 }), null, "une autre version du format est refusée");
+  assert.equal(abîmé({ grid: "!!!" }), null, "une grille illisible est refusée (atob lèverait au départ)");
+  assert.equal(abîmé({ w: 1e6, h: 1e6 }), null, "une grille démesurée est refusée");
+  assert.equal(abîmé({ scene: { ...rec.rec.scene, gravity: 3 } }), null, "une gravité inventée est refusée");
+  assert.equal(abîmé({ scene: { ...rec.rec.scene, emit: 250 } }), null, "une matière de source inconnue est refusée");
+  assert.equal(abîmé({ beats: [{ at: 5, g: { t: "pilot", keys: 1 } }, { at: 2, g: { t: "pilot", keys: 0 } }] }), null,
+    "des beats dans le désordre sont refusés (le lecteur les sauterait)");
+  assert.equal(abîmé({ beats: [{ at: 1, g: { t: "boum", x: 1, y: 1 } }] }), null, "un geste inconnu est refusé");
+  assert.equal(abîmé({ beats: [{ at: 1, g: { t: "clip", x: 0, y: 0, w: 2, h: 2, cells: "@@", life: "" } }] }), null,
+    "un morceau collé illisible est refusé");
+  assert.equal(abîmé({ beats: [{ at: 1, g: { t: "fill", x: "0", y: 0, id: SAND } }] }), null, "un champ mal typé est refusé");
+  assert.equal(await unpack("pas-un-lien"), null, "un lien abîmé est refusé, sans lever");
+  // Une bombe : quelques kilo-octets de lien qui se décompressent au-delà du plafond.
+  const bombe = await pack({ ...rec.rec, grid: rec.rec.grid + ".".repeat(FILM_MAX) });
+  assert.ok(bombe.length < 100_000, "la bombe est petite une fois compressée");
+  assert.equal(await unpack(bombe), null, "et refusée dès qu'elle passe le plafond en se décompressant");
 }
 
 /**

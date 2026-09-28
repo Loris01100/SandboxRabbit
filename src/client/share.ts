@@ -6,7 +6,8 @@
  * deux gestes dont il a besoin (charger une grille, lancer un défi) plutôt que
  * d'importer main.ts, ce qui bouclerait.
  */
-import { HEIGHT, WIDTH, askGrid, canvas } from "./world.ts";
+import { HEIGHT, WIDTH, askFilm, askGrid, canvas } from "./world.ts";
+import { FILM_MAX, pack, parse, unpack, type Recording } from "./replay.ts";
 import { thumbnail } from "./sim/render.ts";
 import { decode } from "./sim/codec.ts";
 import { EMPTY, MATERIALS, PALETTE } from "./sim/materials.ts";
@@ -42,6 +43,8 @@ export interface Deps {
    * qui est seul à pouvoir la vérifier.
    */
   start(challenge: Challenge, goal?: string): void;
+  /** Donne au bac un rejeu importé (lien, fichier), déjà validé, et le fait jouer. */
+  watch(rec: Recording): void;
 }
 
 let deps: Deps;
@@ -235,6 +238,58 @@ document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", a
   }
 });
 
+/* -------------------------------------------------------------------- rejeu */
+
+// Un rejeu sort en lien ou en fichier. Le lien porte le JSON compressé
+// (`pack()`), derrière un préfixe qui le distingue d'un monde (« 320~… ») ;
+// le fichier, le JSON lisible. À l'entrée, `vet()` le passe au crible : c'est
+// une partie qu'on n'a pas jouée, rejouée dans notre bac.
+export const FILM_LINK = "rejeu~";
+
+/** Le rejeu à exporter, ou null — la barre de statut dit alors comment en avoir un. */
+async function film(): Promise<Recording | null> {
+  const rec = await askFilm();
+  if (!rec) statusEl.textContent = "Aucun rejeu : « Enregistrer », jouer, puis « Arrêter ».";
+  return rec;
+}
+
+document.querySelector<HTMLButtonElement>("#film-link")!.addEventListener("click", async () => {
+  const rec = await film();
+  if (!rec) return;
+  location.hash = FILM_LINK + (await pack(rec));
+  const ko = Math.max(1, Math.round(location.href.length / 1024));
+  try {
+    await navigator.clipboard.writeText(location.href);
+    statusEl.textContent = `Lien du rejeu copié (~${ko} ko).`;
+  } catch {
+    statusEl.textContent = `Lien du rejeu dans la barre d'adresse (~${ko} ko).`;
+  }
+});
+
+document.querySelector<HTMLButtonElement>("#film-save")!.addEventListener("click", async () => {
+  const rec = await film();
+  if (!rec) return;
+  download(new Blob([JSON.stringify(rec)], { type: "application/json" }), "rejeu.json");
+  statusEl.textContent = "Rejeu téléchargé.";
+});
+
+const filmFile = document.querySelector<HTMLInputElement>("#film-file")!;
+document.querySelector<HTMLButtonElement>("#film-open")!.addEventListener("click", () => filmFile.click());
+filmFile.addEventListener("change", async () => {
+  const file = filmFile.files?.[0];
+  filmFile.value = ""; // sinon rouvrir le même fichier ne redéclenche rien
+  if (!file) return;
+  const rec = file.size > FILM_MAX ? null : parse(await file.text());
+  if (!rec) { statusEl.textContent = "Rejeu illisible (fichier abîmé, trop lourd ou d'un autre format)."; return; }
+  deps.watch(rec);
+});
+
+/** Un lien de rejeu à l'ouverture de la page (sans le préfixe `FILM_LINK`). */
+export async function openFilmLink(text: string): Promise<void> {
+  const rec = await unpack(text);
+  if (!rec) { statusEl.textContent = "Lien de rejeu illisible (coupé ou abîmé)."; return; }
+  deps.watch(rec);
+}
 
 /** Télécharge un blob sous un nom horodaté. */
 function download(blob: Blob, extension: string): void {

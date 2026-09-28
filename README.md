@@ -66,7 +66,7 @@ mondes partagés, bac multijoueur.
 | Copier / coller | Outil « Copier » : le glissé découpe un rectangle, `Ctrl+V` le repose centré sous le curseur. `life` part avec le morceau — sans lui un interrupteur collé perdrait son état et une source la matière qu'elle crache. |
 | Pipette | `Alt` + clic sur le bac reprend la matière sous le curseur : plus court que de rouvrir la famille dans la palette. |
 | Vidéo | `canvas.captureStream()` + `MediaRecorder`, deux API natives : le bac se filme en `.webm`. C'est la copie agrandie ×4 qui est filmée (celle du PNG), pas le canvas de 320 pixels de large. |
-| Rejeu | « Enregistrer » puis « Rejouer » : rien n'est filmé. On garde la grille de départ, l'état du tirage au sort (`engine.seed`), le sens du balayage et la liste des gestes horodatés en ticks — le moteur ne tire qu'au xorshift semé, donc les rejouer redonne la même partie au pixel près. Quelques kilo-octets là où la vidéo pèse des mégaoctets, et un rejeu se rejoue *dans* la simulation : on peut le regarder à une autre vitesse. C'est aussi ce qui sert de test de non-régression au moteur (test/sim.ts). En mémoire seulement pour l'instant : rien ne s'exporte encore. La pause arrête le rejeu et « Pas à pas » l'avance d'un tick ; vider, annuler, charger un monde ou bâtir une scène l'interrompt, et à la fin le bac reprend les réglages du panneau (gravité, vent, ambiante). |
+| Rejeu | « Enregistrer » puis « Rejouer » : rien n'est filmé. On garde la grille de départ, l'état du tirage au sort (`engine.seed`), le sens du balayage et la liste des gestes horodatés en ticks — le moteur ne tire qu'au xorshift semé, donc les rejouer redonne la même partie au pixel près. Quelques kilo-octets là où la vidéo pèse des mégaoctets, et un rejeu se rejoue *dans* la simulation : on peut le regarder à une autre vitesse. C'est aussi ce qui sert de test de non-régression au moteur (test/sim.ts). « Lien du rejeu » le copie dans un lien (compressé, quelques kilo-octets), « Fichier du rejeu » le télécharge en `.json`, « Ouvrir un rejeu » le relit : il se joue aussitôt, le bac prend sa taille. Un rejeu venu d'ailleurs est vérifié champ par champ avant de toucher au bac. La pause arrête le rejeu et « Pas à pas » l'avance d'un tick ; vider, annuler, charger un monde ou bâtir une scène l'interrompt, et à la fin le bac reprend les réglages du panneau (gravité, vent, ambiante). |
 | Zoom & déplacement | Molette (ou pincement à deux doigts, ou `+` / `-`) pour zoomer autour du curseur, clic du milieu ou ZQSD / WASD / flèches tenues pour déplacer — la caméra d'un grand monde. La vue est bornée : le bac agrandi recouvre toujours son cadre. Une transformation CSS sur le canvas : `toCell()` passe par `getBoundingClientRect()`, qui en tient déjà compte — le pinceau suit sans une ligne de correction. |
 | Taille de grille | 320×180, 480×270, 640×360, 1280×720 ou 1920×1080, tous en 16/9 — les deux dernières tiennent grâce aux blocs de veille. Quand trop de matière bouge à la fois (un lac entier qui s'étale en 1920×1080), le bac ralentit au lieu de ramer : une frame ne s'accorde que 12 ms de simulation et oublie le reste de son retard, le pinceau et l'affichage restent fluides. `Engine` et `Renderer` sont recréés, les réglages du monde reportés. Les défis, écrits en dur pour 320×180, y ramènent d'eux-mêmes. |
 | Ménage nocturne | Un Cron Trigger (4 h du matin) ne garde que les 50 mondes les plus récents — ceux que la galerie montre. |
@@ -189,6 +189,17 @@ Deux pistes distinctes, à ne pas confondre :
   carte à partir d'une description, commenter ce que fait le joueur, etc.
   Il faudrait alors déclarer le binding (optionnel, `AI?: Ai`) dans l'interface
   `Env` de `src/worker/app.ts`.
+
+**Social et contenu**
+
+- *Rejeu exportable* — fait : en lien ou en fichier (voir « Rejeu » plus
+  haut). C'est la pièce qu'attend le classement.
+- *Classement vérifié des défis*, ensuite : le serveur ne croit pas un temps
+  annoncé, il rejoue la partie reçue avec le même moteur (déterministe, un seul
+  tirage semé) et constate lui-même le défi réussi et le tick atteint. Réservé
+  au 320×180 : rejouer coûte du temps de calcul, et celui permis à une requête
+  d'un Worker Cloudflare est borné — une grande grille ou une longue partie
+  n'y tiendrait pas.
 
 **Dette connue** : les `ponytail:` du code (perte de contexte WebGL, encodage
 de la grille, gravité inversée des créatures…). `/ponytail-debt` en fait la

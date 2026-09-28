@@ -231,6 +231,11 @@ gestures.ts).
   `applyGesture` les refuse (`whole()`), et `fill()` se garde aussi — en
   x = 1,5 ses écritures tombaient à côté du tableau et sa pile ne se vidait
   jamais.
+- Un rejeu importé (lien, fichier) passe en entier par `vet()` de replay.ts
+  avant d'atteindre le bac : ses grilles et ses gestes sont rejoués plus tard,
+  en plein tick, là où une levée (`atob` sur un caractère hors base64, par
+  exemple) couperait le rejeu. Un nouveau champ de `Recording`, de `Scene` ou
+  de geste s'ajoute aussi à ce crible (`FIELDS` pour un geste).
 - Si le moteur jette malgré tout, la boucle de sim/worker.ts repose son
   échéance dans un `finally` : l'erreur remonte, le bac ne s'arrête plus.
 

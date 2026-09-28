@@ -54,6 +54,8 @@ export type Order =
   | { t: "grid"; ask: number }
   | { t: "rec"; on: boolean }
   | { t: "play"; on: boolean }
+  | { t: "film"; ask: number }
+  | { t: "reel"; rec: Recording }
   | { t: "host"; on: boolean }
   | { t: "follow"; rec: Recording | null }
   | ({ t: "turn" } & Turn);
@@ -159,9 +161,9 @@ export class Sandbox {
   }
 
   order(o: Order): void {
-    if (o.t !== "cursor" && o.t !== "clip" && o.t !== "grid") this.touched = true;
+    if (o.t !== "cursor" && o.t !== "clip" && o.t !== "grid" && o.t !== "film") this.touched = true;
     if (this.follower && (o.t === "do" || o.t === "edit" || o.t === "scene" || o.t === "terrain" || o.t === "load"
-      || o.t === "goal" || o.t === "rec" || o.t === "play")) {
+      || o.t === "goal" || o.t === "rec" || o.t === "play" || o.t === "reel")) {
       if (o.t !== "do" && !(o.t === "edit" && o.do === "snapshot")) this.send({ t: "say", text: FOLLOW });
       if (o.t === "load" && o.ask !== undefined) this.send({ t: "reply", ask: o.ask, value: false });
       return;
@@ -219,6 +221,16 @@ export class Sandbox {
         return;
       case "rec": return this.record(o.on);
       case "play": return this.play(o.on);
+      case "film":
+        // Le rejeu à exporter (lien, fichier) : le dernier enregistré ou importé.
+        this.send({ t: "reply", ask: o.ask, value: this.film });
+        return;
+      case "reel":
+        // Un rejeu venu d'ailleurs, déjà passé au crible par `vet()` côté page.
+        // Le lecteur en cours tient l'ancien : on l'arrête avant de le remplacer.
+        this.play(false);
+        this.film = o.rec;
+        return;
     }
   }
 
