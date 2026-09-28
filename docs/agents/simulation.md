@@ -60,9 +60,13 @@ milliseconde par tick, au lieu de 30. Un bloc est traité si lui ou un voisin a
   `relocate`, `convert`, `decay`, `charge`, `paste`, `setFrozen`, les bascules,
   l'amorçage du C4 par `explode`. Chacune appelle `wake(i)` ;
 - **une matière active** (table `ACTIVE`) : elle agit sans que rien ne change
-  autour — gaz, créatures, lave, acide, plante, thermite, uranium, sel,
-  nanites, source, pile, braise, étincelle, aimant — plus le métal en repos
-  (`life` > 0) ;
+  autour — gaz, créatures, acide, thermite, uranium, sel, nanites, source,
+  pile, braise, étincelle, aimant — plus le métal en repos (`life` > 0) ;
+- **une matière qui a de quoi agir** : la plante qui touche de l'eau, la lave
+  qui touche du sable ou de l'inflammable appellent `wake(i)` elles-mêmes.
+  Hors de `ACTIVE` exprès : sans eau ni combustible elles ne font rien, et
+  chaque arbre, chaque poche de lave d'un monde généré tenait sinon son coin
+  de bac éveillé pour rien ;
 - **une cellule qui passe son tour** à cause de `clock` (filet : un grain
   peint dans le vide garde l'horloge quelconque de la cellule vide) ;
 - **un liquide bloqué d'un côté mais libre de l'autre** (`canMove()`) : il ne
@@ -99,6 +103,10 @@ Invariants :
   l'attrape que si sa scène réveille la règle fautive ; sinon **aucun test ne
   le voit**. Même règle hors du moteur pour ce qui fait partie de la partie
   (`weather()`). Seule exception : la graine par défaut du constructeur.
+  Le générateur de mondes ([terrain.ts](../../src/client/terrain.ts)) tire,
+  lui, sur un xorshift à lui semé par la graine du monde : un monde est une
+  grille posée d'un coup (`stamp()`), un invité le reçoit tout fait et ne
+  rejoue pas sa construction — elle ne doit donc rien prendre au tirage du bac.
 - Changer **l'ordre** des tirages d'une règle change l'empreinte, même à
   comportement visible identique. C'est voulu.
 - Rejouer en cours de partie exige les tableaux **plus** `seed`, `scan` et
@@ -193,6 +201,7 @@ réinitialiser à l'aveugle**, chaque matière en fait autre chose.
 | `URANIUM` | compteur d'emballement |
 | `MAGNET` | pôle (1 = repousse) |
 | `RABBIT` | satiété du cœur (0 au chargement d'un monde sans état vivant = repart pleine) ; les cellules du corps n'en ont pas |
+| `HERO` | bit 7 = tourné vers la gauche (où il creuse), bits 0-3 = élan de saut restant ; perdu, il repart debout vers la droite. Le corps n'en a pas |
 
 ## Familles de règles
 
@@ -234,8 +243,15 @@ explosif = ajouter un déclencheur, sinon c'est du TNT repeint.
 
 ### Créatures : le lapin
 
-Un lapin = **neuf cellules de forme fixe** (`RABBIT_DX` / `RABBIT_DY` /
-`RABBIT_ID` dans engine.ts). Le cœur (`RABBIT`) porte la satiété et décide de
+Une créature est une **forme** (`Shape` dans engine.ts : offsets `dx` / `dy`
+depuis le cœur et matière de chaque case, le cœur d'abord). Pose, corps
+entier, mort, déplacement d'un bloc et cellules du corps sont communs :
+`spawn()`, `intact()`, `kill()`, `maim()`, `relocate()`, `updatePart()`
+prennent la forme en premier argument. Une nouvelle créature = une forme, ses
+matières (`creature` pour le cœur, `part` pour le reste) et sa règle de cœur.
+
+Un lapin = **neuf cellules de forme fixe** (`RABBIT_SHAPE`, tirée de
+`RABBIT_DX` / `RABBIT_DY` / `RABBIT_ID`). Le cœur (`RABBIT`) porte la satiété et décide de
 tout ; le reste du corps (`RABBIT_BODY`, `RABBIT_EYE`, `RABBIT_TAIL`, hors
 palette, `part` dans `MATERIALS`) n'a aucun état. Ordre d'un tick du cœur :
 vérifier le corps, cuisson, gel, noyade (eau, eau salée ou boue au-dessus des
@@ -244,7 +260,7 @@ oreilles), faim, chute, puis — posé — manger, se reproduire, se déplacer.
 - **Le corps ne dépend pas de `life`.** Le sens (gauche / droite) se lit sur
   le corps (`intact()` compte les cellules en place pour chaque sens), et une
   cellule du corps vit tant qu'un cœur est là où la forme l'attend
-  (`updateRabbitPart()`). Voulu : le salon n'envoie que `cells` et `frozen`, et
+  (`updatePart()`). Voulu : le salon n'envoie que `cells` et `frozen`, et
   `put()` remet `life` à zéro pour une grille sans état vivant — un invité
   promu hôte garde ainsi ses lapins.
 - Couleurs de l'œil et de la queue = matières à part, pas une teinte tirée de
@@ -268,6 +284,31 @@ oreilles), faim, chute, puis — posé — manger, se reproduire, se déplacer.
 - Coût : ~70 lectures par lapin et par tick (corps, parties, regard). Si des
   centaines de lapins pèsent au bench, `sniff()` et `intact()` d'abord.
 - La forme ne suit pas la gravité inversée (`ponytail:` dans le code).
+
+### Créatures : le héros
+
+Sept cellules (`HERO_SHAPE` : tête, buste et bras, hanches = cœur `HERO`,
+jambes), symétriques — son sens se garde dans `life`. **Il n'a pas de volonté**
+: il obéit à `engine.pilot`, cinq bits (`PILOT` dans materials.ts : gauche,
+droite, saut, creuser dessous, creuser devant). Tous les héros du bac obéissent
+aux mêmes touches.
+
+- `pilot` n'est posé **que** par le geste `pilot` (gestures.ts) : c'est ce qui
+  l'enregistre dans le rejeu et le relaie à l'hôte d'un salon. Il figure aussi
+  dans la `Scene` du rejeu, pour un enregistrement lancé touche enfoncée.
+- Ordre d'un tick : corps entier, cuisson, gel, noyade (tête sous un liquide,
+  `BREATH` par tick), creuser, puis un mouvement vertical — saut (`JUMP` ticks
+  de montée), nage (saut tenu dans un liquide), chute (lente dans un liquide,
+  `SINK`) — et un pas de côté (`STRIDE`), qui grimpe une marche d'une cellule.
+- Contrairement au lapin il **marche dans l'eau** (`relocate(…, wet)` partout)
+  : plus dense qu'elle, il y coule et nage en sautant.
+- Il creuse le solide (statique ou poudre) par `become()`, sauf `METAL` et les
+  créatures ; une cellule figée tient bon.
+- `engine.hero` = index du cœur du dernier héros posé (`spawn`) ou mis à jour :
+  Sandbox le joint à chaque frame (`hero`), vérifié (`cells[hero] === HERO`),
+  et la page fait suivre la caméra. Il n'est pas remis à -1 à la mort : c'est
+  la vérification qui le rend `null`.
+- `terrain()` (terrain.ts) en pose un au sec, au plus près du centre.
 
 ## Rendu
 

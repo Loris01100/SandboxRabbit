@@ -9,11 +9,12 @@ import { thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, weather, type Gesture } from "../src/client/gestures.ts";
 import { Player, Recorder, put } from "../src/client/replay.ts";
+import { terrain } from "../src/client/terrain.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
-  CEMENT, FILINGS, MAGNET, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
+  CEMENT, FILINGS, HERO, MAGNET, PILOT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
 const W = 60, H = 40;
@@ -1256,6 +1257,141 @@ function top(e: Engine, id: MaterialId): number {
   while (suivi.step()) { /* jusqu'au bout */ }
   assert.deepEqual(suivi.engine.cells, e.cells, "rejoué depuis un bac à moitié endormi, même grille");
   assert.equal(suivi.engine.seed, e.seed, "et mêmes tirages");
+}
+
+/**
+ * Mondes générés (terrain.ts) : une graine redonne le même monde, sans rien
+ * tirer au bac, et le monde naît au repos — sinon une grande grille
+ * s'effondrait en entier à la première seconde.
+ */
+{
+  const monde = (graine: number, bac = 1): Engine => {
+    const e = new Engine(640, 360, bac);
+    e.clear();
+    terrain(e, graine);
+    return e;
+  };
+  const a = monde(4217, 1);
+  assert.deepEqual(a.cells, monde(4217, 99).cells, "même graine, même monde, quel que soit le tirage du bac");
+  assert.notDeepEqual(a.cells, monde(4218).cells, "une autre graine, un autre monde");
+
+  const e = new Engine(640, 360, 7);
+  const tirage = e.seed;
+  terrain(e, 4217);
+  assert.equal(e.seed, tirage, "bâtir le monde ne consomme aucun tirage du bac");
+
+  for (const id of [STONE, SAND, WATER, WOOD, PLANT, PETROLEUM, LAVA, METAL, RABBIT, HERO]) {
+    assert.ok(count(a, id) > 0, `le monde 4217 contient du ${MATERIALS[id].name.toLowerCase()}`);
+  }
+  let grotte = 0;
+  for (let i = a.cells.length / 2; i < a.cells.length; i++) if (a.cells[i] === EMPTY) grotte++;
+  assert.ok(grotte > 1000, "des grottes creusent le sous-sol");
+
+  const bord = (x: number, y: number, id: MaterialId) => [a.get(x - 1, y), a.get(x + 1, y), a.get(x, y - 1), a.get(x, y + 1)]
+    .every((n) => n === id || n === STONE || n === METAL || n === URANIUM);
+  let ouvertes = 0, amas = 0;
+  for (let y = 0; y < a.height; y++) {
+    for (let x = 0; x < a.width; x++) {
+      const id = a.get(x, y);
+      if ((id === PETROLEUM || id === LAVA) && !bord(x, y, id)) ouvertes++;
+      if (id === URANIUM && [a.get(x - 1, y), a.get(x + 1, y), a.get(x, y - 1), a.get(x, y + 1)].includes(URANIUM)) amas++;
+    }
+  }
+  assert.equal(ouvertes, 0, "pétrole et lave restent enfermés dans la roche");
+  assert.equal(amas, 0, "l'uranium en grains isolés : pas de tas qui s'emballe");
+
+  const avant = a.cells.slice();
+  for (let t = 0; t < 200; t++) a.step();
+  let bougé = 0;
+  for (let i = 0; i < avant.length; i++) if (avant[i] !== a.cells[i]) bougé++;
+  assert.ok(bougé < avant.length / 100, `le monde naît au repos (${bougé} cellules changées en 200 ticks)`);
+}
+
+/**
+ * Le héros : il obéit à `pilot` (marcher, grimper une marche, sauter, nager,
+ * creuser), meurt comme le lapin, et ses commandes passent par des gestes —
+ * donc par le rejeu.
+ */
+{
+  const SOL = 35;
+  const plaine = (): Engine => {
+    const e = new Engine(W, H, 31);
+    e.rect(0, SOL, W - 1, H - 1, STONE);
+    assert.ok(e.spawnHero(10, SOL - 2) >= 0, "un héros se pose sur le sol");
+    return e;
+  };
+  const où = (e: Engine): [number, number] => {
+    assert.equal(e.cells[e.hero], HERO, "le héros est vivant");
+    return [e.hero % W, (e.hero / W) | 0];
+  };
+  const tenir = (e: Engine, keys: number, ticks: number) => {
+    applyGesture(e, { t: "pilot", keys });
+    for (let t = 0; t < ticks; t++) e.step();
+  };
+
+  const marche = plaine();
+  tenir(marche, 0, 5);
+  assert.deepEqual(où(marche), [10, SOL - 2], "sans commande, il reste debout où on l'a posé");
+  tenir(marche, PILOT.right, 40);
+  assert.ok(où(marche)[0] > 18, `il marche vers la droite (x = ${où(marche)[0]})`);
+
+  const marche2 = plaine();
+  marche2.rect(14, SOL - 1, W - 1, SOL - 1, STONE);
+  tenir(marche2, PILOT.right, 40);
+  assert.deepEqual([où(marche2)[0] > 14, où(marche2)[1]], [true, SOL - 3], "il grimpe une marche d'une cellule");
+
+  const saut = plaine();
+  applyGesture(saut, { t: "pilot", keys: PILOT.up });
+  let haut = SOL - 2;
+  for (let t = 0; t < 12; t++) { saut.step(); haut = Math.min(haut, où(saut)[1]); }
+  assert.ok(haut <= SOL - 6, `il saute (jusqu'à y = ${haut})`);
+  tenir(saut, 0, 20);
+  assert.equal(où(saut)[1], SOL - 2, "et retombe sur ses pieds");
+
+  const mur = plaine();
+  mur.rect(14, SOL - 6, 15, SOL - 1, STONE);
+  mur.rect(24, SOL - 6, 25, SOL - 1, METAL);
+  tenir(mur, PILOT.right, 40);
+  assert.equal(où(mur)[0], 12, "un mur de pierre l'arrête");
+  tenir(mur, PILOT.right | PILOT.dig, 120);
+  assert.equal(où(mur)[0], 22, "il le creuse en avançant — et le métal, lui, résiste");
+
+  const puits = plaine();
+  tenir(puits, PILOT.down, 60);
+  assert.ok(où(puits)[1] > SOL - 2, `il creuse sous ses pieds et descend (y = ${où(puits)[1]})`);
+
+  const bassin = new Engine(W, H, 32);
+  bassin.rect(0, SOL, W - 1, H - 1, STONE);
+  bassin.rect(0, 20, W - 1, SOL - 1, WATER);
+  bassin.spawnHero(10, 10);
+  tenir(bassin, 0, 80);
+  const fond = où(bassin)[1];
+  assert.ok(fond > 20, `il tombe dans l'eau et y coule (y = ${fond})`);
+  tenir(bassin, PILOT.up, 30);
+  assert.ok(où(bassin)[1] < fond - 5, "saut tenu, il nage vers la surface");
+
+  const brûlé = plaine();
+  tenir(brûlé, 0, 2);
+  brûlé.temp[brûlé.hero] = 400;
+  brûlé.step();
+  assert.equal(count(brûlé, HERO), 0, "trop chaud, il ne survit pas");
+
+  const pirate = plaine();
+  applyGesture(pirate, { t: "pilot", keys: 999 });
+  assert.equal(pirate.pilot, 999 & 31, "un pair ne pose que les cinq bits des commandes");
+
+  const e = plaine();
+  e.rect(30, SOL - 1, 31, SOL - 1, SAND);
+  const rec = new Recorder(e, false);
+  const commandes: [number, number][] = [[3, PILOT.right], [25, PILOT.right | PILOT.up], [40, PILOT.right | PILOT.dig], [70, 0]];
+  for (let t = 0; t < 100; t++) {
+    for (const [at, keys] of commandes) if (at === t) { const g: Gesture = { t: "pilot", keys }; applyGesture(e, g); rec.gesture(g); }
+    rec.tick(false);
+    e.step();
+  }
+  const rejoué = new Player(rec.rec, new Engine(W, H, 5));
+  while (rejoué.step()) { /* jusqu'au bout */ }
+  assert.deepEqual(rejoué.engine.cells, e.cells, "une partie pilotée se rejoue au pixel près");
 }
 
 console.log("ok — simulation conforme");

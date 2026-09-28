@@ -1,7 +1,8 @@
 import "./style.css";
-import { CATEGORIES, EMPTY, MAGNET, MATERIALS, SAND, SHORTCUTS, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
+import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PILOT, SAND, SHORTCUTS, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
-import { panAfterZoom, pushRecent, read, write } from "./ui.ts";
+import { SEEDS } from "./terrain.ts";
+import { clampPan, panAfterZoom, pushRecent, read, write } from "./ui.ts";
 import { captureFrame, initShare } from "./share.ts";
 import { initRoom, relay } from "./room.ts";
 import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, onResize, order, present, resize, type ClipData } from "./world.ts";
@@ -133,6 +134,13 @@ addEventListener("keydown", (e) => {
   // Une modale ouverte (galerie, raccourcis) garde ses touches : sans ça
   // Espace mettait le bac en pause pendant qu'on choisissait un monde.
   if (document.querySelector("dialog[open]")) return;
+  const move = moveKey(e);
+  if (move) { held.add(move); steer(); e.preventDefault(); return; }
+  if ((e.key === "+" || e.key === "-") && zoomInput.checked) {
+    const r = canvas.getBoundingClientRect();
+    zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(zoom * (e.key === "+" ? 1.5 : 1 / 1.5)));
+    return;
+  }
   if (e.key === " ") { toggleRun(); e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "Z" && e.shiftKey))) { redo(); e.preventDefault(); return; }
   if (e.key === "z" && (e.ctrlKey || e.metaKey)) { undo(); e.preventDefault(); return; }
@@ -240,16 +248,117 @@ function showMarquee(a: { x: number; y: number }, b: { x: number; y: number }): 
 
 // Le canvas est transformé en CSS : `toCell()` passe par `getBoundingClientRect()`,
 // qui tient déjà compte du zoom et du décalage — rien à corriger ailleurs.
-// ponytail: pas de bornes sur le décalage, on peut pousser le bac hors du cadre
-// (la molette à fond inverse remet tout d'aplomb).
 let zoom = 1;
 let panX = 0;
 let panY = 0;
 let panning = false;
 
+/**
+ * Pose la transformation du canvas, décalage ramené dans ses bornes
+ * (`clampPan`) : quel que soit le geste — molette, glisser, pincement,
+ * clavier — le bac agrandi recouvre son cadre. `offsetWidth` est la taille
+ * du canvas avant transformation, le cadre lui-même.
+ */
 function applyView(): void {
+  panX = clampPan(panX, canvas.offsetWidth, zoom);
+  panY = clampPan(panY, canvas.offsetHeight, zoom);
   canvas.style.transformOrigin = "0 0";
   canvas.style.transform = zoom === 1 ? "" : `translate(${panX}px, ${panY}px) scale(${zoom})`;
+}
+
+/** Touches de caméra : ZQSD (AZERTY), WASD (QWERTY) et flèches, en sens de déplacement de la vue. */
+const MOVES: Record<string, [number, number]> = {
+  z: [0, -1], w: [0, -1], ArrowUp: [0, -1],
+  s: [0, 1], ArrowDown: [0, 1],
+  q: [-1, 0], a: [-1, 0], ArrowLeft: [-1, 0],
+  d: [1, 0], ArrowRight: [1, 0],
+};
+/** Touches de caméra tenues : la vue glisse à chaque image tant qu'elles le sont. */
+const held = new Set<string>();
+
+/**
+ * Fait glisser la vue selon les touches tenues : un quatre-vingt-dixième du
+ * cadre par image, soit un cadre et demi par seconde, quel que soit le zoom.
+ */
+function scroll(): void {
+  let dx = 0, dy = 0;
+  for (const key of held) { dx += MOVES[key][0]; dy += MOVES[key][1]; }
+  const step = canvas.offsetWidth / 90;
+  panX -= Math.sign(dx) * step;
+  panY -= Math.sign(dy) * step;
+  applyView();
+}
+
+/**
+ * Touche de caméra — ou de héros — de l'événement, ou null. Une lettre compte
+ * quelle que soit la casse (Maj tenu pour tracer une ligne), jamais avec Ctrl
+ * (Ctrl+Z annule). Les flèches ne comptent que hors des boutons : dans la
+ * palette, elles passent d'une matière à l'autre. E (creuser) n'existe
+ * qu'avec un héros.
+ */
+function moveKey(e: KeyboardEvent): string | null {
+  if (e.ctrlKey || e.metaKey || e.altKey) return null;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (!(key in MOVES) && !(hero && key in STEER)) return null;
+  if (key.startsWith("Arrow") && (e.target as HTMLElement | null)?.closest?.("button")) return null;
+  return key;
+}
+
+addEventListener("keyup", (e) => {
+  held.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key);
+  steer();
+});
+addEventListener("blur", () => { held.clear(); steer(); });
+
+/* ------------------------------------------------------------------ héros */
+
+/** Position du héros dans la dernière frame, en cellules ; null sans héros. Avec lui, les touches le pilotent et la caméra le suit. */
+let hero: [number, number] | null = null;
+/** Commandes envoyées en dernier (bits de `PILOT`) : un geste ne part que quand elles changent. */
+let piloted = 0;
+
+/** Touches du héros : celles de la caméra, plus E pour creuser devant lui. */
+const STEER: Record<string, number> = {
+  q: PILOT.left, a: PILOT.left, ArrowLeft: PILOT.left,
+  d: PILOT.right, ArrowRight: PILOT.right,
+  z: PILOT.up, w: PILOT.up, ArrowUp: PILOT.up,
+  s: PILOT.down, ArrowDown: PILOT.down,
+  e: PILOT.dig,
+};
+
+/**
+ * Commandes tirées des touches tenues, envoyées par `gesture()` si elles ont
+ * changé : c'est un geste comme un coup de pinceau, que le rejeu enregistre et
+ * qu'un invité de salon relaie à l'hôte.
+ */
+function steer(): void {
+  let keys = 0;
+  if (hero) for (const key of held) keys |= STEER[key] ?? 0;
+  if (keys === piloted) return;
+  piloted = keys;
+  gesture({ t: "pilot", keys });
+}
+
+/**
+ * Rapproche la vue du héros d'un cinquième du chemin par image : elle le suit
+ * sans sauter d'une cellule à chaque pas, et `applyView` la garde dans ses
+ * bornes près des bords du monde.
+ */
+function follow(): void {
+  if (!hero || zoom === 1) return;
+  const w = canvas.offsetWidth, h = canvas.offsetHeight;
+  panX += (w / 2 - ((hero[0] + 0.5) / WIDTH) * w * zoom - panX) * 0.2;
+  panY += (h / 2 - ((hero[1] + 0.5) / HEIGHT) * h * zoom - panY) * 0.2;
+  applyView();
+}
+
+/** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large) et la barre de statut donne les touches. */
+function meet(): void {
+  if (zoomInput.checked && zoom < WIDTH / 160) {
+    const r = canvas.getBoundingClientRect();
+    zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(WIDTH / 160));
+  }
+  statusEl.textContent = "Héros : Q/D pour marcher, Z pour sauter (et nager), S pour creuser dessous, E devant. Le métal résiste.";
 }
 
 /** Zoome autour d'un point de l'écran, qui ne bouge pas (math dans ui.ts). */
@@ -651,6 +760,21 @@ document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", ()
   else void canvas.parentElement!.requestFullscreen();
 });
 
+/**
+ * Nouveau monde : la graine tapée, sinon une au hasard, que la barre de statut
+ * donne pour le retrouver. Le champ reste tel quel : vide, chaque clic tire
+ * un autre monde ; rempli, il redonne le même. Le monde prend la taille du
+ * bac — c'est en 1920×1080 qu'il y a le plus à explorer.
+ */
+const seedInput = document.querySelector<HTMLInputElement>("#seed")!;
+document.querySelector<HTMLButtonElement>("#terrain")!.addEventListener("click", () => {
+  const typed = Math.floor(Number(seedInput.value));
+  const seed = typed >= 1 && typed <= SEEDS ? typed : 1 + Math.floor(Math.random() * SEEDS);
+  order({ t: "terrain", seed });
+  abandon();
+  statusEl.textContent = `Monde n° ${seed} — la même graine redonne le même monde. Molette ou + pour zoomer, ZQSD pour se déplacer.`;
+});
+
 // Surprise : un décor tiré au sort, sans objectif — juste pour regarder.
 document.querySelector<HTMLButtonElement>("#surprise")!.addEventListener("click", () => {
   const scene = SCENES[Math.floor(Math.random() * SCENES.length)];
@@ -879,6 +1003,8 @@ function frame(now: number): void {
   // On ne compte que les images neuves venues du bac : cette boucle-ci tourne
   // à 60 Hz quoi qu'il arrive (elle ne fait presque rien), la compter
   // affichait 60 fps même quand le Worker n'en livrait que 30.
+  if (hero) follow();
+  else if (held.size > 0) scroll();
   if (present()) frames++;
   captureFrame(); // vidéo en cours : la frame y part aussi
 
@@ -909,12 +1035,20 @@ function win(): void {
 // là ; la grille encodée, elle, est gardée par world.ts et lue par le salon.
 listen((news) => {
   switch (news.t) {
-    case "frame":
+    case "frame": {
       probed = news.probe;
       probeEl.textContent = news.probe
         ? `${MATERIALS[news.probe[0]].name} · ${Math.round(news.probe[1])} °C`
         : "–";
+      const was = hero;
+      hero = news.hero;
+      if (hero && !was) meet();
+      if (!hero && was) {
+        statusEl.textContent = "Le héros n'a pas survécu. Un autre : Vivant → Héros, ou un nouveau monde.";
+        steer();
+      }
       return;
+    }
     case "stats":
       filledEl.textContent = news.filled.toLocaleString("fr-FR");
       return;

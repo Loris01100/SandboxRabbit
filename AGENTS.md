@@ -55,6 +55,7 @@ src/client/
   gestures.ts            Gesture + applyGesture(engine, g) + météo          (pur)
   replay.ts              Recorder / Player                                  (pur)
   challenges.ts          défis et décors bâtis en code                      (pur)
+  terrain.ts             monde généré par graine, bâti au repos             (pur)
   ui.ts                  logique pure du panneau + read/write/forget (localStorage)
   room.ts share.ts theme.ts   salon, galerie/exports, jour-nuit (reçoivent leurs dépendances par init…())
   sim/
@@ -82,7 +83,8 @@ aucun test précis.
 **Simulation** ([simulation.md](docs/agents/simulation.md))
 
 - Tout tirage au sort du moteur (et de la météo) passe par `engine.rand()`,
-  **jamais** `Math.random()`.
+  **jamais** `Math.random()`. Seule exception : terrain.ts a son propre
+  tirage, semé par la graine — bâtir un monde ne doit pas décaler celui du bac.
 - Déplacements via `tryMove()`, `y + this.gravity` et `drift()`. Exceptions :
   `MAGNET`, et le lapin qui bouge ses neuf cellules d'un bloc (`relocate()`).
 - Une règle transforme un voisin avec `become()`, pas `set()` (qui libère le
@@ -183,7 +185,7 @@ local, faute de frappe, refactor interne). Le dire explicitement.
 | `sim/engine.ts`, `sim/materials.ts`, `sim/render.ts`, `sim/codec.ts` | [simulation.md](docs/agents/simulation.md) (invariants, usages de `life`) ; README (tableau des règles, nombre de matières) si le comportement visible change ; codec → [architecture.md](docs/agents/architecture.md) |
 | `sim/sandbox.ts`, `sim/worker.ts`, `world.ts` | [architecture.md](docs/agents/architecture.md) (protocole `Order` / `News`) |
 | `gestures.ts`, `replay.ts` | [architecture.md](docs/agents/architecture.md) (chemin d'un geste), [recettes.md](docs/agents/recettes.md) (ajouter un geste) |
-| `challenges.ts` | README (défis, décors) |
+| `challenges.ts`, `terrain.ts` | README (défis, décors, mondes générés) ; `terrain.ts` → [architecture.md](docs/agents/architecture.md) (modules) |
 | `main.ts`, `index.html`, `style.css`, `ui.ts`, `share.ts`, `room.ts`, `theme.ts` | [architecture.md](docs/agents/architecture.md) (modules, galerie, salon, clés `localStorage`) ; README si une fonctionnalité visible change |
 | `src/worker/*`, `migrations/`, `wrangler.jsonc` | [architecture.md](docs/agents/architecture.md) (API, stockage) ; README (tableau de l'API) |
 | `test/*`, scripts de `package.json`, `.github/` | [tests.md](docs/agents/tests.md) ; section Commandes de ce fichier |

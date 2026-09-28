@@ -79,6 +79,16 @@ export function ticksFor(speed: number, ms: number, pending: number, max = 8): {
 }
 
 /**
+ * Décalage de la vue ramené dans ses bornes : le bac agrandi recouvre
+ * toujours son cadre, on ne le pousse plus hors de l'écran. `size` est la
+ * taille du cadre (le canvas sans transformation), en pixels d'écran ; le
+ * décalage précède l'échelle, il va donc de `size × (1 - zoom)` à 0.
+ */
+export function clampPan(pan: number, size: number, zoom: number): number {
+  return Math.min(0, Math.max(size * (1 - zoom), pan));
+}
+
+/**
  * Décalage à appliquer après un zoom pour que le point sous le curseur ne
  * bouge pas. `edge` et `size` décrivent la boîte **affichée** (déjà
  * transformée) ; la boîte d'origine s'en déduit : `edge - pan`, `size / zoom`.

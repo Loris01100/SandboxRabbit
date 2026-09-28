@@ -55,6 +55,17 @@ export const RABBIT = 47;
 export const RABBIT_BODY = 48;
 export const RABBIT_EYE = 49;
 export const RABBIT_TAIL = 50;
+export const HERO = 51;
+export const HERO_HEAD = 52;
+export const HERO_BODY = 53;
+export const HERO_LEGS = 54;
+
+/**
+ * Commandes du héros, un bit chacune (`engine.pilot`, geste `pilot`). Ici
+ * plutôt que dans engine.ts : la page les envoie, et elle n'importe pas le
+ * moteur.
+ */
+export const PILOT = { left: 1, right: 2, up: 4, down: 8, dig: 16 } as const;
 
 export type MaterialId = number;
 
@@ -162,6 +173,15 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [RABBIT_BODY]: { id: RABBIT_BODY, name: "Lapin", kind: "powder", density: 5, color: [214, 190, 176], noise: 6, flammable: 0.3, part: RABBIT, hint: "Le corps d'un lapin" },
   [RABBIT_EYE]: { id: RABBIT_EYE, name: "Lapin", kind: "powder", density: 5, color: [40, 30, 34], noise: 0, flammable: 0.3, part: RABBIT, hint: "L'œil d'un lapin" },
   [RABBIT_TAIL]: { id: RABBIT_TAIL, name: "Lapin", kind: "powder", density: 5, color: [246, 240, 234], noise: 4, flammable: 0.3, part: RABBIT, hint: "La queue d'un lapin" },
+  /**
+   * Le héros = sept cellules (voir `HERO_SHAPE` dans engine.ts), piloté au
+   * clavier. `HERO` en est le cœur (les hanches) ; `life` y garde son sens et
+   * son élan de saut. Plus dense que l'eau : il y coule, et nage en sautant.
+   */
+  [HERO]: { id: HERO, name: "Héros", kind: "powder", density: 6, color: [58, 66, 128], noise: 4, flammable: 0.1, creature: true, hint: "Se pilote au clavier : Q/D ou flèches pour marcher, Z pour sauter, S pour creuser dessous, E devant" },
+  [HERO_HEAD]: { id: HERO_HEAD, name: "Héros", kind: "powder", density: 6, color: [238, 196, 160], noise: 2, flammable: 0.1, part: HERO, hint: "La tête du héros" },
+  [HERO_BODY]: { id: HERO_BODY, name: "Héros", kind: "powder", density: 6, color: [214, 64, 52], noise: 4, flammable: 0.1, part: HERO, hint: "Le buste du héros" },
+  [HERO_LEGS]: { id: HERO_LEGS, name: "Héros", kind: "powder", density: 6, color: [58, 66, 128], noise: 4, flammable: 0.1, part: HERO, hint: "Les jambes du héros" },
 };
 
 /**
@@ -174,7 +194,7 @@ export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
   { name: "Inflammable", ids: [FIRE, EMBER, LAVA, WAX, CANDLE] },
   { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, THERMITE, URANIUM] },
   { name: "Froid", ids: [ICE, SNOW, NITROGEN] },
-  { name: "Vivant", ids: [SEED, PLANT, RABBIT, NANITE] },
+  { name: "Vivant", ids: [SEED, PLANT, RABBIT, HERO, NANITE] },
   { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK, MAGNET] },
   { name: "Gaz", ids: [SMOKE, STEAM, FIREDAMP, FALLOUT] },
   { name: "Outils", ids: [SOURCE, EMPTY] },

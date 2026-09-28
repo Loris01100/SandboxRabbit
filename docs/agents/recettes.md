@@ -16,9 +16,11 @@ a bougé).
    s'obtient qu'en jeu (comme la cire fondue).
 4. Si son `kind` ne suffit pas : un `case` dans `Engine.update` et une méthode
    `updateXxx` (voir la recette suivante). Une créature de plusieurs cellules
-   ne part pas d'une matière simple : suivre le lapin (`creature`, `part`,
-   forme en offsets, `relocate()`), décrit dans
-   [simulation.md](simulation.md#créatures--le-lapin).
+   ne part pas d'une matière simple : une `Shape` (offsets et matières, cœur
+   d'abord), `creature` sur le cœur et `part` sur le reste, un `case` pour le
+   cœur et un pour les parties (`updatePart(SHAPE, …)`), la forme choisie dans
+   `paint()` / `rect()`. Le lapin et le héros en sont les deux exemples, décrits
+   dans [simulation.md](simulation.md#créatures--le-lapin).
    Si elle agit sans que rien ne bouge autour d'elle (compteur, tirage qui
    finit par réussir) : son id dans la liste `ACTIVE` d'engine.ts — les gaz et
    les créatures y sont d'office. Sinon son bloc s'endort et elle se fige (voir

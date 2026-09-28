@@ -13,10 +13,11 @@
 import { Engine } from "./engine.ts";
 import { Renderer, type Patch } from "./render.ts";
 import { encode } from "./codec.ts";
-import { SAND, STONE, WATER, type MaterialId } from "./materials.ts";
+import { HERO, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, weather, type Gesture } from "../gestures.ts";
 import { Player, Recorder, put, type Beat, type Recording } from "../replay.ts";
 import { CHALLENGES, SCENES, count } from "../challenges.ts";
+import { SEEDS, terrain } from "../terrain.ts";
 import { parseGoal, ticksFor } from "../ui.ts";
 
 /** Les réglages du bac. Le panneau en est la source, le bac ne les invente pas. */
@@ -45,6 +46,7 @@ export type Order =
   | { t: "load"; data: string; ask?: number; quiet?: boolean }
   | { t: "edit"; do: "clear" | "undo" | "redo" | "step" | "snapshot" }
   | { t: "scene"; name: string }
+  | { t: "terrain"; seed: number }
   | { t: "goal"; goal: string | null }
   | { t: "cursor"; x: number; y: number }
   | { t: "clip"; ask: number; x: number; y: number; x2: number; y2: number }
@@ -55,7 +57,7 @@ export type Order =
   | ({ t: "turn" } & Turn);
 
 export type News =
-  | { t: "frame"; patches: Patch[]; w: number; h: number; probe: [MaterialId, number] | null }
+  | { t: "frame"; patches: Patch[]; w: number; h: number; probe: [MaterialId, number] | null; hero: [number, number] | null }
   | { t: "stats"; filled: number }
   | { t: "grid"; full: string }
   | { t: "start"; rec: Recording }
@@ -141,7 +143,7 @@ export class Sandbox {
   }
 
   order(o: Order): void {
-    if (this.follower && (o.t === "do" || o.t === "edit" || o.t === "scene" || o.t === "load"
+    if (this.follower && (o.t === "do" || o.t === "edit" || o.t === "scene" || o.t === "terrain" || o.t === "load"
       || o.t === "goal" || o.t === "rec" || o.t === "play")) {
       if (o.t !== "do" && !(o.t === "edit" && o.do === "snapshot")) this.send({ t: "say", text: FOLLOW });
       if (o.t === "load" && o.ask !== undefined) this.send({ t: "reply", ask: o.ask, value: false });
@@ -175,6 +177,7 @@ export class Sandbox {
       case "load": return this.load(o.data, o.ask, o.quiet);
       case "edit": return this.edit(o.do);
       case "scene": return this.scene(o.name);
+      case "terrain": return this.world(o.seed);
       case "goal": {
         const goal = parseGoal(o.goal);
         this.won = goal
@@ -237,7 +240,9 @@ export class Sandbox {
     const at = this.engine.inBounds(x, y) ? this.engine.index(x, y) : -1;
     const probe: [MaterialId, number] | null =
       at < 0 ? null : [this.engine.cells[at] as MaterialId, this.engine.temp[at]];
-    this.send({ t: "frame", patches, w, h, probe });
+    const heart = this.engine.hero;
+    const hero: [number, number] | null = heart >= 0 && this.engine.cells[heart] === HERO ? [heart % w, (heart / w) | 0] : null;
+    this.send({ t: "frame", patches, w, h, probe, hero });
 
     this.sinceStats += ms;
     if (this.sinceStats >= STATS) {
@@ -428,6 +433,21 @@ export class Sandbox {
     found.build(this.engine);
     this.stamp();
     this.won = challenge ? challenge.won : null;
+  }
+
+  /**
+   * Un monde généré (terrain.ts), à la taille du bac. Même chemin qu'un décor :
+   * le rejeu s'arrête, le bac d'avant reste annulable, et la grille entière
+   * part aux enregistrements — un invité reçoit le monde, pas la graine.
+   * Une graine hors de 1..`SEEDS` venue de la page est ramenée dedans.
+   */
+  private world(seed: number): void {
+    this.play(false);
+    this.snapshot();
+    this.engine.clear();
+    terrain(this.engine, Math.min(SEEDS, Math.max(1, Math.floor(seed) || 1)));
+    this.stamp();
+    this.won = null;
   }
 
   /**

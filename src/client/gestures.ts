@@ -18,7 +18,8 @@ export type Gesture =
   | { t: "rect"; x: number; y: number; x2: number; y2: number; id: MaterialId; over: boolean }
   | { t: "frozen"; x: number; y: number; r: number; on: boolean }
   | { t: "toggle"; x: number; y: number }
-  | { t: "clip"; x: number; y: number; w: number; h: number; cells: string; life: string };
+  | { t: "clip"; x: number; y: number; w: number; h: number; cells: string; life: string }
+  | { t: "pilot"; keys: number };
 
 /** Un id de matière inventé ferait jeter `MATERIALS[id].life` chez l'hôte. */
 const known = (id: MaterialId): MaterialId => (MATERIALS[id] ? id : EMPTY);
@@ -30,7 +31,14 @@ const known = (id: MaterialId): MaterialId => (MATERIALS[id] ? id : EMPTY);
  */
 const whole = (...v: number[]): boolean => v.every(Number.isSafeInteger);
 
+/**
+ * Applique un geste au moteur. Les commandes du héros (`pilot`) sont un geste
+ * elles aussi : c'est ce qui les fait enregistrer par le rejeu et relayer à
+ * l'hôte d'un salon, au tick près. Bornées à leurs cinq bits : un pair envoie
+ * ce qu'il veut.
+ */
 export function applyGesture(engine: Engine, g: Gesture): void {
+  if (g.t === "pilot") { engine.pilot = (g.keys | 0) & 31; return; }
   if (!whole(g.x, g.y)) return;
   switch (g.t) {
     case "paint": engine.paint(g.x, g.y, g.r, known(g.id), g.d, g.over, g.only); return;

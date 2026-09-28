@@ -22,6 +22,12 @@ export interface Scene {
   gravity: 1 | -1;
   emit: MaterialId;
   weather: boolean;
+  /**
+   * Commandes du héros tenues (`engine.pilot`). Ses changements arrivent par
+   * gestes ; il est ici pour le départ — un enregistrement lancé touche
+   * enfoncée repartait sinon à l'arrêt. Absent des enregistrements d'avant.
+   */
+  pilot?: number;
 }
 
 /**
@@ -54,11 +60,12 @@ export interface Recording {
 }
 
 const sceneOf = (e: Engine, rain: boolean): Scene => ({
-  wind: e.wind, ambient: e.ambient, gravity: e.gravity, emit: e.emit, weather: rain,
+  wind: e.wind, ambient: e.ambient, gravity: e.gravity, emit: e.emit, weather: rain, pilot: e.pilot,
 });
 
 const same = (a: Scene, b: Scene): boolean =>
-  a.wind === b.wind && a.ambient === b.ambient && a.gravity === b.gravity && a.emit === b.emit && a.weather === b.weather;
+  a.wind === b.wind && a.ambient === b.ambient && a.gravity === b.gravity && a.emit === b.emit && a.weather === b.weather
+  && (a.pilot ?? 0) === (b.pilot ?? 0);
 
 /**
  * La grille et son état vivant : un incendie enregistré repart chaud.
@@ -95,6 +102,7 @@ function apply(e: Engine, s: Scene): void {
   e.ambient = s.ambient;
   e.gravity = s.gravity;
   e.emit = s.emit;
+  e.pilot = s.pilot ?? 0;
 }
 
 /**

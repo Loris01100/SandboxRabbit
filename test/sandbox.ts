@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
 import { Renderer } from "../src/client/sim/render.ts";
 import { count } from "../src/client/challenges.ts";
-import { EMPTY, FIRE, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
+import { EMPTY, FIRE, HERO, PILOT, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 
 const W = 80, H = 45;
 
@@ -161,6 +161,32 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   sim.order({ t: "rec", on: false });
   const joués = last(news, "rec")!.ticks;
   assert.ok(joués >= 1 && joués < 8, `une frame surchargée s'arrête à temps (${joués} ticks sur 8 demandés)`);
+}
+
+/** Un monde généré se bâtit à la taille du bac, et s'annule comme un décor. */
+{
+  const { sim } = bac();
+  const avant = sim.engine.cells.slice();
+  sim.order({ t: "terrain", seed: 4217 });
+  assert.notDeepEqual(sim.engine.cells, avant, "le monde a remplacé la cuvette");
+  const bâti = sim.engine.cells.slice();
+  sim.order({ t: "edit", do: "undo" });
+  assert.deepEqual(sim.engine.cells, avant, "annuler ramène le bac d'avant");
+  sim.order({ t: "terrain", seed: 4217 });
+  assert.deepEqual(sim.engine.cells, bâti, "la même graine redonne le même monde");
+}
+
+/** La frame dit où est le héros — la caméra le suit — et se tait quand il n'y en a pas. */
+{
+  const { sim, news } = bac();
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.hero, null, "pas de héros, pas de position");
+  sim.order({ t: "do", g: { t: "paint", x: 40, y: 3, r: 1, id: HERO, d: 1, over: true } });
+  sim.frame(16);
+  const [x] = last(news, "frame")!.hero!;
+  sim.order({ t: "do", g: { t: "pilot", keys: PILOT.right } });
+  run(sim, 60);
+  assert.ok(last(news, "frame")!.hero![0] > x, "piloté par un geste, il avance, et la frame le suit");
 }
 
 // Charger une grille : la réponse dit si elle était lisible.

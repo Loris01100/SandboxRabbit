@@ -3,7 +3,7 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { goalText, panAfterZoom, parseGoal, pushRecent, ticksFor } from "../src/client/ui.ts";
+import { clampPan, goalText, panAfterZoom, parseGoal, pushRecent, ticksFor } from "../src/client/ui.ts";
 import { SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 
 // Objectifs : ce qui vient d'un autre visiteur ne passe pas sans contrôle.
@@ -45,6 +45,14 @@ import { SAND, STONE, WATER } from "../src/client/sim/materials.ts";
   const out = panAfterZoom(500, edge, size, 0, 1, 4);
   const back = panAfterZoom(500, edge + out, size * 4, out, 4, 1);
   assert.ok(Math.abs(back) < 1e-9, "revenir à ×1 remet le décalage à zéro");
+}
+
+// La vue zoomée recouvre toujours son cadre : on ne pousse plus le bac hors de l'écran.
+{
+  assert.equal(clampPan(50, 800, 3), 0, "pas de vide à gauche du bac");
+  assert.equal(clampPan(-5000, 800, 3), -1600, "ni à droite : au plus deux cadres de décalage à ×3");
+  assert.equal(clampPan(-700, 800, 3), -700, "entre les deux, le décalage est gardé");
+  assert.equal(clampPan(-30, 800, 1), 0, "à ×1, rien à déplacer");
 }
 
 // Cadence : la vitesse est par 60e de seconde, pas par frame.

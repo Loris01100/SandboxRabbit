@@ -61,6 +61,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | `load` `{data,ask?,quiet?}` | Pose une grille encodée ; `quiet` = sans cran d'annulation (salon). Arrête le rejeu et désarme le défi en cours — un monde-défi réarme le sien par `goal` juste après |
 | `edit` | `clear` / `undo` / `redo` / `step` / `snapshot`. Pendant un rejeu, `step` l'avance d'un tick, `clear` / `undo` / `redo` l'arrêtent d'abord. `clear` désarme le défi |
 | `scene` `{name}` | Bâtit un défi ou un décor de `challenges.ts` ; arrête le rejeu |
+| `terrain` `{seed}` | Bâtit le monde de la graine (terrain.ts) à la taille du bac, graine ramenée dans 1..`SEEDS` ; même chemin que `scene` (rejeu arrêté, cran d'annulation, `stamp()`, défi désarmé). Refusé à un invité |
 | `goal` `{goal}` | Objectif d'un monde-défi (`ge:12:600`) |
 | `cursor` `{x,y}` | Position de la sonde |
 | `clip` `{ask,…}` | Découpe un rectangle, répond par `reply` |
@@ -68,7 +69,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
-| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,pixels}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, image entière à la première frame d'un moteur), taille, sonde `[matière, °C]` |
+| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,pixels}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, image entière à la première frame d'un moteur), taille, sonde `[matière, °C]`, `hero` `[x, y]` ou `null` (la caméra le suit) |
 | `stats` | 2 × / s | nombre de cellules pleines |
 | `grid` | 4 × / s | grille encodée complète (`full`) + version courte pour le salon (`room`) |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askClip()` |
@@ -100,6 +101,15 @@ Une créature de taille fixe (le lapin) passe par le même `paint`, mais
 `placesCreature()` de main.ts n'en envoie qu'un par clic (ni trait ni dépôt
 continu), et `paint()` côté moteur en pose une entière quel que soit le rayon
 reçu : un pair de salon ne peut pas en semer un disque.
+
+Les commandes du héros suivent le même chemin : `steer()` de main.ts envoie un
+geste `{t:"pilot", keys}` (bits de `PILOT`) chaque fois que les touches tenues
+changent — jamais à chaque image. Le rejeu l'enregistre, l'hôte d'un salon le
+reçoit d'un invité ; `applyGesture` le borne à cinq bits. Quand la frame porte
+un héros (`hero`), ZQSD / flèches / E le pilotent au lieu de déplacer la vue,
+et `follow()` recentre la caméra sur lui à chaque image (un cinquième du
+chemin, bornes comprises). À son apparition la vue zoome à ~160 cellules de
+large (`meet()`).
 
 ## Salon partagé (bac multijoueur)
 
@@ -215,12 +225,13 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
-| [main.ts](../../src/client/main.ts) | palette, souris, zoom, réglages, défis, boucle rAF, câblage de tout le DOM | non |
+| [main.ts](../../src/client/main.ts) | palette, souris, zoom et caméra (bornes par `clampPan`, ZQSD / WASD / flèches tenues, `+` / `-`), réglages, défis, boucle rAF, câblage de tout le DOM | non |
 | [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker | non |
 | [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence), accès `localStorage` tolérant | **oui** (test/ui.ts) |
 | [gestures.ts](../../src/client/gestures.ts) | `Gesture` + `applyGesture(engine, g)` + météo | **oui** |
 | [replay.ts](../../src/client/replay.ts) | `Recorder` / `Player` | **oui** |
 | [challenges.ts](../../src/client/challenges.ts) | défis et décors bâtis en code | **oui** |
+| [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
 | [room.ts](../../src/client/room.ts) | salon côté navigateur | non |
 | [share.ts](../../src/client/share.ts) | galerie, PNG, vidéo, lien | non |
 | [theme.ts](../../src/client/theme.ts) | jour / nuit | non |

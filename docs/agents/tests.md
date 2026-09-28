@@ -89,6 +89,12 @@ ambiante sous zéro réveillent les blocs endormis, et un rejeu lancé sur un ba
 le mettre dans un bassin qu'il remplit exactement : sur un sol plat, sa
 dernière rangée incomplète glisse sans fin et tient son bloc éveillé.
 
+Mondes générés (fin de test/sim.ts) : même graine → même grille quel que soit
+le tirage du bac, aucun tirage consommé, poches de pétrole et de lave closes,
+uranium sans amas, et moins de 1 % des cellules qui bougent en 200 ticks. Un
+réglage du générateur qui casse ce dernier assert rend les grandes grilles
+lentes dès la naissance du monde.
+
 Côté rendu, test/sandbox.ts recompose l'image comme la page (bandes recopiées
 dans un tableau miroir) et la compare, au pixel près, à un rendu témoin tout
 neuf — après un feu, un geste bac en pause, la vue thermique et une autre

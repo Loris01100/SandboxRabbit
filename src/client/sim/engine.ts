@@ -1,7 +1,7 @@
 import {
   ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FALLOUT, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
-  FILINGS, MAGNET, MINE, MUD, NANITE, NITRO, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM,
-  STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
+  FILINGS, HERO, HERO_BODY, HERO_HEAD, HERO_LEGS, MAGNET, MINE, MUD, NANITE, NITRO, PILOT, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL,
+  SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM, STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
 /**
@@ -102,6 +102,47 @@ const COOK = 110;
 const FROST = -25;
 
 /**
+ * Une créature de taille fixe : offsets depuis le cœur, tournée vers la
+ * droite (on inverse les `dx` pour la gauche), et la matière de chaque case,
+ * le cœur d'abord. Le lapin et le héros partagent ainsi la pose, la marche,
+ * la chute et la mort d'un bloc (`spawn`, `relocate`, `kill`…).
+ */
+interface Shape {
+  dx: Int8Array;
+  dy: Int8Array;
+  id: Uint8Array;
+}
+const RABBIT_SHAPE: Shape = { dx: RABBIT_DX, dy: RABBIT_DY, id: RABBIT_ID };
+
+/*
+ * Le héros, de face, en offsets depuis le cœur ◆ (les hanches) :
+ *
+ *     . ● .      tête
+ *     █ █ █      bras et buste
+ *     . ◆ .      hanches
+ *     ▌ . ▐      jambes
+ *
+ * Symétrique : son sens (où il creuse) se garde dans `life`, pas dans sa forme.
+ */
+const HERO_SHAPE: Shape = {
+  dx: new Int8Array([0, 0, 0, -1, 1, -1, 1]),
+  dy: new Int8Array([0, -2, -1, -1, -1, 1, 1]),
+  id: new Uint8Array([HERO, HERO_HEAD, HERO_BODY, HERO_BODY, HERO_BODY, HERO_LEGS, HERO_LEGS]),
+};
+/** Ticks de montée d'un saut : de quoi franchir quatre à cinq cellules. */
+const JUMP = 6;
+/** Chance, par tick et touche tenue, de faire un pas : 30 cellules par seconde. */
+const STRIDE = 0.5;
+/** Chance, par tick et touche tenue, d'arracher ce qu'il creuse. */
+const DIG = 0.3;
+/** Chance, par tick dans un liquide, de s'y enfoncer d'une cellule : il coule, lentement. */
+const SINK = 0.3;
+/** Chance, par tick la tête sous un liquide, de se noyer : quelques secondes d'apnée. */
+const BREATH = 0.004;
+/** `life` du cœur du héros : bit 7 = tourné vers la gauche, bits 0-3 = élan de saut restant. */
+const FACING_LEFT = 128;
+
+/**
  * `thermal()` lit trois propriétés par cellule et par tick : autant les sortir
  * de `MATERIALS` une fois pour toutes. Un accès de tableau typé au lieu d'une
  * propriété d'objet, sur 57 600 cellules × 60 fois par seconde.
@@ -162,17 +203,19 @@ const STILL = 0.001;
 /**
  * 1 = matière qui agit d'elle-même, sans que rien ne change autour : un
  * compteur (gaz, braise, pile, thermite, uranium, lapin) ou un tirage qui
- * finira par réussir (la plante qui boit, la lave qui fond le sable, l'acide
- * qui ronge). Son bloc ne s'endort pas. Les autres — sable posé, eau étale,
- * TNT qui attend sa flamme — ne font rien tant que leurs voisines ne bougent
- * pas, et toute écriture réveille le bloc qu'elle touche.
+ * finira par réussir (l'acide qui ronge, le sel qui fond la glace). Son bloc
+ * ne s'endort pas. Les autres — sable posé, eau étale, TNT qui attend sa
+ * flamme — ne font rien tant que leurs voisines ne bougent pas, et toute
+ * écriture réveille le bloc qu'elle touche. La plante et la lave sont entre
+ * les deux : elles ne tiennent leur bloc éveillé (`wake`) que lorsqu'elles
+ * ont de quoi agir — de l'eau à boire, du sable ou du bois à côté.
  */
 const ACTIVE = new Uint8Array(256);
 for (const key of Object.keys(MATERIALS)) {
   const id = Number(key);
   if (KIND[id] === KINDS.gas || CREATURE[id]) ACTIVE[id] = 1;
 }
-for (const id of [LAVA, ACID, PLANT, THERMITE, URANIUM, SALT, NANITE, SOURCE, BATTERY, EMBER, SPARK, MAGNET]) ACTIVE[id] = 1;
+for (const id of [ACID, THERMITE, URANIUM, SALT, NANITE, SOURCE, BATTERY, EMBER, SPARK, MAGNET]) ACTIVE[id] = 1;
 
 /**
  * Offsets d'un disque de rayon `radius`, du bord vers le centre — l'ordre dans
@@ -256,11 +299,17 @@ export class Engine {
   emit: MaterialId = WATER;
   /** État du tirage au sort. Voir `rand()`. */
   private state: number;
-  /** Cases de départ et d'arrivée d'un lapin qui bouge, et ce qu'il déplace : alloués une fois. */
+  /** Cases de départ et d'arrivée d'une créature qui bouge, et ce qu'elle déplace : alloués une fois, à la taille de la plus grande. */
   private readonly moveFrom = new Int32Array(RABBIT_SIZE);
   private readonly moveTo = new Int32Array(RABBIT_SIZE);
   private readonly carryId = new Uint8Array(RABBIT_SIZE);
   private readonly carryLife = new Uint8Array(RABBIT_SIZE);
+  /** Cellules de la créature en train de bouger (`relocate`), lues par `owns()`. */
+  private moving = 0;
+  /** Commandes tenues par le joueur (bits de `PILOT`) : tous les héros du bac y obéissent. */
+  pilot = 0;
+  /** Index du cœur du dernier héros mis à jour, -1 s'il n'y en a jamais eu : la caméra le suit. À vérifier (`cells[hero] === HERO`), il a pu mourir depuis. */
+  hero = -1;
 
   constructor(width: number, height: number, seed = (Math.random() * 0x1_0000_0000) >>> 0) {
     // Un xorshift32 meurt sur 0 : toute graine nulle devient 1.
@@ -480,7 +529,7 @@ export class Engine {
    */
   paint(cx: number, cy: number, radius: number, id: MaterialId, density = 1, overwrite = true, only?: MaterialId): void {
     // Une créature a sa taille : un coup de pinceau en pose une, quel que soit le rayon.
-    if (CREATURE[id]) { this.spawnRabbit(Math.round(cx), Math.round(cy), 1, overwrite); return; }
+    if (CREATURE[id]) { this.spawn(id === HERO ? HERO_SHAPE : RABBIT_SHAPE, Math.round(cx), Math.round(cy), 1, overwrite); return; }
     const r2 = radius * radius;
     const [x0, x1, y0, y1] = this.disc(cx, cy, radius);
     for (let y = y0; y <= y1; y++) {
@@ -503,7 +552,7 @@ export class Engine {
    */
   rect(x0: number, y0: number, x1: number, y1: number, id: MaterialId, overwrite = true): void {
     // Un rectangle de cœurs sans place pour leurs corps mourrait aussitôt : un lapin, au milieu.
-    if (CREATURE[id]) { this.spawnRabbit(Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2), 1, overwrite); return; }
+    if (CREATURE[id]) { this.spawn(id === HERO ? HERO_SHAPE : RABBIT_SHAPE, Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2), 1, overwrite); return; }
     const left = Math.max(0, Math.min(x0, x1));
     const right = Math.min(this.width - 1, Math.max(x0, x1));
     const top = Math.max(0, Math.min(y0, y1));
@@ -702,7 +751,7 @@ export class Engine {
       case FIRE: this.updateFire(i, x, y); return;
       case LAVA: this.updateLava(i, x, y); return;
       case ACID: this.updateAcid(i, x, y); return;
-      case PLANT: this.updatePlant(x, y); return;
+      case PLANT: this.updatePlant(i, x, y); return;
       case TNT: this.updateTnt(x, y); return;
       case NITRO: this.updateNitro(i, x, y); return;
       case C4: this.updateC4(i, x, y); return;
@@ -721,7 +770,9 @@ export class Engine {
       case SPARK: this.updateSpark(i, x, y); return;
       case MAGNET: this.updateMagnet(i, x, y); return;
       case RABBIT: this.updateRabbit(i, x, y); return;
-      case RABBIT_BODY: case RABBIT_EYE: case RABBIT_TAIL: this.updateRabbitPart(x, y, id); return;
+      case RABBIT_BODY: case RABBIT_EYE: case RABBIT_TAIL: this.updatePart(RABBIT_SHAPE, x, y, id); return;
+      case HERO: this.updateHero(i, x, y); return;
+      case HERO_HEAD: case HERO_BODY: case HERO_LEGS: this.updatePart(HERO_SHAPE, x, y, id); return;
       // Le métal ne fait que sortir de sa période de repos.
       case METAL: if (this.life[i] > 0) this.life[i]--; return;
     }
@@ -811,7 +862,14 @@ export class Engine {
     if (this.rand() < 0.6) this.moveGas(i, x, y, FIRE);
   }
 
+  /**
+   * La lave fond le sable voisin et enflamme ce qui brûle, par tirage : elle
+   * ne tient son bloc éveillé (`wake`) que si elle a l'un ou l'autre à côté.
+   * Une poche enfermée dans la pierre dort — sa chaleur, elle, reste diffusée
+   * par `thermal()` tant qu'elle n'est pas à l'équilibre.
+   */
   private updateLava(i: number, x: number, y: number): void {
+    let busy = false;
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
@@ -820,8 +878,10 @@ export class Engine {
         this.become(x, y, STONE);
         return;
       }
+      if (n === SAND || FLAMMABLE[n] > 0) busy = true;
       if (n === SAND && this.rand() < 0.01) this.become(nx, ny, LAVA);
     }
+    if (busy) this.wake(i);
     this.ignite(x, y, 2);
     this.updateLiquid(i, x, y, LAVA);
   }
@@ -852,14 +912,18 @@ export class Engine {
     this.updateLiquid(i, x, y, ACID);
   }
 
-  private updatePlant(x: number, y: number): void {
+  /**
+   * La plante boit l'eau voisine et pousse. Sans eau à côté elle n'a rien à
+   * faire : elle ne tient son bloc éveillé (`wake`) que si elle en touche —
+   * sinon chaque arbre d'un monde généré gardait sa colline éveillée pour rien.
+   */
+  private updatePlant(i: number, x: number, y: number): void {
+    let water = -1;
+    for (let k = 0; k < 4 && water < 0; k++) if (this.get(x + NX[k], y + NY[k]) === WATER) water = k;
+    if (water < 0) return;
+    this.wake(i);
     if (this.rand() > 0.08) return;
-    let drank = false;
-    for (let k = 0; k < 4; k++) {
-      const nx = x + NX[k], ny = y + NY[k];
-      if (this.get(nx, ny) === WATER) { this.become(nx, ny, PLANT); drank = true; break; }
-    }
-    if (!drank) return;
+    this.become(x + NX[water], y + NY[water], PLANT);
     // Une pousse peut partir vers le haut ou en biais.
     const dx = (this.rand() * 3 | 0) - 1;
     const up = y - this.gravity;
@@ -1289,46 +1353,73 @@ export class Engine {
     }
   }
 
-  /**
-   * Pose un lapin entier, cœur en (x, y), tourné vers `f`, si toutes ses cases
-   * sont libres (ou liquides et gazeuses si `over`). Un cœur déjà là — posé
-   * seul par `set()` — garde sa place et sa satiété. Renvoie l'index du cœur,
-   * -1 faute de place : un lapin ne s'incruste pas dans la pierre.
-   */
+  /** Pose un lapin entier (voir `spawn`). Public : les mondes générés en sèment. */
   spawnRabbit(x: number, y: number, f: number, over = false): number {
-    for (let k = 0; k < RABBIT_SIZE; k++) {
-      const px = x + f * RABBIT_DX[k], py = y + RABBIT_DY[k];
+    return this.spawn(RABBIT_SHAPE, x, y, f, over);
+  }
+
+  /** Pose un héros entier (voir `spawn`). Public : un monde généré en pose un. */
+  spawnHero(x: number, y: number): number {
+    return this.spawn(HERO_SHAPE, x, y, 1);
+  }
+
+  /**
+   * Pose une créature entière, cœur en (x, y), tournée vers `f`, si toutes ses
+   * cases sont libres (ou liquides et gazeuses si `over`). Un cœur déjà là —
+   * posé seul par `set()` — garde sa place et son état. Renvoie l'index du
+   * cœur, -1 faute de place : une créature ne s'incruste pas dans la pierre.
+   */
+  private spawn(shape: Shape, x: number, y: number, f: number, over = false): number {
+    const { dx, dy, id } = shape;
+    for (let k = 0; k < id.length; k++) {
+      const px = x + f * dx[k], py = y + dy[k];
       if (!this.inBounds(px, py)) return -1;
       const j = this.index(px, py);
       if (this.frozen[j]) return -1;
       const n = this.cells[j];
-      if (n === EMPTY || (k === 0 && n === RABBIT)) continue;
+      if (n === EMPTY || (k === 0 && n === id[0])) continue;
       if (over && (KIND[n] === KINDS.liquid || KIND[n] === KINDS.gas)) continue;
       return -1;
     }
-    for (let k = 0; k < RABBIT_SIZE; k++) {
-      const px = x + f * RABBIT_DX[k], py = y + RABBIT_DY[k];
-      if (k === 0 && this.cells[this.index(px, py)] === RABBIT) continue;
-      this.become(px, py, RABBIT_ID[k]);
+    for (let k = 0; k < id.length; k++) {
+      const px = x + f * dx[k], py = y + dy[k];
+      if (k === 0 && this.cells[this.index(px, py)] === id[0]) continue;
+      this.become(px, py, id[k]);
     }
-    return this.index(x, y);
+    const heart = this.index(x, y);
+    if (shape === HERO_SHAPE) this.hero = heart;
+    return heart;
   }
 
-  /** Nombre de cellules du lapin de cœur (x, y) à leur place pour le sens `f`, cœur compris. */
-  private intact(x: number, y: number, f: number): number {
+  /** Nombre de cellules de la créature de cœur (x, y) à leur place pour le sens `f`, cœur compris. */
+  private intact(shape: Shape, x: number, y: number, f: number): number {
+    const { dx, dy, id } = shape;
     let n = 0;
-    for (let k = 0; k < RABBIT_SIZE; k++) {
-      if (this.get(x + f * RABBIT_DX[k], y + RABBIT_DY[k]) === RABBIT_ID[k]) n++;
+    for (let k = 0; k < id.length; k++) {
+      if (this.get(x + f * dx[k], y + dy[k]) === id[k]) n++;
     }
     return n;
   }
 
   /** Change tout le corps (ce qu'il en reste) en `into` : mort, cuisson, gel. */
-  private kill(x: number, y: number, f: number, into: MaterialId): void {
-    for (let k = 0; k < RABBIT_SIZE; k++) {
-      const px = x + f * RABBIT_DX[k], py = y + RABBIT_DY[k];
-      if (this.get(px, py) === RABBIT_ID[k]) this.become(px, py, into);
+  private kill(shape: Shape, x: number, y: number, f: number, into: MaterialId): void {
+    const { dx, dy, id } = shape;
+    for (let k = 0; k < id.length; k++) {
+      const px = x + f * dx[k], py = y + dy[k];
+      if (this.get(px, py) === id[k]) this.become(px, py, into);
     }
+  }
+
+  /**
+   * Un corps incomplet (souffle, acide, nanites, gomme) : la créature n'y
+   * survit pas. Si une partie a pris feu, le reste brûle avec.
+   */
+  private maim(shape: Shape, x: number, y: number, f: number): void {
+    let burning = false;
+    for (let k = 1; k < shape.id.length; k++) {
+      if (this.get(x + f * shape.dx[k], y + shape.dy[k]) === FIRE) burning = true;
+    }
+    this.kill(shape, x, y, f, burning ? FIRE : EMPTY);
   }
 
   /**
@@ -1338,8 +1429,9 @@ export class Engine {
    */
   private updateRabbit(i: number, x: number, y: number): void {
     // Le sens se lit sur le corps lui-même : aucun état de plus à garder.
-    const right = this.intact(x, y, 1);
-    const left = right === RABBIT_SIZE ? 0 : this.intact(x, y, -1);
+    const R = RABBIT_SHAPE;
+    const right = this.intact(R, x, y, 1);
+    const left = right === RABBIT_SIZE ? 0 : this.intact(R, x, y, -1);
     const f = right >= left ? 1 : -1;
     const whole = Math.max(right, left);
     if (whole === 1) {
@@ -1348,32 +1440,23 @@ export class Engine {
       if (this.spawnRabbit(x, y, this.rand() < 0.5 ? 1 : -1) < 0) this.become(x, y, EMPTY);
       return;
     }
-    if (whole < RABBIT_SIZE) {
-      // Un morceau arraché (souffle, acide, nanites, gomme) : il n'y survit
-      // pas. S'il a pris feu, le reste brûle avec.
-      let burning = false;
-      for (let k = 1; k < RABBIT_SIZE; k++) {
-        if (this.get(x + f * RABBIT_DX[k], y + RABBIT_DY[k]) === FIRE) burning = true;
-      }
-      this.kill(x, y, f, burning ? FIRE : EMPTY);
-      return;
-    }
+    if (whole < RABBIT_SIZE) { this.maim(R, x, y, f); return; }
 
     const t = this.temp[i];
-    if (t > COOK) { this.kill(x, y, f, FIRE); return; }
-    if (t < FROST) { this.kill(x, y, f, ICE); return; }
+    if (t > COOK) { this.kill(R, x, y, f, FIRE); return; }
+    if (t < FROST) { this.kill(R, x, y, f, ICE); return; }
     // De l'eau par-dessus les oreilles : il se noie (plus dense qu'elle, il coule).
     const above = this.get(x, y - 3);
     if ((above === WATER || above === SALTWATER || above === MUD) && this.rand() < DROWN) {
-      this.kill(x, y, f, EMPTY);
+      this.kill(R, x, y, f, EMPTY);
       return;
     }
     // Un lapin venu d'une grille sans état vivant arrive à satiété nulle : sans
     // ce repli, il mourrait de faim au premier tick.
     if (this.life[i] === 0) this.life[i] = FED;
-    if (this.rand() < HUNGER && --this.life[i] === 0) { this.kill(x, y, f, EMPTY); return; }
+    if (this.rand() < HUNGER && --this.life[i] === 0) { this.kill(R, x, y, f, EMPTY); return; }
     // Chute d'un bloc. Lui seul peut entrer dans un liquide plus léger : il y coule.
-    if (this.relocate(x, y, f, x, y + this.gravity, f, true)) return;
+    if (this.relocate(R, x, y, f, x, y + this.gravity, f, true)) return;
 
     if (this.life[i] <= 250 - MEAL) {
       for (let k = 0; k < MOUTH_DX.length; k++) {
@@ -1416,9 +1499,9 @@ export class Engine {
     if (dir === 0) dir = this.rand() < TURN ? -f : f;
     // Un pas, sinon une marche à grimper — en se tournant du côté où il va.
     // Seulement vers du vide ou un gaz : il n'entre pas dans l'eau de lui-même.
-    if (this.relocate(x, y, f, x + dir, y, dir, false)) return;
-    if (this.relocate(x, y, f, x + dir, y - this.gravity, dir, false)) return;
-    if (dir !== f) this.relocate(x, y, f, x, y, dir, false); // bloqué : il se retourne
+    if (this.relocate(R, x, y, f, x + dir, y, dir, false)) return;
+    if (this.relocate(R, x, y, f, x + dir, y - this.gravity, dir, false)) return;
+    if (dir !== f) this.relocate(R, x, y, f, x, y, dir, false); // bloqué : il se retourne
   }
 
   /**
@@ -1429,38 +1512,41 @@ export class Engine {
    * en tombant — un liquide plus léger que lui. Ce qu'il déplace reprend les
    * cases qu'il quitte : la matière est conservée, comme dans `hurl()`.
    */
-  private relocate(x: number, y: number, f: number, nx: number, ny: number, nf: number, wet: boolean): boolean {
+  private relocate(shape: Shape, x: number, y: number, f: number, nx: number, ny: number, nf: number, wet: boolean): boolean {
     const { moveFrom: from, moveTo: to, cells, life, frozen } = this;
-    for (let k = 0; k < RABBIT_SIZE; k++) {
-      const tx = nx + nf * RABBIT_DX[k], ty = ny + RABBIT_DY[k];
+    const { dx, dy, id } = shape;
+    const size = id.length;
+    this.moving = size;
+    for (let k = 0; k < size; k++) {
+      const tx = nx + nf * dx[k], ty = ny + dy[k];
       if (!this.inBounds(tx, ty)) return false;
-      from[k] = this.index(x + f * RABBIT_DX[k], y + RABBIT_DY[k]); // corps intact : dans la grille
+      from[k] = this.index(x + f * dx[k], y + dy[k]); // corps intact : dans la grille
       to[k] = this.index(tx, ty);
       if (frozen[from[k]]) return false; // une patte figée tient tout le lapin
     }
     let carried = 0;
-    for (let k = 0; k < RABBIT_SIZE; k++) {
+    for (let k = 0; k < size; k++) {
       const j = to[k];
       if (frozen[j]) return false;
       const n = cells[j];
       if (n === EMPTY || this.owns(j)) continue;
       const kind = KIND[n];
-      if (kind !== KINDS.gas && !(wet && kind === KINDS.liquid && DENSITY[n] < DENSITY[RABBIT])) return false;
+      if (kind !== KINDS.gas && !(wet && kind === KINDS.liquid && DENSITY[n] < DENSITY[id[0]])) return false;
       this.carryId[carried] = n;
       this.carryLife[carried] = life[j];
       carried++;
     }
     const fed = life[from[0]];
-    for (let k = 0; k < RABBIT_SIZE; k++) { this.wake(from[k]); this.wake(to[k]); }
-    for (let k = 0; k < RABBIT_SIZE; k++) { cells[from[k]] = EMPTY; life[from[k]] = 0; }
-    for (let k = 0; k < RABBIT_SIZE; k++) {
+    for (let k = 0; k < size; k++) { this.wake(from[k]); this.wake(to[k]); }
+    for (let k = 0; k < size; k++) { cells[from[k]] = EMPTY; life[from[k]] = 0; }
+    for (let k = 0; k < size; k++) {
       const j = to[k];
-      cells[j] = RABBIT_ID[k];
+      cells[j] = id[k];
       life[j] = 0;
       this.clock[j] = this.parity; // il a bougé ce tick, ses cellules aussi
     }
     life[to[0]] = fed;
-    for (let k = 0; k < RABBIT_SIZE && carried > 0; k++) {
+    for (let k = 0; k < size && carried > 0; k++) {
       const j = from[k];
       if (cells[j] !== EMPTY) continue;
       carried--;
@@ -1473,23 +1559,92 @@ export class Engine {
 
   /** La case `j` fait-elle partie du corps en train de bouger (`moveFrom`) ? */
   private owns(j: number): boolean {
-    for (let k = 0; k < RABBIT_SIZE; k++) if (this.moveFrom[k] === j) return true;
+    for (let k = 0; k < this.moving; k++) if (this.moveFrom[k] === j) return true;
     return false;
   }
 
   /**
    * Une cellule du corps n'a pas d'état : elle vit tant qu'un cœur se trouve là
-   * où la forme l'attend, dans un sens ou dans l'autre. Sinon — lapin mort,
-   * éclat d'un souffle — elle disparaît. Ne rien garder dans `life` est voulu :
-   * le salon et les grilles d'avant n'en transmettent pas.
+   * où la forme l'attend, dans un sens ou dans l'autre. Sinon — créature
+   * morte, éclat d'un souffle — elle disparaît. Ne rien garder dans `life` est
+   * voulu : le salon et les grilles d'avant n'en transmettent pas.
    */
-  private updateRabbitPart(x: number, y: number, id: MaterialId): void {
-    for (let k = 1; k < RABBIT_SIZE; k++) {
-      if (RABBIT_ID[k] !== id) continue;
-      if (this.get(x - RABBIT_DX[k], y - RABBIT_DY[k]) === RABBIT) return;
-      if (this.get(x + RABBIT_DX[k], y - RABBIT_DY[k]) === RABBIT) return;
+  private updatePart(shape: Shape, x: number, y: number, id: MaterialId): void {
+    const { dx, dy, id: ids } = shape;
+    for (let k = 1; k < ids.length; k++) {
+      if (ids[k] !== id) continue;
+      if (this.get(x - dx[k], y - dy[k]) === ids[0]) return;
+      if (this.get(x + dx[k], y - dy[k]) === ids[0]) return;
     }
     this.become(x, y, EMPTY);
+  }
+
+  /**
+   * Le héros : une créature sans volonté propre, qui obéit à `pilot`. Même
+   * vérifications que le lapin (corps entier, cuisson, gel, noyade), puis un
+   * mouvement vertical — saut, nage, chute — et un pas de côté, qui grimpe une
+   * marche s'il le faut. Il creuse devant lui (E) ou sous ses pieds (S) tout
+   * ce qui est solide, sauf le métal : c'est ce qui laisse encore des murs.
+   *
+   * Dans un liquide il coule lentement (`SINK`), et saut tenu il remonte : il
+   * nage. La tête dessous, il se noie en quelques secondes (`BREATH`).
+   * Tous les héros du bac obéissent aux mêmes touches ; la caméra suit le
+   * dernier mis à jour (`hero`).
+   */
+  private updateHero(i: number, x: number, y: number): void {
+    const H = HERO_SHAPE;
+    const whole = this.intact(H, x, y, 1);
+    if (whole === 1) {
+      if (this.spawn(H, x, y, 1) < 0) this.become(x, y, EMPTY);
+      return;
+    }
+    if (whole < H.id.length) { this.maim(H, x, y, 1); return; }
+    const t = this.temp[i];
+    if (t > COOK) { this.kill(H, x, y, 1, FIRE); return; }
+    if (t < FROST) { this.kill(H, x, y, 1, ICE); return; }
+    const head = KIND[this.get(x, y - 3)] === KINDS.liquid;
+    if (head && this.rand() < BREATH) { this.kill(H, x, y, 1, EMPTY); return; }
+
+    const p = this.pilot, g = this.gravity;
+    const dir = (p & PILOT.right ? 1 : 0) - (p & PILOT.left ? 1 : 0);
+    let face = this.life[i] & FACING_LEFT ? -1 : 1;
+    if (dir !== 0) face = dir;
+    let jump = this.life[i] & 15;
+    if (p & PILOT.dig && this.rand() < DIG) this.dig(x + 2 * face, y - 2, y + 1);
+    if (p & PILOT.down && this.rand() < DIG) { this.dig(x - 1, y + 2, y + 2); this.dig(x, y + 2, y + 2); this.dig(x + 1, y + 2, y + 2); }
+
+    const wet = head || KIND[this.get(x, y + 2)] === KINDS.liquid;
+    let cy = y, grounded = false;
+    if (jump > 0) {
+      if (this.relocate(H, x, cy, 1, x, cy - g, 1, true)) { cy -= g; jump--; } else jump = 0;
+    } else if (wet && p & PILOT.up) {
+      if (this.relocate(H, x, cy, 1, x, cy - g, 1, true)) cy -= g;
+    } else if ((!wet || this.rand() < SINK) && this.relocate(H, x, cy, 1, x, cy + g, 1, true)) {
+      cy += g;
+    } else grounded = !wet;
+    if (grounded && p & PILOT.up) jump = JUMP;
+
+    let cx = x;
+    if (dir !== 0 && this.rand() < STRIDE) {
+      if (this.relocate(H, cx, cy, 1, cx + dir, cy, 1, true)) cx += dir;
+      else if (grounded && this.relocate(H, cx, cy, 1, cx + dir, cy - g, 1, true)) { cx += dir; cy -= g; }
+    }
+    const at = this.index(cx, cy);
+    this.life[at] = (face < 0 ? FACING_LEFT : 0) | jump;
+    this.hero = at;
+  }
+
+  /**
+   * Le héros creuse la colonne `x`, de `y0` à `y1` : tout ce qui est solide —
+   * statique ou poudre — part, sauf le métal et les créatures. `become` : une
+   * cellule figée tient bon.
+   */
+  private dig(x: number, y0: number, y1: number): void {
+    for (let y = y0; y <= y1; y++) {
+      const n = this.get(x, y);
+      const kind = KIND[n];
+      if ((kind === KINDS.static || kind === KINDS.powder) && n !== METAL && !CREATURE[n] && this.inBounds(x, y)) this.become(x, y, EMPTY);
+    }
   }
 
   /**

@@ -103,7 +103,12 @@
             <input id="speed" type="range" min="1" max="16" value="4" />
             <output id="speed-value">×1</output>
           </label>
+          <label class="row">
+            <span>Graine</span>
+            <input id="seed" type="number" min="1" max="999999" placeholder="au hasard" />
+          </label>
           <div class="buttons">
+            <button id="terrain" type="button" title="Un monde généré : relief, lacs, grottes, pétrole, lave — la même graine redonne le même monde">Nouveau monde 🗺️</button>
             <button id="surprise" type="button" title="Un décor tiré au sort">Surprise 🎲</button>
             <button id="full" type="button" title="Le bac en plein écran">Plein écran</button>
             <button id="clear" type="button">Vider</button>
@@ -221,7 +226,9 @@
         <dt>Clic droit</dt><dd>Remplir la poche de matière sous le curseur</dd>
         <dt>Clic</dt><dd>Sur un interrupteur ou un aimant posé : le basculer</dd>
         <dt>Glisser</dt><dd>Tracer le rectangle des outils <em>Rectangle</em> et <em>Copier</em></dd>
-        <dt>Molette</dt><dd>Zoomer autour du curseur, si le zoom est actif</dd>
+        <dt>Molette · <kbd>+</kbd> <kbd>−</kbd></dt><dd>Zoomer autour du curseur (ou du centre, au clavier), si le zoom est actif</dd>
+        <dt><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · flèches</dt><dd>Déplacer la vue zoomée, tant que la touche est tenue — ou, s'il y a un héros, le piloter : marcher, sauter (Z), creuser dessous (S)</dd>
+        <dt><kbd>E</kbd></dt><dd>Le héros creuse devant lui</dd>
         <dt>Clic du milieu</dt><dd>Déplacer la vue</dd>
         <dt>Deux doigts</dt><dd>Zoomer et déplacer la vue</dd>
       </dl>
