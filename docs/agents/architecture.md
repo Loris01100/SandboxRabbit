@@ -129,13 +129,30 @@ geste `{t:"pilot", keys}` (bits de `PILOT`, plus la matière choisie en bits
 chaque image. Le rejeu l'enregistre, l'hôte d'un salon le reçoit d'un invité ;
 `applyGesture` le borne à six bits et ne garde la matière que si `placeable()`
 l'accepte. Changer de matière R tenu ne renvoie rien : la nouvelle part au
-prochain changement de touches. Quand la frame porte un héros (`hero`), ZQSD /
-flèches / E / R le pilotent au lieu de déplacer la vue,
+prochain changement de touches. Quand la frame porte un héros (`hero`), les
+touches de direction, de creusage et de pose le pilotent au lieu de déplacer la vue,
 et `follow()` recentre la caméra sur lui à chaque image (un cinquième du
 chemin, bornes comprises). À son apparition la vue zoome à ~160 cellules de
 large (`meet()`). Glisser au clic du milieu (ou pincer) passe `loose` à vrai :
 `follow()` ne tourne plus, la vue reste où on l'a mise ; un clic du milieu
 sans bouger (moins de `CLICK` pixels) la raccroche, et `meet()` aussi.
+
+### Clavier réassignable
+
+**Tous** les raccourcis clavier sont des actions (`ACTIONS` d'ui.ts : pause,
+matières 1-9, gomme, pinceau, gravité, figer, vue thermique, annuler,
+rétablir, coller, zoom, aide, les quatre directions, creuser, poser, vue),
+réassignables dans la fenêtre des raccourcis (liste `#bindings`, remplie par
+`listBindings()` ; seule la souris reste en dur dans index.html).
+`combo()` écrit l'événement en combinaison (`Ctrl+z`, `Ctrl+Maj+z`, `g` :
+Cmd vaut Ctrl, Maj ne compte qu'avec Ctrl ou Alt, puisque les chiffres AZERTY
+la demandent), et `bound`, la table combinaison → action de `keymap()`, la
+traduit. Les actions tenues (`MOVES` / `STEER`) vont dans `held`, rangées par
+touche nue : relâchée avec ou sans Ctrl, elle se retrouve. Les flèches, A / W
+et Ctrl+Maj+Z restent des alias tant qu'aucune action ne les prend. Une
+touche prise par une autre action s'échange avec elle (`rebind()`) ; Tab,
+Entrée, Échap et les modificateurs seuls (`RESERVED`) sont refusés. Un
+écouteur en capture prend la touche attendue avant tout le reste.
 
 V fait défiler trois vues (`VIEWS` de main.ts) : de côté, de côté avec
 l'encadré de ce que voit le héros, à la première personne. Les deux dernières
@@ -268,7 +285,7 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | [main.ts](../../src/client/main.ts) | palette, souris, zoom et caméra (bornes par `clampPan`, ZQSD / WASD / flèches tenues, `+` / `-`), réglages, défis, boucle rAF, câblage de tout le DOM | non |
 | [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille (lu par `seen()`) | non |
 | [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, secours 2D par `Renderer` (sans éclairage) | non |
-| [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence), accès `localStorage` tolérant | **oui** (test/ui.ts) |
+| [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence, touches réassignables), accès `localStorage` tolérant | **oui** (test/ui.ts) |
 | [sight.ts](../../src/client/sight.ts) | ce que voit le héros : `look()` lance un éventail de rayons dans une grille et rend une colonne de pixels | **oui** (test/ui.ts) |
 | [gestures.ts](../../src/client/gestures.ts) | `Gesture` + `applyGesture(engine, g)` + météo | **oui** |
 | [replay.ts](../../src/client/replay.ts) | `Recorder` / `Player` | **oui** |
@@ -315,7 +332,8 @@ importer main.ts (cycle) : main.ts leur passe ce dont ils ont besoin par un
 Accès `localStorage` : uniquement via `read` / `write` / `forget` de ui.ts.
 Un `localStorage.getItem` nu jette quand les cookies sont bloqués, et au
 chargement d'un module cela laisse la page blanche. Clés existantes :
-`sandbox-rabbit:mondes`, `:reglages`, `:records`, `:bac`, `:theme`.
+`sandbox-rabbit:mondes`, `:reglages`, `:records`, `:bac`, `:theme`, `:touches`
+(les touches réassignées, relues par `parseBindings()`).
 
 `:bac` suit le format d'un lien de partage, `320~<grille>` (`loadWorld()` de
 main.ts lit les deux ; une valeur sans `~`, d'avant, se charge dans le bac tel

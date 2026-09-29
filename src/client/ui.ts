@@ -97,3 +97,92 @@ export function panAfterZoom(client: number, edge: number, size: number, pan: nu
   const fraction = (client - edge) / size;
   return client - (edge - pan) - fraction * (size / zoom) * next;
 }
+
+/**
+ * Tout ce que le clavier commande, réassignable : pause, matières, pinceau,
+ * réglages, annulation, zoom, aide, puis les quatre directions (la vue, ou le
+ * héros quand il y en a un), creuser, poser, changer de vue.
+ */
+export const ACTIONS = [
+  "pause", "mat1", "mat2", "mat3", "mat4", "mat5", "mat6", "mat7", "mat8", "mat9", "eraser",
+  "brushDown", "brushUp", "gravity", "freeze", "heat", "undo", "redo", "paste", "zoomIn", "zoomOut", "help",
+  "left", "right", "up", "down", "dig", "place", "view",
+] as const;
+export type Action = (typeof ACTIONS)[number];
+export type Bindings = Record<Action, string>;
+
+/** Les touches d'origine, pensées pour l'AZERTY. Une combinaison s'écrit « Ctrl+z ». */
+export const DEFAULT_BINDINGS: Bindings = {
+  pause: " ", mat1: "1", mat2: "2", mat3: "3", mat4: "4", mat5: "5", mat6: "6", mat7: "7", mat8: "8", mat9: "9", eraser: "0",
+  brushDown: "[", brushUp: "]", gravity: "g", freeze: "f", heat: "h", undo: "Ctrl+z", redo: "Ctrl+y", paste: "Ctrl+v",
+  zoomIn: "+", zoomOut: "-", help: "?",
+  left: "q", right: "d", up: "z", down: "s", dig: "e", place: "r", view: "v",
+};
+
+/** Toujours là en plus de la touche choisie, tant qu'aucune action ne les prend : les flèches, le WASD du QWERTY, Ctrl+Maj+Z. */
+const ALIASES: Record<string, Action> = {
+  ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", a: "left", w: "up", "Ctrl+Maj+z": "redo",
+};
+
+/** Ce qui ne s'attribue pas : Échap annule, Tab et Entrée naviguent, Maj seule trace une ligne au clic, les autres modificateurs ne valent que combinés. */
+const RESERVED = new Set(["Escape", "Tab", "Enter", "Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock"]);
+
+/** Une touche seule telle qu'on la range : une lettre en minuscule quelle que soit la casse, un nom de touche tel quel. */
+export const keyOf = (key: string): string => (key.length === 1 ? key.toLowerCase() : key);
+
+/**
+ * La combinaison d'un événement clavier, telle qu'on la range : « Ctrl+z »,
+ * « Ctrl+Maj+z », « g ». Cmd compte pour Ctrl. Maj ne compte qu'avec Ctrl ou
+ * Alt : seule, elle ne fait que changer le caractère — les chiffres d'un
+ * clavier AZERTY la demandent.
+ */
+export function combo(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }): string {
+  const ctrl = e.ctrlKey || e.metaKey;
+  return (ctrl ? "Ctrl+" : "") + (e.altKey ? "Alt+" : "") + ((ctrl || e.altKey) && e.shiftKey ? "Maj+" : "") + keyOf(e.key);
+}
+
+/** La touche d'une combinaison, sans ses modificateurs. */
+const bare = (c: string): string => c.replace(/^(Ctrl\+|Alt\+|Maj\+)+(?=.)/, "");
+
+/**
+ * Les touches rangées, complétées par celles d'origine. Une valeur abîmée,
+ * réservée ou en double se perd sans emporter les autres.
+ */
+export function parseBindings(text: string | null): Bindings {
+  const out = { ...DEFAULT_BINDINGS };
+  let saved: unknown = null;
+  try { saved = JSON.parse(text ?? "null"); } catch { return out; }
+  if (!saved || typeof saved !== "object") return out;
+  for (const action of ACTIONS) {
+    const key = (saved as Record<string, unknown>)[action];
+    if (typeof key === "string") out[action] = rebind(out, action, key)?.[action] ?? out[action];
+  }
+  return out;
+}
+
+/**
+ * Donne la combinaison `c` à `action`. Si une autre action l'avait, elle
+ * reprend l'ancienne touche de `action` : un échange, jamais une action sans
+ * touche. Null pour une touche réservée ou vide.
+ */
+export function rebind(b: Bindings, action: Action, c: string): Bindings | null {
+  if (!bare(c) || RESERVED.has(bare(c))) return null;
+  const out = { ...b };
+  for (const other of ACTIONS) if (out[other] === c) out[other] = b[action];
+  out[action] = c;
+  return out;
+}
+
+/** De la combinaison à l'action : les touches choisies, puis les alias qu'elles laissent libres. */
+export function keymap(b: Bindings): Record<string, Action> {
+  const map: Record<string, Action> = { ...ALIASES };
+  for (const action of ACTIONS) map[b[action]] = action;
+  return map;
+}
+
+/** Une combinaison lisible par un humain : « Q », « Ctrl+Z », « ← », « Espace ». */
+export function keyLabel(c: string): string {
+  const names: Record<string, string> = { " ": "Espace", ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓", Backspace: "Retour", Delete: "Suppr", "-": "−" };
+  const key = bare(c);
+  return c.slice(0, c.length - key.length) + (names[key] ?? (key.length === 1 ? key.toUpperCase() : key));
+}

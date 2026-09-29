@@ -3,7 +3,7 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { clampPan, goalText, panAfterZoom, parseGoal, pushRecent, ticksFor } from "../src/client/ui.ts";
+import { DEFAULT_BINDINGS, clampPan, combo, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, ticksFor } from "../src/client/ui.ts";
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 
@@ -92,6 +92,40 @@ import { look } from "../src/client/sight.ts";
   assert.ok(milieu()[0] > 0.9 * sable[0] && milieu()[0] <= sable[0], "droit devant, le sable, à peine assombri par la distance");
   look(cells, W, H, 10, 10, -1, out);
   assert.ok(milieu()[0] < MATERIALS[STONE].color[0] && milieu()[0] > MATERIALS[EMPTY].color[0], "de l'autre côté, le bord du monde, en pierre");
+}
+
+/**
+ * Touches réassignables : un échange quand la touche est prise, un refus
+ * quand elle est réservée, des combinaisons avec Ctrl, et des flèches qui
+ * restent là.
+ */
+{
+  const touche = (key: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) =>
+    combo({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
+  assert.equal(touche("Q", { shiftKey: true }), "q", "Maj seule ne compte pas : une lettre reste elle-même");
+  assert.equal(touche("1", { shiftKey: true }), "1", "les chiffres d'un clavier AZERTY demandent Maj");
+  assert.equal(touche("Z", { ctrlKey: true, shiftKey: true }), "Ctrl+Maj+z", "avec Ctrl, Maj compte");
+  assert.equal(touche("z", { metaKey: true }), "Ctrl+z", "Cmd vaut Ctrl");
+
+  const b = rebind(DEFAULT_BINDINGS, "left", touche("J"))!;
+  assert.equal(b.left, "j");
+  assert.equal(keymap(b).j, "left");
+  assert.equal(keymap(b).ArrowLeft, "left", "les flèches marchent toujours");
+  const échange = rebind(DEFAULT_BINDINGS, "dig", "g")!;
+  assert.deepEqual([échange.dig, échange.gravity], ["g", "e"], "prendre la touche d'une autre action échange les deux");
+  const annuler = rebind(DEFAULT_BINDINGS, "undo", touche("w", { ctrlKey: true }))!;
+  assert.equal(keymap(annuler)["Ctrl+w"], "undo", "une combinaison s'attribue");
+  assert.equal(keymap(annuler).w, "up", "et ne prend pas la touche seule");
+  assert.equal(keymap(DEFAULT_BINDINGS)["Ctrl+Maj+z"], "redo", "Ctrl+Maj+Z rétablit aussi");
+  assert.equal(rebind(DEFAULT_BINDINGS, "view", "Tab"), null, "Tab navigue : réservée");
+  assert.equal(rebind(DEFAULT_BINDINGS, "view", "Ctrl+Shift"), null, "un modificateur seul non plus");
+  assert.equal(keymap(rebind(DEFAULT_BINDINGS, "dig", "a")!).a, "dig", "une touche choisie passe avant un alias");
+  assert.equal(keyLabel("Ctrl+z"), "Ctrl+Z");
+  assert.equal(keyLabel("Ctrl++"), "Ctrl++");
+  assert.equal(keyLabel(" "), "Espace");
+  assert.deepEqual(parseBindings(JSON.stringify(b)), b, "relues telles qu'écrites");
+  assert.deepEqual(parseBindings("{abîmé"), DEFAULT_BINDINGS, "illisible : les touches d'origine");
+  assert.deepEqual(parseBindings(JSON.stringify({ up: "Enter", left: 3 })), DEFAULT_BINDINGS, "réservée ou pas une chaîne : écartée");
 }
 
 console.log("ok — panneau conforme");

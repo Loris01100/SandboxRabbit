@@ -222,26 +222,19 @@
         <h2>Raccourcis</h2>
         <button type="submit">Fermer</button>
       </form>
+      <!-- Le clavier est rempli par main.ts (listBindings) : un bouton par
+           action, cliquer puis presser la nouvelle touche ou combinaison. -->
+      <h3>Clavier — cliquer une touche pour la changer</h3>
+      <dl class="keys" id="bindings"></dl>
+      <button id="bindings-reset" type="button">Touches d'origine</button>
+      <h3>Souris</h3>
       <dl class="keys">
-        <dt><kbd>Espace</kbd></dt><dd>Mettre en pause ou reprendre</dd>
-        <dt><kbd>1</kbd> … <kbd>9</kbd></dt><dd>Choisir une matière — <span id="keys-materials"></span></dd>
-        <dt><kbd>0</kbd></dt><dd>Gomme</dd>
-        <dt><kbd>[</kbd> · <kbd>]</kbd></dt><dd>Pinceau plus fin · plus large</dd>
-        <dt><kbd>G</kbd></dt><dd>Inverser la gravité</dd>
-        <dt><kbd>F</kbd></dt><dd>Passer de Peindre à Figer</dd>
-        <dt><kbd>H</kbd></dt><dd>Vue thermique</dd>
-        <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd> · <kbd>Ctrl</kbd>+<kbd>Y</kbd></dt><dd>Annuler · Rétablir</dd>
-        <dt><kbd>Ctrl</kbd>+<kbd>V</kbd></dt><dd>Reposer le morceau copié, centré sur le curseur</dd>
         <dt><kbd>Maj</kbd> + clic</dt><dd>Ligne droite depuis le dernier point posé</dd>
         <dt><kbd>Alt</kbd> + clic</dt><dd>Pipette : reprendre la matière sous le curseur</dd>
         <dt>Clic droit</dt><dd>Remplir la poche de matière sous le curseur</dd>
         <dt>Clic</dt><dd>Sur un interrupteur ou un aimant posé : le basculer</dd>
         <dt>Glisser</dt><dd>Tracer le rectangle des outils <em>Rectangle</em> et <em>Copier</em></dd>
-        <dt>Molette · <kbd>+</kbd> <kbd>−</kbd></dt><dd>Zoomer autour du curseur (ou du centre, au clavier), si le zoom est actif</dd>
-        <dt><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · flèches</dt><dd>Déplacer la vue zoomée, tant que la touche est tenue — ou, s'il y a un héros, le piloter : marcher, sauter (Z), creuser dessous (S)</dd>
-        <dt><kbd>E</kbd></dt><dd>Le héros creuse devant lui</dd>
-        <dt><kbd>V</kbd></dt><dd>Vue du héros : de côté, de côté avec l'encadré de ce qu'il voit, ou à la première personne</dd>
-        <dt><kbd>R</kbd></dt><dd>Le héros pose la matière choisie devant ses pieds (une marche) — avec <kbd>Z</kbd>, sous lui (un pilier). Solides seulement, ni nanites, étincelle, braise ni source</dd>
+        <dt>Molette</dt><dd>Zoomer autour du curseur, si le zoom est actif</dd>
         <dt>Clic du milieu</dt><dd>Déplacer la vue</dd>
         <dt>Deux doigts</dt><dd>Zoomer et déplacer la vue</dd>
       </dl>

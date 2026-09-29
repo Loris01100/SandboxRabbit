@@ -2,7 +2,7 @@ import "./style.css";
 import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PILOT, SAND, SHORTCUTS, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
-import { clampPan, panAfterZoom, pushRecent, read, write } from "./ui.ts";
+import { ACTIONS, clampPan, combo, keyLabel, keymap, keyOf, panAfterZoom, parseBindings, pushRecent, read, rebind, forget, write, type Action } from "./ui.ts";
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
@@ -127,7 +127,8 @@ function select(id: MaterialId): void {
 }
 select(current);
 
-// Raccourcis : 1..9 puis 0 pour la gomme.
+// Raccourcis : chaque combinaison devient une action (`bound`, touches
+// réassignables dans la fenêtre des raccourcis).
 addEventListener("keydown", (e) => {
   // Un champ a le focus (le nombre d'un objectif, un curseur, la galerie) :
   // ses touches lui appartiennent, sinon taper « 500 » change de matière.
@@ -137,55 +138,53 @@ addEventListener("keydown", (e) => {
   // Espace mettait le bac en pause pendant qu'on choisissait un monde.
   if (document.querySelector("dialog[open]")) return;
   const move = moveKey(e);
-  if (move) { held.add(move); steer(); e.preventDefault(); return; }
-  if ((e.key === "+" || e.key === "-") && zoomInput.checked) {
-    const r = canvas.getBoundingClientRect();
-    zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(zoom * (e.key === "+" ? 1.5 : 1 / 1.5)));
-    return;
+  if (move) { held.set(keyOf(e.key), move); steer(); e.preventDefault(); return; }
+  const action = bound[combo(e)];
+  if (!action) return;
+  e.preventDefault();
+  if (action.startsWith("mat")) { select(SHORTCUTS[Number(action.slice(3)) - 1]); return; }
+  switch (action) {
+    case "pause": toggleRun(); return;
+    case "eraser": select(EMPTY); return;
+    case "undo": undo(); return;
+    case "redo": redo(); return;
+    case "paste":
+      if (!clip || !last) return;
+      snapshot();
+      // Centré sur le curseur : c'est là qu'on regarde en collant.
+      gesture({
+        t: "clip",
+        x: last.x - (clip.w >> 1),
+        y: last.y - (clip.h >> 1),
+        w: clip.w, h: clip.h,
+        cells: clip.cells, life: clip.life,
+      });
+      return;
+    case "zoomIn": case "zoomOut": {
+      if (!zoomInput.checked) return;
+      const r = canvas.getBoundingClientRect();
+      zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(zoom * (action === "zoomIn" ? 1.5 : 1 / 1.5)));
+      return;
+    }
+    // Taille du pinceau : le réglage le plus repris, et il fallait redéplier son
+    // groupe à chaque fois. L'événement rejoué borne la valeur et retient tout.
+    case "brushDown": case "brushUp":
+      brushInput.value = String(Number(brushInput.value) + (action === "brushUp" ? 1 : -1));
+      brushInput.dispatchEvent(new Event("input"));
+      return;
+    case "gravity": flipGravity(); return;
+    case "freeze": toolInput.value = toolInput.value === "paint" ? "freeze" : "paint"; return;
+    case "heat": heatmapInput.checked = !heatmapInput.checked; set({ heatmap: heatmapInput.checked }); return;
+    case "help": if (!shortcutsEl.open) shortcutsEl.showModal(); return;
+    case "view": nextView(); return;
   }
-  if (e.key === " ") { toggleRun(); e.preventDefault(); return; }
-  if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "Z" && e.shiftKey))) { redo(); e.preventDefault(); return; }
-  if (e.key === "z" && (e.ctrlKey || e.metaKey)) { undo(); e.preventDefault(); return; }
-  if (e.key === "v" && (e.ctrlKey || e.metaKey) && clip && last) {
-    snapshot();
-    // Centré sur le curseur : c'est là qu'on regarde en collant.
-    gesture({
-      t: "clip",
-      x: last.x - (clip.w >> 1),
-      y: last.y - (clip.h >> 1),
-      w: clip.w, h: clip.h,
-      cells: clip.cells, life: clip.life,
-    });
-    e.preventDefault();
-    return;
-  }
-  const n = Number(e.key);
-  if (!Number.isNaN(n) && SHORTCUTS[n - 1] !== undefined) select(SHORTCUTS[n - 1]);
-  if (e.key === "0") select(EMPTY);
-  if (e.key === "g") flipGravity();
-  if (e.key === "v" && !e.ctrlKey && !e.metaKey) nextView();
-  // Taille du pinceau : le réglage le plus repris, et il fallait redéplier son
-  // groupe à chaque fois. L'événement rejoué borne la valeur et retient tout.
-  if (e.key === "[" || e.key === "]") {
-    brushInput.value = String(Number(brushInput.value) + (e.key === "]" ? 1 : -1));
-    brushInput.dispatchEvent(new Event("input"));
-  }
-  if (e.key === "f") toolInput.value = toolInput.value === "paint" ? "freeze" : "paint";
-  if (e.key === "h") { heatmapInput.checked = !heatmapInput.checked; set({ heatmap: heatmapInput.checked }); }
-  if (e.key === "?" && !shortcutsEl.open) shortcutsEl.showModal();
 });
 
 /* -------------------------------------------------------------- raccourcis */
 
-// Le pense-bête : les touches vivent dans index.html, sauf la ligne des
-// matières, qui se remplit depuis `SHORTCUTS` — réordonner la barre ne doit pas
-// laisser une aide qui ment.
+// Le pense-bête : la souris vit dans index.html, le clavier se remplit depuis
+// `bindings` (`listBindings()`) — une touche changée ne laisse pas une aide qui ment.
 const shortcutsEl = document.querySelector<HTMLDialogElement>("#shortcuts")!;
-// Les neuf premières : la dixième est la gomme, qui a sa propre ligne (touche 0).
-document.querySelector<HTMLSpanElement>("#keys-materials")!.textContent = SHORTCUTS
-  .slice(0, 9)
-  .map((id, n) => `${n + 1} ${MATERIALS[id].name}`)
-  .join(" · ");
 document.querySelector<HTMLButtonElement>("#help")!.addEventListener("click", () => shortcutsEl.showModal());
 
 /* ------------------------------------------------------------------ souris */
@@ -272,15 +271,19 @@ function applyView(): void {
   canvas.style.transform = zoom === 1 ? "" : `translate(${panX}px, ${panY}px) scale(${zoom})`;
 }
 
-/** Touches de caméra : ZQSD (AZERTY), WASD (QWERTY) et flèches, en sens de déplacement de la vue. */
-const MOVES: Record<string, [number, number]> = {
-  z: [0, -1], w: [0, -1], ArrowUp: [0, -1],
-  s: [0, 1], ArrowDown: [0, 1],
-  q: [-1, 0], a: [-1, 0], ArrowLeft: [-1, 0],
-  d: [1, 0], ArrowRight: [1, 0],
-};
-/** Touches de caméra tenues : la vue glisse à chaque image tant qu'elles le sont. */
-const held = new Set<string>();
+/** Touches choisies par le joueur (fenêtre des raccourcis), gardées d'une visite à l'autre. */
+const KEYS = "sandbox-rabbit:touches";
+let bindings = parseBindings(read(KEYS));
+/** De la touche à l'action, refait à chaque changement de `bindings`. */
+let bound = keymap(bindings);
+
+/** Actions de caméra, en sens de déplacement de la vue. */
+const MOVES: Partial<Record<Action, [number, number]>> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+/**
+ * Touches de direction, de creusage ou de pose tenues, avec l'action qu'elles
+ * portaient à l'appui : relâchée avec ou sans Ctrl, la touche se retrouve.
+ */
+const held = new Map<string, Action>();
 
 /**
  * Fait glisser la vue selon les touches tenues : un quatre-vingt-dixième du
@@ -288,7 +291,7 @@ const held = new Set<string>();
  */
 function scroll(): void {
   let dx = 0, dy = 0;
-  for (const key of held) { dx += MOVES[key][0]; dy += MOVES[key][1]; }
+  for (const action of held.values()) { const m = MOVES[action] ?? [0, 0]; dx += m[0]; dy += m[1]; }
   const step = canvas.offsetWidth / 90;
   panX -= Math.sign(dx) * step;
   panY -= Math.sign(dy) * step;
@@ -296,22 +299,21 @@ function scroll(): void {
 }
 
 /**
- * Touche de caméra — ou de héros — de l'événement, ou null. Une lettre compte
- * quelle que soit la casse (Maj tenu pour tracer une ligne), jamais avec Ctrl
- * (Ctrl+Z annule). Les flèches ne comptent que hors des boutons : dans la
- * palette, elles passent d'une matière à l'autre. E (creuser) et R (poser)
- * n'existent qu'avec un héros.
+ * Action de caméra — ou de héros — de l'événement, ou null. Une lettre compte
+ * quelle que soit la casse (Maj tenu pour tracer une ligne) ; avec Ctrl, c'est
+ * une autre combinaison (`combo`). Les flèches ne comptent que hors des
+ * boutons : dans la palette, elles passent d'une matière à l'autre. Creuser
+ * et poser n'existent qu'avec un héros.
  */
-function moveKey(e: KeyboardEvent): string | null {
-  if (e.ctrlKey || e.metaKey || e.altKey) return null;
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  if (!(key in MOVES) && !(hero && key in STEER)) return null;
-  if (key.startsWith("Arrow") && (e.target as HTMLElement | null)?.closest?.("button")) return null;
-  return key;
+function moveKey(e: KeyboardEvent): Action | null {
+  const action = bound[combo(e)];
+  if (!action || !(action in MOVES || (hero && action in STEER))) return null;
+  if (e.key.startsWith("Arrow") && (e.target as HTMLElement | null)?.closest?.("button")) return null;
+  return action;
 }
 
 addEventListener("keyup", (e) => {
-  held.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key);
+  held.delete(keyOf(e.key));
   steer();
 });
 addEventListener("blur", () => { held.clear(); steer(); });
@@ -330,14 +332,9 @@ let loose = false;
 /** Commandes envoyées en dernier (bits de `PILOT`) : un geste ne part que quand elles changent. */
 let piloted = 0;
 
-/** Touches du héros : celles de la caméra, plus E pour creuser devant lui et R pour poser. */
-const STEER: Record<string, number> = {
-  q: PILOT.left, a: PILOT.left, ArrowLeft: PILOT.left,
-  d: PILOT.right, ArrowRight: PILOT.right,
-  z: PILOT.up, w: PILOT.up, ArrowUp: PILOT.up,
-  s: PILOT.down, ArrowDown: PILOT.down,
-  e: PILOT.dig,
-  r: PILOT.place,
+/** Actions du héros : celles de la caméra, plus creuser devant lui et poser. */
+const STEER: Partial<Record<Action, number>> = {
+  left: PILOT.left, right: PILOT.right, up: PILOT.up, down: PILOT.down, dig: PILOT.dig, place: PILOT.place,
 };
 
 /**
@@ -347,7 +344,7 @@ const STEER: Record<string, number> = {
  */
 function steer(): void {
   let keys = 0;
-  if (hero) for (const key of held) keys |= STEER[key] ?? 0;
+  if (hero) for (const action of held.values()) keys |= STEER[action] ?? 0;
   if (keys & PILOT.place) keys |= current << 8;
   if (keys === piloted) return;
   piloted = keys;
@@ -374,7 +371,8 @@ function meet(): void {
     const r = canvas.getBoundingClientRect();
     zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(WIDTH / 160));
   }
-  statusEl.textContent = "Héros : Q/D pour marcher, Z pour sauter (et nager), S pour creuser dessous, E devant, R pour poser la matière choisie (Z+R : sous lui). V change de vue. Le métal résiste.";
+  const k = (a: Action) => keyLabel(bindings[a]);
+  statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
 }
 
 /** Les vues que V fait défiler : de côté, de côté avec l'encadré de ce que voit le héros, à la première personne. */
@@ -389,7 +387,7 @@ const sightImg = sightCtx.createImageData(1, sightEl.height);
 function nextView(): void {
   view = (view + 1) % VIEWS.length;
   sightEl.dataset.view = VIEWS[view];
-  statusEl.textContent = `Vue ${VIEW_NAMES[view]}${hero ? "" : " — elle attend un héros (Vivant → Héros)"}. V pour changer.`;
+  statusEl.textContent = `Vue ${VIEW_NAMES[view]}${hero ? "" : " — elle attend un héros (Vivant → Héros)"}. ${keyLabel(bindings.view)} pour changer.`;
 }
 
 /**
@@ -406,6 +404,79 @@ function gaze(): void {
   look(grid.cells, grid.width, grid.height, x, y, face, sightImg.data);
   sightCtx.putImageData(sightImg, 0, 0);
 }
+
+/** Ce que fait chaque action, pour la liste des touches de la fenêtre des raccourcis. Les matières se nomment depuis `SHORTCUTS`. */
+const ACTION_NAMES: Record<Action, string> = {
+  pause: "Mettre en pause ou reprendre",
+  mat1: "", mat2: "", mat3: "", mat4: "", mat5: "", mat6: "", mat7: "", mat8: "", mat9: "",
+  eraser: "Gomme",
+  brushDown: "Pinceau plus fin",
+  brushUp: "Pinceau plus large",
+  gravity: "Inverser la gravité",
+  freeze: "Passer de Peindre à Figer",
+  heat: "Vue thermique",
+  undo: "Annuler",
+  redo: "Rétablir (aussi Ctrl+Maj+Z)",
+  paste: "Reposer le morceau copié, centré sur le curseur",
+  zoomIn: "Zoomer (au centre), si le zoom est actif",
+  zoomOut: "Dézoomer (au centre), si le zoom est actif",
+  help: "Cette fenêtre",
+  left: "Vue ou héros vers la gauche",
+  right: "Vue ou héros vers la droite",
+  up: "Vue vers le haut · le héros saute (et nage)",
+  down: "Vue vers le bas · le héros creuse dessous",
+  dig: "Le héros creuse devant lui",
+  place: "Le héros pose la matière choisie devant ses pieds — saut tenu, sous lui. Solides seulement, ni nanites, étincelle, braise ni source",
+  view: "Vue du héros : de côté, avec l'encadré de ce qu'il voit, ou à la première personne",
+};
+const bindingsEl = document.querySelector<HTMLDListElement>("#bindings")!;
+/** L'action qui attend sa nouvelle touche, ou null. */
+let waiting: Action | null = null;
+
+/**
+ * Remplit la liste des touches : un bouton par action, qu'on clique puis qui
+ * prend la combinaison suivante (Ctrl, Alt, Maj n'attendent que leur touche).
+ * Échap annule ; une touche déjà prise par une autre action s'échange avec
+ * elle, une touche réservée (Tab, Entrée, Maj seule…) est refusée.
+ */
+function listBindings(): void {
+  bindingsEl.replaceChildren(...ACTIONS.flatMap((action) => {
+    const dt = document.createElement("dt");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.action = action;
+    button.textContent = waiting === action ? "Touche ?" : keyLabel(bindings[action]);
+    button.addEventListener("click", () => { waiting = action; listBindings(); });
+    dt.append(button);
+    const dd = document.createElement("dd");
+    dd.textContent = action.startsWith("mat") ? `Matière : ${MATERIALS[SHORTCUTS[Number(action.slice(3)) - 1]].name}` : ACTION_NAMES[action];
+    return [dt, dd];
+  }));
+}
+
+/** Retient de nouvelles touches (null : celles d'origine) et les applique tout de suite. */
+function setBindings(next: typeof bindings | null): void {
+  bindings = next ?? parseBindings(null);
+  bound = keymap(bindings);
+  held.clear();
+  if (next) write(KEYS, JSON.stringify(next)); else forget(KEYS);
+  waiting = null;
+  listBindings();
+}
+
+addEventListener("keydown", (e) => {
+  if (!waiting || ["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (e.key === "Escape") { waiting = null; listBindings(); return; }
+  const next = rebind(bindings, waiting, combo(e));
+  if (next) setBindings(next);
+  else bindingsEl.querySelector<HTMLButtonElement>(`[data-action="${waiting}"]`)!.textContent = "Pas celle-ci — une autre ?";
+}, true);
+
+document.querySelector<HTMLButtonElement>("#bindings-reset")!.addEventListener("click", () => setBindings(null));
+shortcutsEl.addEventListener("close", () => { waiting = null; listBindings(); });
+listBindings();
 
 /** Zoome autour d'un point de l'écran, qui ne bouge pas (math dans ui.ts). */
 function zoomAt(clientX: number, clientY: number, next: number): void {
