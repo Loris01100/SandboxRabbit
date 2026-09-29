@@ -394,9 +394,20 @@ tick en 1920×1080 chargé (`npm run directions`).
   lumière, vue thermique) = changer les deux. `Renderer` sert au secours, aux
   tests et à `npm run directions` ; le test du miroir (test/sandbox.ts)
   vérifie qu'un miroir se colorie comme le moteur.
+- **Seule exception : l'éclairage global** (*radiance cascades*, screen.ts),
+  qui n'existe qu'en WebGL2. Il ajoute sa lumière par-dessus le coloriage
+  commun et `Renderer` n'en a pas de copie (`ponytail:` de `lighting()`).
+  Ce qu'une matière émet et arrête vit dans `lighting()` (render.ts), une
+  table de 256 × RGBA comme `palette()` ; le rougeoiement des corps chauds
+  (au-delà de 450 °C) est ajouté dans le shader `SCENE`. Une matière qui
+  émet doit arrêter un peu de lumière (opacité > 0), sinon elle n'éclaire
+  rien : test/sim.ts le vérifie. Une nouvelle matière lumineuse = une ligne
+  `set(…)` dans `lighting()`. Une matière opaque qui brille n'est pas
+  éclairée en plus (passe `FLUENCE`) : sans ça, le bord d'une mer de lave
+  reprenait sa propre lumière et virait au jaune saturé.
 - Ce qui change l'aspect **sans écriture ni tick** : la vue thermique ne
   regarde que la page (`order()` de world.ts la relève et fait tout
-  recolorier) ; l'ambiante (seuil de lumière, pivot de la vue thermique)
+  recolorier), l'éclairage aussi (`light()` de world.ts) ; l'ambiante (seuil de lumière, pivot de la vue thermique)
   passe par `wakeAll()` et voyage avec la frame. Un nouveau réglage d'aspect
   doit faire l'un ou l'autre.
 - `engine.changed()` remet à zéro ce qu'il a rendu : un seul `Tracker` par

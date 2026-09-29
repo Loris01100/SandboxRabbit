@@ -1,4 +1,6 @@
-import { EMPTY, MAGNET, MATERIALS, SWITCH, THERMITE, URANIUM } from "./materials.ts";
+import {
+  EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MAGNET, MATERIALS, MOLTEN_GLASS, SPARK, SWITCH, THERMITE, URANIUM,
+} from "./materials.ts";
 import { type Engine } from "./engine.ts";
 
 /**
@@ -112,6 +114,36 @@ export const GLOWING = [URANIUM, THERMITE, SWITCH, MAGNET] as const;
 
 /** Écart à l'ambiante à partir duquel une cellule commence à éclairer, en °C. */
 export const GLOW = 40;
+
+/**
+ * Ce que chaque matière fait à la lumière de l'éclairage global (screen.ts),
+ * 256 × RGBA : ce qu'elle émet (rouge, vert, bleu), puis ce qu'elle arrête
+ * (255 = opaque). Le verre laisse passer, l'eau atténue, la pierre fait
+ * de l'ombre. Le feu, gaz, arrête un peu : sans ça, une flamme n'émettrait
+ * rien. La chaleur ajoute son rougeoiement dans le shader, au-delà de 450 °C.
+ *
+ * ponytail: seul le shader éclaire — `Renderer` (secours 2D, tests) n'en a
+ * pas de copie, l'effet ne tient qu'en WebGL2. À recopier le jour où le
+ * secours doit ressembler.
+ */
+export function lighting(): Uint8Array {
+  const out = new Uint8Array(256 * 4);
+  const opacity = { empty: 0, gas: 20, liquid: 70, powder: 255, static: 255 };
+  for (const key of Object.keys(MATERIALS)) {
+    const m = MATERIALS[Number(key)];
+    out[m.id * 4 + 3] = opacity[m.kind];
+  }
+  const set = (id: number, r: number, g: number, b: number, a: number) => out.set([r, g, b, a], id * 4);
+  set(FIRE, 255, 150, 50, 110);
+  set(LAVA, 255, 110, 30, 255);
+  set(EMBER, 230, 90, 30, 255);
+  set(MOLTEN_GLASS, 255, 160, 70, 255);
+  set(SPARK, 255, 240, 140, 255);
+  set(URANIUM, 70, 200, 70, 255);
+  set(GLASS, 0, 0, 0, 25);
+  set(ICE, 0, 0, 0, 90);
+  return out;
+}
 
 /**
  * Rendu 1 cellule = 1 pixel dans un tableau de pixels, puis mise à l'échelle

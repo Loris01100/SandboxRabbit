@@ -30,7 +30,12 @@ a bougé).
    registre : clé = `id`, `life` ≤ 250, couleur en trois canaux 0..255,
    `boil.into` / `freeze.into` connus et non bouclés, aucune matière dans deux
    familles.
-6. Une ligne dans le tableau « Ce qui se passe quand on mélange » du
+6. Si elle brille, ou si elle laisse passer la lumière alors que son `kind`
+   est opaque (comme le verre) : une ligne `set(…)` dans `lighting()` de
+   [render.ts](../../src/client/sim/render.ts). Sinon l'éclairage la traite
+   d'après son `kind` : un solide ou une poudre fait de l'ombre, un liquide
+   atténue, un gaz laisse passer.
+7. Une ligne dans le tableau « Ce qui se passe quand on mélange » du
    [README](../../README.md), et mettre à jour le compte de matières en tête.
 
 Un changement d'état seul (fondre, geler, prendre) = `boil` / `freeze`, aucune

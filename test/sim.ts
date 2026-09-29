@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/client/sim/codec.ts";
-import { thumbnail } from "../src/client/sim/render.ts";
+import { lighting, thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, weather, type Gesture } from "../src/client/gestures.ts";
 import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
@@ -1440,6 +1440,16 @@ for (const fichier of ["../src/client/sim/engine.ts", "../src/client/terrain.ts"
   const source = readFileSync(new URL(fichier, import.meta.url), "utf8");
   const approchées = source.match(/Math\.(hypot|sin|cos|tan|asin|acos|atan2?|sinh|cosh|tanh|exp|expm1|log|log1p|log2|log10|pow|cbrt)\b/g);
   assert.equal(approchées, null, `${fichier} n'emploie aucune fonction Math approchée (${approchées?.join(", ")})`);
+}
+
+/**
+ * L'éclairage (screen.ts) compte l'émission d'une cellule au prorata de ce
+ * qu'elle arrête : une matière qui émet sans rien arrêter n'éclairerait rien.
+ */
+const lumière = lighting();
+for (let id = 0; id < 256; id++) {
+  const émet = lumière[id * 4] + lumière[id * 4 + 1] + lumière[id * 4 + 2] > 0;
+  if (émet) assert.ok(lumière[id * 4 + 3] > 0, `la matière ${id} émet de la lumière, elle doit en arrêter un peu`);
 }
 
 console.log("ok — simulation conforme");

@@ -42,6 +42,7 @@ mondes partagés, bac multijoueur.
 | Alcool | Le plus léger des liquides : il flotte sur tout, s'enflamme d'un rien (0,9) et s'évapore dès 40 °C. |
 | Verre fondu | Le verre refond au-dessus de 700 °C, coule, puis se fige sous 600 : sable → verre → verre fondu → verre, sans une ligne de règle dans le moteur. |
 | Vue thermique | Case à cocher ou touche `h` : affiche `temp` au lieu de la matière, bleu pour le froid, corps noir jusqu'au blanc à 1200 °C. |
+| Éclairage | Case à cocher, active par défaut : le feu, la lave, les braises, l'uranium et tout ce qui dépasse 450 °C éclairent le bac ; la pierre fait de l'ombre, l'eau atténue, le verre laisse passer. Éclairage global en *radiance cascades*, calculé par la carte graphique à chaque frame (WebGL2 seulement). |
 | Lumière | Ce qui est chaud éclaire ce qui l'entoure. Aucun flou à calculer : `temp` est déjà diffusé par le moteur, donc l'air autour d'une flamme est chaud — le halo est un sous-produit de la thermique. |
 | Vitesse | Curseur ×0,25 à ×4 : nombre de ticks de simulation par frame, avec reliquat pour le ralenti et plafond à 8 ticks pour ne pas s'enliser. |
 | Vent & gravité | Un curseur biaise la dérive horizontale, la touche `g` retourne la gravité. |

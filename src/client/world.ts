@@ -44,6 +44,16 @@ export function order(o: Order): void {
   sim.postMessage(o);
 }
 
+/**
+ * Allume ou éteint l'éclairage global (screen.ts). Réglage de la page seule,
+ * comme la vue thermique : le bac n'en sait rien, on recolorie tout.
+ */
+export function light(on: boolean): void {
+  if (on === lit) return;
+  lit = on;
+  repaint = true;
+}
+
 const listeners: ((news: News) => void)[] = [];
 
 /** S'abonne aux nouvelles du bac. */
@@ -118,6 +128,7 @@ let fresh = false;
 /** Tout recolorier au prochain `present()` : vue thermique basculée, ambiante changée. */
 let repaint = false;
 let heatmap = false;
+let lit = true;
 /** Le rectangle changé depuis le dernier `present()`, en cellules, bords droit et bas exclus. */
 let left = Infinity, top = Infinity, right = 0, bottom = 0;
 
@@ -176,7 +187,7 @@ export function present(): boolean {
     repaint = true;
   }
   if (repaint) { left = 0; top = 0; right = mirror.width; bottom = mirror.height; }
-  screen.paint(mirror, left, top, right, bottom, heatmap);
+  screen.paint(mirror, left, top, right, bottom, heatmap, lit);
   fresh = false;
   repaint = false;
   left = Infinity; top = Infinity; right = 0; bottom = 0;

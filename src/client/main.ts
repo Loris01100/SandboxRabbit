@@ -6,7 +6,7 @@ import { clampPan, panAfterZoom, pushRecent, read, write } from "./ui.ts";
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
-import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, onResize, order, present, resize, type ClipData } from "./world.ts";
+import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, light, listen, onResize, order, present, resize, screen, type ClipData } from "./world.ts";
 import type { Knobs } from "./sim/sandbox.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
@@ -694,6 +694,13 @@ weatherInput.addEventListener("change", () => set({ weather: weatherInput.checke
 const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
 heatmapInput.addEventListener("change", () => set({ heatmap: heatmapInput.checked }));
 
+const lightingInput = document.querySelector<HTMLInputElement>("#lighting")!;
+lightingInput.addEventListener("change", () => light(lightingInput.checked));
+if (screen.kind === "2d") {
+  lightingInput.disabled = true;
+  lightingInput.parentElement!.title = "Demande WebGL2, absent de ce navigateur";
+}
+
 // Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
 // que de dupliquer les handlers ci-dessus.
 // ponytail: un blob JSON sans version — un réglage renommé repart au défaut.
@@ -715,7 +722,7 @@ function stored<T>(key: string, fallback: T): T {
  */
 const SAVED = [
   brushInput, speedInput, windInput, ambientInput, sizeInput,
-  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput,
+  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, lightingInput,
 ];
 const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";

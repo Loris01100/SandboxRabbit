@@ -16,7 +16,7 @@ TypeScript directement.
 
 | Script | Couvre | Charge |
 | --- | --- | --- |
-| [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
+| [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
 | [test/ui.ts](../../test/ui.ts) | logique pure du panneau | `ui.ts` |
 | [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, routage des messages du salon | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
 | [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles | `Sandbox` avec un rappel `send` qui empile |

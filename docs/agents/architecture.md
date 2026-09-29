@@ -38,7 +38,11 @@ flowchart LR
    `putImageData`. Un envoi à l'écran par rafraîchissement. Ne jamais sauter
    une frame : elle ne porte que ce qui a changé, et le morceau resterait en
    retard pour de bon. La vue thermique ne regarde que la page : `order()`
-   relève `heatmap` au passage et fait tout recolorier.
+   relève `heatmap` au passage et fait tout recolorier. L'éclairage global
+   (case « Éclairage », `light()` de world.ts) est lui aussi un réglage de
+   la page seule : en WebGL2, screen.ts recalcule la lumière de tout le bac à
+   chaque frame arrivée (quelques passes à basse résolution, voir `SCENE`
+   dans screen.ts) ; au repos, rien n'arrive et rien n'est recalculé.
 2. **Le Web Worker de simulation** ([sim/worker.ts](../../src/client/sim/worker.ts))
    héberge `Sandbox`, qui possède l'`Engine` et le `Tracker`. Quand la page
    est isolée (`crossOriginIsolated`, en-têtes COOP/COEP posés par app.ts et
@@ -249,7 +253,7 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | --- | --- | --- |
 | [main.ts](../../src/client/main.ts) | palette, souris, zoom et caméra (bornes par `clampPan`, ZQSD / WASD / flèches tenues, `+` / `-`), réglages, défis, boucle rAF, câblage de tout le DOM | non |
 | [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille | non |
-| [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières), secours 2D par `Renderer` | non |
+| [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, secours 2D par `Renderer` (sans éclairage) | non |
 | [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence), accès `localStorage` tolérant | **oui** (test/ui.ts) |
 | [gestures.ts](../../src/client/gestures.ts) | `Gesture` + `applyGesture(engine, g)` + météo | **oui** |
 | [replay.ts](../../src/client/replay.ts) | `Recorder` / `Player` | **oui** |
