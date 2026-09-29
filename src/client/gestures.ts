@@ -10,7 +10,7 @@
  */
 import { decode, decodeFrozen } from "./sim/codec.ts";
 import { type Engine } from "./sim/engine.ts";
-import { EMPTY, MATERIALS, SNOW, WATER, type MaterialId } from "./sim/materials.ts";
+import { EMPTY, MATERIALS, placeable, SNOW, WATER, type MaterialId } from "./sim/materials.ts";
 
 export type Gesture =
   | { t: "paint"; x: number; y: number; r: number; id: MaterialId; d: number; over: boolean; only?: MaterialId }
@@ -34,11 +34,16 @@ const whole = (...v: number[]): boolean => v.every(Number.isSafeInteger);
 /**
  * Applique un geste au moteur. Les commandes du héros (`pilot`) sont un geste
  * elles aussi : c'est ce qui les fait enregistrer par le rejeu et relayer à
- * l'hôte d'un salon, au tick près. Bornées à leurs cinq bits : un pair envoie
- * ce qu'il veut.
+ * l'hôte d'un salon, au tick près. Bornées à leurs six bits, plus la matière
+ * à poser si le héros peut la tenir (`placeable`), sinon rien : un pair
+ * envoie ce qu'il veut.
  */
 export function applyGesture(engine: Engine, g: Gesture): void {
-  if (g.t === "pilot") { engine.pilot = (g.keys | 0) & 31; return; }
+  if (g.t === "pilot") {
+    const id = (g.keys >> 8) & 255;
+    engine.pilot = ((g.keys | 0) & 63) | (placeable(id) ? id << 8 : 0);
+    return;
+  }
   if (!whole(g.x, g.y)) return;
   switch (g.t) {
     case "paint": engine.paint(g.x, g.y, g.r, known(g.id), g.d, g.over, g.only); return;

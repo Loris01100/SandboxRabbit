@@ -102,7 +102,7 @@ function apply(e: Engine, s: Scene): void {
   e.ambient = s.ambient;
   e.gravity = s.gravity;
   e.emit = s.emit;
-  e.pilot = s.pilot ?? 0;
+  applyGesture(e, { t: "pilot", keys: s.pilot ?? 0 });
 }
 
 /**

@@ -124,10 +124,13 @@ continu), et `paint()` côté moteur en pose une entière quel que soit le rayon
 reçu : un pair de salon ne peut pas en semer un disque.
 
 Les commandes du héros suivent le même chemin : `steer()` de main.ts envoie un
-geste `{t:"pilot", keys}` (bits de `PILOT`) chaque fois que les touches tenues
-changent — jamais à chaque image. Le rejeu l'enregistre, l'hôte d'un salon le
-reçoit d'un invité ; `applyGesture` le borne à cinq bits. Quand la frame porte
-un héros (`hero`), ZQSD / flèches / E le pilotent au lieu de déplacer la vue,
+geste `{t:"pilot", keys}` (bits de `PILOT`, plus la matière choisie en bits
+8-15 quand R est tenu) chaque fois que les touches tenues changent — jamais à
+chaque image. Le rejeu l'enregistre, l'hôte d'un salon le reçoit d'un invité ;
+`applyGesture` le borne à six bits et ne garde la matière que si `placeable()`
+l'accepte. Changer de matière R tenu ne renvoie rien : la nouvelle part au
+prochain changement de touches. Quand la frame porte un héros (`hero`), ZQSD /
+flèches / E / R le pilotent au lieu de déplacer la vue,
 et `follow()` recentre la caméra sur lui à chaque image (un cinquième du
 chemin, bornes comprises). À son apparition la vue zoome à ~160 cellules de
 large (`meet()`). Glisser au clic du milieu (ou pincer) passe `loose` à vrai :

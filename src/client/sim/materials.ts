@@ -63,9 +63,10 @@ export const HERO_LEGS = 54;
 /**
  * Commandes du héros, un bit chacune (`engine.pilot`, geste `pilot`). Ici
  * plutôt que dans engine.ts : la page les envoie, et elle n'importe pas le
- * moteur.
+ * moteur. Les bits 8-15 portent la matière qu'il pose (`place`) : elle voyage
+ * avec les touches, sans autre champ à relayer, enregistrer ni partager.
  */
-export const PILOT = { left: 1, right: 2, up: 4, down: 8, dig: 16 } as const;
+export const PILOT = { left: 1, right: 2, up: 4, down: 8, dig: 16, place: 32 } as const;
 
 export type MaterialId = number;
 
@@ -178,7 +179,7 @@ export const MATERIALS: Record<MaterialId, Material> = {
    * clavier. `HERO` en est le cœur (les hanches) ; `life` y garde son sens et
    * son élan de saut. Plus dense que l'eau : il y coule, et nage en sautant.
    */
-  [HERO]: { id: HERO, name: "Héros", kind: "powder", density: 6, color: [58, 66, 128], noise: 4, flammable: 0.1, creature: true, hint: "Se pilote au clavier : Q/D ou flèches pour marcher, Z pour sauter, S pour creuser dessous, E devant" },
+  [HERO]: { id: HERO, name: "Héros", kind: "powder", density: 6, color: [58, 66, 128], noise: 4, flammable: 0.1, creature: true, hint: "Se pilote au clavier : Q/D ou flèches pour marcher, Z pour sauter, S pour creuser dessous, E devant, R pour poser la matière choisie" },
   [HERO_HEAD]: { id: HERO_HEAD, name: "Héros", kind: "powder", density: 6, color: [238, 196, 160], noise: 2, flammable: 0.1, part: HERO, hint: "La tête du héros" },
   [HERO_BODY]: { id: HERO_BODY, name: "Héros", kind: "powder", density: 6, color: [214, 64, 52], noise: 4, flammable: 0.1, part: HERO, hint: "Le buste du héros" },
   [HERO_LEGS]: { id: HERO_LEGS, name: "Héros", kind: "powder", density: 6, color: [58, 66, 128], noise: 4, flammable: 0.1, part: HERO, hint: "Les jambes du héros" },
@@ -199,6 +200,17 @@ export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
   { name: "Gaz", ids: [SMOKE, STEAM, FIREDAMP, FALLOUT] },
   { name: "Outils", ids: [SOURCE, EMPTY] },
 ];
+
+/**
+ * Ce que le héros peut poser (R) : du solide qu'on tient en main. Ni gaz ni
+ * liquide, ni ce qui ne se touche pas (nanites, étincelle, braise, source),
+ * ni une créature.
+ */
+export const placeable = (id: MaterialId): boolean => {
+  const m = MATERIALS[id];
+  return !!m && (m.kind === "static" || m.kind === "powder") && !m.creature && m.part === undefined
+    && id !== NANITE && id !== SPARK && id !== EMBER && id !== SOURCE;
+};
 
 /** Toutes les matières de la barre d'outils, familles mises bout à bout. */
 export const PALETTE: MaterialId[] = CATEGORIES.flatMap((c) => c.ids);

@@ -1957,6 +1957,10 @@ export class Engine {
    * mouvement vertical — saut, nage, chute — et un pas de côté, qui grimpe une
    * marche s'il le faut. Il creuse devant lui (E) ou sous ses pieds (S) tout
    * ce qui est solide, sauf le métal : c'est ce qui laisse encore des murs.
+   * Il pose (R) la matière de `pilot >> 8` : une marche devant ses pieds, qu'il
+   * gravit en avançant, ou, saut tenu, sous lui — de quoi monter en pilier.
+   * À chaque tick et avant le pas, pas au hasard comme creuser : sinon il
+   * marche plus vite qu'il ne pose et tombe de son propre escalier.
    *
    * Dans un liquide il coule lentement (`SINK`), et saut tenu il remonte : il
    * nage. La tête dessous, il se noie en quelques secondes (`BREATH`).
@@ -1984,6 +1988,11 @@ export class Engine {
     let jump = this.life[i] & 15;
     if (p & PILOT.dig && this.rand() < DIG) this.dig(x + 2 * face, y - 2, y + 1);
     if (p & PILOT.down && this.rand() < DIG) { this.dig(x - 1, y + 2, y + 2); this.dig(x, y + 2, y + 2); this.dig(x + 1, y + 2, y + 2); }
+    if (p & PILOT.place) {
+      const id = p >> 8;
+      if (p & PILOT.up) { this.lay(x - 1, y + 2, id); this.lay(x, y + 2, id); this.lay(x + 1, y + 2, id); }
+      else this.lay(x + 2 * face, y + 1, id);
+    }
 
     const wet = head || KIND[this.get(x, y + 2)] === KINDS.liquid;
     let cy = y, grounded = false;
@@ -2017,6 +2026,15 @@ export class Engine {
       const kind = KIND[n];
       if ((kind === KINDS.static || kind === KINDS.powder) && n !== METAL && !CREATURE[n] && this.inBounds(x, y)) this.become(x, y, EMPTY);
     }
+  }
+
+  /**
+   * Le héros pose `id` en (x, y) si la place est libre (vide ou gaz) : il ne
+   * remplace rien, et `id` = 0 (matière refusée par `applyGesture`) ne pose rien.
+   */
+  private lay(x: number, y: number, id: MaterialId): void {
+    const kind = KIND[this.get(x, y)];
+    if (id !== EMPTY && (kind === KINDS.empty || kind === KINDS.gas)) this.become(x, y, id);
   }
 
   /**

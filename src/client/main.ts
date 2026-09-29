@@ -297,8 +297,8 @@ function scroll(): void {
  * Touche de caméra — ou de héros — de l'événement, ou null. Une lettre compte
  * quelle que soit la casse (Maj tenu pour tracer une ligne), jamais avec Ctrl
  * (Ctrl+Z annule). Les flèches ne comptent que hors des boutons : dans la
- * palette, elles passent d'une matière à l'autre. E (creuser) n'existe
- * qu'avec un héros.
+ * palette, elles passent d'une matière à l'autre. E (creuser) et R (poser)
+ * n'existent qu'avec un héros.
  */
 function moveKey(e: KeyboardEvent): string | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
@@ -328,13 +328,14 @@ let loose = false;
 /** Commandes envoyées en dernier (bits de `PILOT`) : un geste ne part que quand elles changent. */
 let piloted = 0;
 
-/** Touches du héros : celles de la caméra, plus E pour creuser devant lui. */
+/** Touches du héros : celles de la caméra, plus E pour creuser devant lui et R pour poser. */
 const STEER: Record<string, number> = {
   q: PILOT.left, a: PILOT.left, ArrowLeft: PILOT.left,
   d: PILOT.right, ArrowRight: PILOT.right,
   z: PILOT.up, w: PILOT.up, ArrowUp: PILOT.up,
   s: PILOT.down, ArrowDown: PILOT.down,
   e: PILOT.dig,
+  r: PILOT.place,
 };
 
 /**
@@ -345,6 +346,7 @@ const STEER: Record<string, number> = {
 function steer(): void {
   let keys = 0;
   if (hero) for (const key of held) keys |= STEER[key] ?? 0;
+  if (keys & PILOT.place) keys |= current << 8;
   if (keys === piloted) return;
   piloted = keys;
   gesture({ t: "pilot", keys });
@@ -370,7 +372,7 @@ function meet(): void {
     const r = canvas.getBoundingClientRect();
     zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(WIDTH / 160));
   }
-  statusEl.textContent = "Héros : Q/D pour marcher, Z pour sauter (et nager), S pour creuser dessous, E devant. Le métal résiste.";
+  statusEl.textContent = "Héros : Q/D pour marcher, Z pour sauter (et nager), S pour creuser dessous, E devant, R pour poser la matière choisie (Z+R : sous lui). Le métal résiste.";
 }
 
 /** Zoome autour d'un point de l'écran, qui ne bouge pas (math dans ui.ts). */

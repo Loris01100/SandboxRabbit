@@ -1427,8 +1427,22 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(count(brûlé, HERO), 0, "trop chaud, il ne survit pas");
 
   const pirate = plaine();
-  applyGesture(pirate, { t: "pilot", keys: 999 });
-  assert.equal(pirate.pilot, 999 & 31, "un pair ne pose que les cinq bits des commandes");
+  applyGesture(pirate, { t: "pilot", keys: 999 | (NANITE << 8) | (1 << 20) });
+  assert.equal(pirate.pilot, 999 & 63, "un pair ne pose que les six bits des commandes, et pas de nanites");
+  applyGesture(pirate, { t: "pilot", keys: PILOT.place | (WATER << 8) });
+  assert.equal(pirate.pilot, PILOT.place, "ni un liquide");
+  applyGesture(pirate, { t: "pilot", keys: PILOT.place | (STONE << 8) });
+  assert.equal(pirate.pilot >> 8, STONE, "mais de la pierre, oui");
+
+  const escalier = plaine();
+  tenir(escalier, PILOT.right | PILOT.place | (WOOD << 8), 60);
+  assert.ok(où(escalier)[1] < SOL - 6, `il pose des marches de bois et les gravit (y = ${où(escalier)[1]})`);
+  assert.ok(count(escalier, WOOD) > 5, "le bois est bien posé");
+
+  const pilier = plaine();
+  tenir(pilier, PILOT.up | PILOT.place | (STONE << 8), 120);
+  assert.ok(où(pilier)[1] < SOL - 8, `saut tenu, il monte sur un pilier de pierre (y = ${où(pilier)[1]})`);
+  assert.equal(où(pilier)[0], 10, "sans bouger de colonne");
 
   const e = plaine();
   e.rect(30, SOL - 1, 31, SOL - 1, SAND);

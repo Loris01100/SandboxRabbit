@@ -376,9 +376,9 @@ oreilles), faim, chute, puis — posé — manger, se reproduire, se déplacer.
 
 Sept cellules (`HERO_SHAPE` : tête, buste et bras, hanches = cœur `HERO`,
 jambes), symétriques — son sens se garde dans `life`. **Il n'a pas de volonté**
-: il obéit à `engine.pilot`, cinq bits (`PILOT` dans materials.ts : gauche,
-droite, saut, creuser dessous, creuser devant). Tous les héros du bac obéissent
-aux mêmes touches.
+: il obéit à `engine.pilot`, six bits (`PILOT` dans materials.ts : gauche,
+droite, saut, creuser dessous, creuser devant, poser) et, bits 8-15, la matière
+qu'il pose. Tous les héros du bac obéissent aux mêmes touches.
 
 - `pilot` n'est posé **que** par le geste `pilot` (gestures.ts) : c'est ce qui
   l'enregistre dans le rejeu et le relaie à l'hôte d'un salon. Il figure aussi
@@ -391,6 +391,12 @@ aux mêmes touches.
   : plus dense qu'elle, il y coule et nage en sautant.
 - Il creuse le solide (statique ou poudre) par `become()`, sauf `METAL` et les
   créatures ; une cellule figée tient bon.
+- Il pose (`lay()`) la matière de `pilot >> 8` dans du vide ou un gaz : devant
+  ses pieds (une marche), ou saut tenu sous lui (un pilier). À **chaque** tick,
+  avant le pas — au hasard, il marchait plus vite qu'il ne posait et tombait de
+  son escalier. La matière est filtrée par `placeable()` (materials.ts) dans
+  `applyGesture`, seule porte d'entrée de `pilot` (rejeu compris) : le moteur
+  ne la revérifie pas, 0 = rien à poser.
 - `engine.hero` = index du cœur du dernier héros posé (`spawn`) ou mis à jour :
   Sandbox le joint à chaque frame (`hero`), vérifié (`cells[hero] === HERO`),
   et la page fait suivre la caméra. Il n'est pas remis à -1 à la mort : c'est
