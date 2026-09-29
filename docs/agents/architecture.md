@@ -143,8 +143,10 @@ sans bouger (moins de `CLICK` pixels) la raccroche, et `meet()` aussi.
 réassignables dans la fenêtre des raccourcis. Elle est rangée en encadrés
 calqués sur les sections du panneau (`KEY_GROUPS` d'ui.ts : Matière,
 Pinceau, Simulation, Physique du monde, Défis, Mondes, Héros et vue), chacun
-avec ses gestes de souris, fixes ; un menu d'onglets (`#keys-menu`) en ouvre
-un à la fois (`shownGroup`), `listBindings()` remplit le tout. Chaque action
+avec ses gestes de souris, fixes ; un menu d'onglets (`#keys-menu`) en montre
+un à la fois (`shownGroup`), `listBindings()` remplit le tout. Tous sont posés
+dans la même case de grille, les autres en `visibility: hidden` : chacun a la
+taille du plus grand, la fenêtre ne saute pas d'un onglet à l'autre. Chaque action
 est dans un encadré et un seul (test/ui.ts). Les actions de Simulation et de
 Mondes, et « recommencer le dernier défi » (`lastChallenge`), cliquent
 simplement le bouton du panneau.

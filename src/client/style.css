@@ -301,6 +301,11 @@ kbd {
 /* Menu de la fenêtre des raccourcis : un onglet par encadré. */
 .keys-menu { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.75rem; }
 .keys-menu button[aria-pressed="true"] { border-color: var(--accent); background: var(--pressed); }
+/* Tous les encadrés dans la même case : elle prend la taille du plus grand,
+   et la fenêtre ne change pas de taille d'un onglet à l'autre. */
+#bindings { display: grid; }
+#bindings > section { grid-area: 1 / 1; }
+#bindings > section:not(.shown) { visibility: hidden; }
 
 .keys {
   display: grid;

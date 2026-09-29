@@ -451,7 +451,9 @@ let shownGroup = 0;
 
 /**
  * Remplit la fenêtre des raccourcis : un menu d'onglets, un par encadré de
- * `KEY_GROUPS`, et l'encadré ouvert — un bouton par action, qu'on clique puis
+ * `KEY_GROUPS`, et les encadrés — tous posés, un seul visible, pour qu'ils
+ * aient la taille du plus grand et que la fenêtre ne saute pas d'un onglet à
+ * l'autre. Un bouton par action, qu'on clique puis
  * qui prend la combinaison suivante (Ctrl, Alt, Maj n'attendent que leur
  * touche), puis les gestes de souris. Échap annule ; une touche déjà prise par
  * une autre action s'échange avec elle, une touche réservée (Tab, Entrée, Maj
@@ -466,31 +468,35 @@ function listBindings(): void {
     tab.addEventListener("click", () => { shownGroup = n; waiting = null; listBindings(); });
     return tab;
   }));
-  const group = KEY_GROUPS[shownGroup];
-  const title = document.createElement("h3");
-  title.textContent = group.name;
-  const list = document.createElement("dl");
-  list.className = "keys";
-  for (const action of group.actions) {
-    const dt = document.createElement("dt");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.action = action;
-    button.textContent = waiting === action ? "Touche ?" : keyLabel(bindings[action]);
-    button.addEventListener("click", () => { waiting = action; listBindings(); });
-    dt.append(button);
-    const dd = document.createElement("dd");
-    dd.textContent = action.startsWith("mat") ? `Matière : ${MATERIALS[SHORTCUTS[Number(action.slice(3)) - 1]].name}` : ACTION_NAMES[action];
-    list.append(dt, dd);
-  }
-  for (const [gesture, effect] of group.mouse) {
-    const dt = document.createElement("dt");
-    dt.textContent = gesture;
-    const dd = document.createElement("dd");
-    dd.textContent = effect;
-    list.append(dt, dd);
-  }
-  bindingsEl.replaceChildren(title, list);
+  bindingsEl.replaceChildren(...KEY_GROUPS.map((group, n) => {
+    const section = document.createElement("section");
+    section.classList.toggle("shown", n === shownGroup);
+    const title = document.createElement("h3");
+    title.textContent = group.name;
+    const list = document.createElement("dl");
+    list.className = "keys";
+    for (const action of group.actions) {
+      const dt = document.createElement("dt");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.action = action;
+      button.textContent = waiting === action ? "Touche ?" : keyLabel(bindings[action]);
+      button.addEventListener("click", () => { waiting = action; listBindings(); });
+      dt.append(button);
+      const dd = document.createElement("dd");
+      dd.textContent = action.startsWith("mat") ? `Matière : ${MATERIALS[SHORTCUTS[Number(action.slice(3)) - 1]].name}` : ACTION_NAMES[action];
+      list.append(dt, dd);
+    }
+    for (const [gesture, effect] of group.mouse) {
+      const dt = document.createElement("dt");
+      dt.textContent = gesture;
+      const dd = document.createElement("dd");
+      dd.textContent = effect;
+      list.append(dt, dd);
+    }
+    section.append(title, list);
+    return section;
+  }));
 }
 
 /** Retient de nouvelles touches (null : celles d'origine) et les applique tout de suite. */
