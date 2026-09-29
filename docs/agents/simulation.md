@@ -126,6 +126,15 @@ milliseconde par tick, au lieu de 30. Un bloc est traité si lui ou un voisin a
   depuis. test/sim.ts le vérifie (mer de lave en 128×72, surface à mi-bloc).
   Tester `awake === 0` est sans risque en multi-fils : pendant la diffusion,
   un bloc ne passe que de 1 à 2, jamais par 0.
+- **un bloc éveillé mais à l'ambiante** : si le bloc et sa bordure sont tous
+  à l'ambiante exacte, sans source ni matière que l'ambiante ferait changer
+  d'état (table `calm`, recalculée quand l'ambiante change), `flat()` fait
+  sauter le calcul de la diffusion : il recopie la température et déclare le
+  bloc refroidi. Le résultat est identique au bit près (`sum - 4t` vaut 0
+  exactement). C'est le cas de presque tous les blocs réveillés par de l'eau
+  ou du sable qui bougent : 3238 blocs éveillés sur 3254 dans le chantier en
+  1920×1080. Une ambiante qui n'est pas un f32 exact (20,3) ne prend jamais
+  ce raccourci : c'est plus lent, mais toujours juste.
 
 Invariants :
 

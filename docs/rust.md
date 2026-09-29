@@ -180,6 +180,26 @@ trouvailles en TypeScript, qui pèsent bien plus que tout portage :
   tirages, même empreinte : **48,6 → 42,9 ms par tick** sur de la lave qui
   coule en 1920×1080.
 
+Deuxième passe, sur trois scènes en 1920×1080 (le chantier du bench, de la
+lave qui tombe par les trous d'un plancher, un monde généré avec de l'eau et
+du sable), minimum de cinq exécutions :
+
+- **La diffusion recalculait des blocs à l'ambiante.** Presque tous les blocs
+  éveillés par de l'eau ou du sable qui bougent sont à 20 °C tout rond, et la
+  diffusion y rend `t` au bit près. `flat()` le voit et saute le calcul
+  ([simulation.md](agents/simulation.md#blocs-de-veille)). État identique au
+  bit près sur les trois scènes après 300 ticks, empreinte inchangée.
+  **Chantier 28,5 → 25,7 ms, monde 14,9 → 13,1 ms** ; lave inchangée (sa
+  chaleur est réelle).
+- **Essayé sans gain** : remplacer les tests des voisines de la lave par une
+  table (`LAVA_TOUCH`). Les 8 % que le profil attribuait à cette ligne
+  venaient de `get()` intégré, pas des comparaisons. Retiré.
+
+Sur la lave qui coule, 680 000 cellules pleines sont balayées pour 15 000
+qui changent. Chacune tire `drift()` même quand elle est entourée de lave :
+la sauter réduirait le tick, mais **changerait les tirages, donc
+l'empreinte**. C'est la prochaine piste, à décider en connaissance de cause.
+
 Ce qui reste sur de la lave qui coule (profil `node --cpu-prof`, part du
 temps propre) : la règle de la lave et le choix de la règle (`update`,
 ~32 %), la chaleur (`diffuseChunk`, ~22 %), l'étalement des liquides

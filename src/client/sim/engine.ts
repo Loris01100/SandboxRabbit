@@ -390,6 +390,9 @@ export class Engine {
   /** Vent horizontal, de -1 (plein ouest) à 1 (plein est). */
   wind = 0;
   private air = AMBIENT;
+  /** 1 = matière qui ne chauffe pas et ne change pas d'état à l'ambiante `calmAt` (voir `flat()`). */
+  private readonly calm = new Uint8Array(256);
+  private calmAt = NaN;
   /** Côté d'un bloc de veille, en cellules : le rendu redessine par blocs lui aussi. */
   readonly chunk = CHUNK;
   /** Blocs de veille par rangée et par colonne (voir `CHUNK`). */
@@ -1621,6 +1624,11 @@ export class Engine {
     const cols = this.cols;
     const upAsleep = y0 > 0 && awake[c - cols] === 0, downAsleep = y1 < h && awake[c + cols] === 0;
     const leftAsleep = x0 > 0 && awake[c - 1] === 0, rightAsleep = x1 < w && awake[c + 1] === 0;
+    if (this.flat(x0, y0, x1, y1)) {
+      for (let y = y0; y < y1; y++) tempNext.fill(ambient + 0, y * w + x0, y * w + x1);
+      awake[c] = 2;
+      return;
+    }
     let still = true;
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
@@ -1643,6 +1651,39 @@ export class Engine {
     }
     if (still) awake[c] = 2;
     else stir[c] = 1;
+  }
+
+  /**
+   * Le bloc (x0, y0)–(x1, y1) et sa bordure sont-ils tous à l'ambiante exacte,
+   * sans source ni matière que l'ambiante ferait changer d'état ? La diffusion
+   * y rendrait alors `t` au bit près : `sum - 4t` vaut 0 exactement (un f32
+   * fois 3 ou 4 tient dans un f64), `ambient - t` aussi. Dans le chantier de
+   * `npm run bench` en 1920×1080, 3238 des 3254 blocs éveillés le sont : l'eau
+   * et le sable qui bougent réveillent leurs blocs sans rien y chauffer, et la
+   * diffusion faisait un cinquième du tick pour recopier des 20 °C.
+   *
+   * La bordure est lue sans distinguer éveillée ou endormie (`pulled()`) :
+   * une source y est refusée d'office, c'est plus strict et plus simple.
+   * `ambient + 0` écrit +0 là où l'ambiante vaut -0, comme le calcul complet.
+   */
+  private flat(x0: number, y0: number, x1: number, y1: number): boolean {
+    const { width: w, height: h, cells, temp, calm } = this;
+    const ambient = this.air;
+    if (this.calmAt !== ambient) {
+      for (let id = 0; id < 256; id++) {
+        const heat = HEAT[id];
+        calm[id] = heat !== heat && !(ambient > BOIL_AT[id]) && !(ambient < FREEZE_AT[id]) ? 1 : 0;
+      }
+      this.calmAt = ambient;
+    }
+    const ya = Math.max(0, y0 - 1), yb = Math.min(h, y1 + 1);
+    const xa = Math.max(0, x0 - 1), xb = Math.min(w, x1 + 1);
+    for (let y = ya; y < yb; y++) {
+      for (let i = y * w + xa, end = y * w + xb; i < end; i++) {
+        if (temp[i] !== ambient || calm[cells[i]] === 0) return false;
+      }
+    }
+    return true;
   }
 
   /** Passe 3 : un bloc refroidi recopie sa nouvelle température dans l'autre tampon, pour lire la même chose endormi. */
