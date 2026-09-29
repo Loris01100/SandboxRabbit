@@ -46,18 +46,26 @@ pub extern "C" fn reserve(bytes: usize) -> usize {
     start
 }
 
-/// Ce que lit la chaleur d'une matière, rangé par id comme dans engine.ts.
-struct Tables<'a> {
-    heat: &'a [f32],
-    boil_at: &'a [f32],
-    freeze_at: &'a [f32],
-    boil_into: &'a [u8],
-    freeze_into: &'a [u8],
-    life: &'a [u8],
+/// Ce que lit la chaleur d'une matière. Tout sur 16 octets, plutôt qu'un
+/// tableau par propriété comme engine.ts : `after()` lit `heat`, `boil_at` et
+/// `freeze_at` de chaque cellule, qui tombent ainsi sur la même ligne de cache
+/// au lieu de trois.
+#[derive(Clone, Copy)]
+struct Mat {
+    heat: f32,
+    boil_at: f32,
+    freeze_at: f32,
+    boil_into: u8,
+    freeze_into: u8,
+    life: u8,
     /// `calm` d'engine.ts : ni source, ni matière que l'ambiante ferait
     /// changer d'état. Recalculé à chaque appel, l'ambiante pouvant changer.
-    calm: [bool; 256],
+    calm: bool,
 }
+
+/// Les matières rangées par id. Indexé par un `u8`, le tableau de 256 n'a
+/// besoin d'aucune vérification de bornes : le compilateur les retire.
+type Tables = [Mat; 256];
 
 /// La grille, vue depuis Rust : les tableaux qu'engine.ts range dans `Memory`.
 struct Grid<'a> {
@@ -92,14 +100,11 @@ pub unsafe extern "C" fn thermal(
     let cols = w.div_ceil(CHUNK);
     let chunks = cols * h.div_ceil(CHUNK);
     let (f, b) = unsafe { (core::slice::from_raw_parts(f32s, 768), core::slice::from_raw_parts(u8s, 768)) };
-    let mut t = Tables {
-        heat: &f[..256], boil_at: &f[256..512], freeze_at: &f[512..],
-        boil_into: &b[..256], freeze_into: &b[256..512], life: &b[512..],
-        calm: [false; 256],
-    };
-    for id in 0..256 {
-        let heat = t.heat[id];
-        t.calm[id] = heat != heat && !(ambient > t.boil_at[id] as f64) && !(ambient < t.freeze_at[id] as f64);
+    let mut t: Tables = [Mat { heat: 0.0, boil_at: 0.0, freeze_at: 0.0, boil_into: 0, freeze_into: 0, life: 0, calm: false }; 256];
+    for (id, m) in t.iter_mut().enumerate() {
+        let (heat, boil_at, freeze_at) = (f[id], f[256 + id], f[512 + id]);
+        let calm = heat != heat && !(ambient > boil_at as f64) && !(ambient < freeze_at as f64);
+        *m = Mat { heat, boil_at, freeze_at, boil_into: b[id], freeze_into: b[256 + id], life: b[512 + id], calm };
     }
     let mut g = unsafe {
         Grid {
@@ -165,9 +170,9 @@ fn flat(g: &Grid, tb: &Tables, c: usize) -> bool {
     let (ya, yb) = (y0.saturating_sub(1), (y1 + 1).min(g.h));
     let (xa, xb) = (x0.saturating_sub(1), (x1 + 1).min(g.w));
     for y in ya..yb {
-        let row = y * g.w;
-        for i in row + xa..row + xb {
-            if g.temp[i] as f64 != g.ambient || !tb.calm[g.cells[i] as usize] {
+        let (a, b) = (y * g.w + xa, y * g.w + xb);
+        for (&t, &id) in g.temp[a..b].iter().zip(&g.cells[a..b]) {
+            if t as f64 != g.ambient || !tb[id as usize].calm {
                 return false;
             }
         }
@@ -179,11 +184,12 @@ fn flat(g: &Grid, tb: &Tables, c: usize) -> bool {
 fn heat_chunk(g: &mut Grid, t: &Tables, c: usize) {
     let (x0, y0, x1, y1) = bounds(g, c);
     for y in y0..y1 {
-        for i in y * g.w + x0..y * g.w + x1 {
-            let heat = t.heat[g.cells[i] as usize] as f64;
+        let (a, b) = (y * g.w + x0, y * g.w + x1);
+        for (v, &id) in g.temp[a..b].iter_mut().zip(&g.cells[a..b]) {
+            let heat = t[id as usize].heat as f64;
             if heat == heat {
-                let v = g.temp[i] as f64;
-                g.temp[i] = (v + (heat - v) * 0.5) as f32;
+                let old = *v as f64;
+                *v = (old + (heat - old) * 0.5) as f32;
             }
         }
     }
@@ -216,7 +222,7 @@ fn asleep(g: &Grid, c: usize) -> Asleep {
 /// à chaque frontière entre bloc endormi et bloc éveillé.
 #[inline(always)]
 fn pulled(g: &Grid, tb: &Tables, j: usize) -> f64 {
-    let heat = tb.heat[g.cells[j] as usize] as f64;
+    let heat = tb[g.cells[j] as usize].heat as f64;
     let t = g.temp[j] as f64;
     if heat == heat { (t + (heat - t) * 0.5) as f32 as f64 } else { t }
 }
@@ -226,23 +232,35 @@ fn convert(g: &mut Grid, t: &Tables, i: usize, into: u8) {
     let y = i / g.w;
     g.stir[(y >> SHIFT) * g.cols + ((i - y * g.w) >> SHIFT)] = 1;
     g.cells[i] = into;
-    g.life[i] = t.life[into as usize];
+    g.life[i] = t[into as usize].life;
 }
 
-/// La fin de la diffusion d'une cellule, commune aux trois modes : le bloc a-t-il bougé, et le changement d'état.
+/// La fin de la diffusion d'une cellule, commune aux trois modes : le bloc
+/// a-t-il bougé, et le changement d'état. `id` est la matière de la cellule
+/// `i`, lue par l'appelant : avec ou sans vérification de bornes selon qu'il
+/// sait `i` dans la grille.
 #[inline(always)]
-fn after(g: &mut Grid, tb: &Tables, i: usize, t: f64, next: f64, still: &mut bool) {
-    let id = g.cells[i] as usize;
-    let heat = tb.heat[id] as f64;
+fn after(g: &mut Grid, tb: &Tables, i: usize, id: u8, t: f64, next: f64, still: &mut bool) {
+    let m = &tb[id as usize];
+    let heat = m.heat as f64;
     let moved = next - if heat == heat { 2.0 * t - heat } else { t };
     if moved > STILL || moved < -STILL {
         *still = false;
     }
-    if next > tb.boil_at[id] as f64 {
-        convert(g, tb, i, tb.boil_into[id]);
-    } else if next < tb.freeze_at[id] as f64 {
-        convert(g, tb, i, tb.freeze_into[id]);
+    if next > m.boil_at as f64 {
+        convert(g, tb, i, m.boil_into);
+    } else if next < m.freeze_at as f64 {
+        convert(g, tb, i, m.freeze_into);
     }
+}
+
+/// La matière de la cellule `i`, sans vérification de bornes.
+///
+/// # Safety
+/// `i < w * h`.
+#[inline(always)]
+unsafe fn cell(g: &Grid, i: usize) -> u8 {
+    unsafe { *g.cells.get_unchecked(i) }
 }
 
 /// Une cellule en f64, bords compris : ce que fait `diffuseChunk()` pour
@@ -260,7 +278,30 @@ fn diffuse_one(g: &mut Grid, tb: &Tables, b: (usize, usize, usize, usize), s: As
         + (if x < w - 1 { read(g, i + 1, x == x1 - 1 && s.right) } else { t });
     let next = t + CONDUCTION * (sum - 4.0 * t) + COOLING * (g.ambient - t);
     g.next[i] = next as f32;
-    after(g, tb, i, t, next, still);
+    after(g, tb, i, g.cells[i], t, next, still);
+}
+
+/// Une cellule intérieure : ses quatre voisines existent et aucune n'est dans
+/// un bloc endormi. Le même calcul que `diffuse_one()`, sans ses tests de bord
+/// ni ses vérifications de bornes. C'est le cas de toutes les cellules d'un
+/// bloc loin du bord du bac dont les quatre voisins sont éveillés ; un voisin
+/// endormi n'en retire qu'une ligne ou une colonne.
+///
+/// # Safety
+/// `0 < x < w - 1` et `0 < y < h - 1`, pour `i = y * w + x`.
+#[inline(always)]
+unsafe fn diffuse_inner(g: &mut Grid, tb: &Tables, i: usize, still: &mut bool) {
+    let w = g.w;
+    let p = g.temp.as_ptr();
+    let (t, up, down, left, right) = unsafe {
+        (*p.add(i) as f64, *p.add(i - w) as f64, *p.add(i + w) as f64, *p.add(i - 1) as f64, *p.add(i + 1) as f64)
+    };
+    // Même ordre d'additions que JavaScript : haut, bas, gauche, droite.
+    let sum = up + down + left + right;
+    let next = t + CONDUCTION * (sum - 4.0 * t) + COOLING * (g.ambient - t);
+    unsafe { *g.next.get_unchecked_mut(i) = next as f32 };
+    let id = unsafe { cell(g, i) };
+    after(g, tb, i, id, t, next, still);
 }
 
 /// Fin commune d'une passe 2 : le bloc refroidi s'endort (`awake = 2`), sinon il réveille (`stir`).
@@ -272,14 +313,36 @@ fn close(g: &mut Grid, c: usize, still: bool) {
     }
 }
 
-/// Mode 0 : `diffuseChunk()` ligne à ligne.
+/// Mode 0 : `diffuseChunk()` ligne à ligne. Chaque ligne intérieure passe
+/// ses cellules du milieu à `diffuse_inner()`, et seulement ses deux bouts à
+/// `diffuse_one()` quand ils touchent le bord du bac ou un bloc endormi.
 fn diffuse_scalar(g: &mut Grid, tb: &Tables, c: usize) {
     let b = bounds(g, c);
     let (x0, y0, x1, y1) = b;
     let s = asleep(g, c);
+    let (w, h) = (g.w, g.h);
     let mut still = true;
     for y in y0..y1 {
-        for x in x0..x1 {
+        let inner = y > 0 && y < h - 1 && !(y == y0 && s.up) && !(y == y1 - 1 && s.down);
+        if !inner {
+            for x in x0..x1 {
+                diffuse_one(g, tb, b, s, x, y, &mut still);
+            }
+            continue;
+        }
+        let xa = if x0 == 0 || s.left { x0 + 1 } else { x0 };
+        // `max` : un bloc d'une seule colonne, au bord à gauche comme à
+        // droite, ne doit pas voir sa cellule diffusée deux fois.
+        let xb = (if x1 == w || s.right { x1 - 1 } else { x1 }).max(xa);
+        for x in x0..xa {
+            diffuse_one(g, tb, b, s, x, y, &mut still);
+        }
+        for x in xa..xb {
+            // SAFETY : ligne intérieure (0 < y < h - 1), et xa..xb exclut la
+            // colonne 0 comme la colonne w - 1.
+            unsafe { diffuse_inner(g, tb, y * w + x, &mut still) };
+        }
+        for x in xb..x1 {
             diffuse_one(g, tb, b, s, x, y, &mut still);
         }
     }
@@ -320,8 +383,10 @@ fn diffuse_f64x2(g: &mut Grid, tb: &Tables, c: usize) {
                 f64x2_mul(cool, f64x2_sub(amb, t)),
             );
             unsafe { v128_store64_lane::<0>(f32x4_demote_f64x2_zero(next), g.next.as_mut_ptr().add(i) as *mut u64) };
-            after(g, tb, i, f64x2_extract_lane::<0>(t), f64x2_extract_lane::<0>(next), &mut still);
-            after(g, tb, i + 1, f64x2_extract_lane::<1>(t), f64x2_extract_lane::<1>(next), &mut still);
+            // SAFETY : i + 1 < w * h, ses voisines viennent d'être lues.
+            let (a, b) = unsafe { (cell(g, i), cell(g, i + 1)) };
+            after(g, tb, i, a, f64x2_extract_lane::<0>(t), f64x2_extract_lane::<0>(next), &mut still);
+            after(g, tb, i + 1, b, f64x2_extract_lane::<1>(t), f64x2_extract_lane::<1>(next), &mut still);
             x += 2;
         }
     }
@@ -360,7 +425,9 @@ fn diffuse_f32x4(g: &mut Grid, tb: &Tables, c: usize) {
                 [f32x4_extract_lane::<0>(next), f32x4_extract_lane::<1>(next), f32x4_extract_lane::<2>(next), f32x4_extract_lane::<3>(next)],
             );
             for l in 0..4 {
-                after(g, tb, i + l, tl[l] as f64, nl[l] as f64, &mut still);
+                // SAFETY : i + 3 < w * h, ses voisines viennent d'être lues.
+                let id = unsafe { cell(g, i + l) };
+                after(g, tb, i + l, id, tl[l] as f64, nl[l] as f64, &mut still);
             }
             x += 4;
         }

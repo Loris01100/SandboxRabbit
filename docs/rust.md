@@ -163,6 +163,18 @@ mesure autre chose :
   mais il faisait alors le calcul que JavaScript saute : le chantier tombait à
   ×0,66 en Rust f64.
 
+Deux écarts avec engine.ts, sans effet sur le résultat, pour la vitesse :
+
+- **Une table par matière** (`Mat`, 16 octets) au lieu d'un tableau par
+  propriété : `heat`, `boil_at` et `freeze_at` d'une cellule tombent sur la
+  même ligne de cache. Indexée par un `u8`, la table de 256 n'a plus de
+  vérification de bornes.
+- **Les cellules intérieures sans vérification de bornes**
+  (`diffuse_inner()`, `unsafe`) : quand les quatre voisines existent et
+  qu'aucune n'est dans un bloc endormi, le mode 0 saute les tests de bord et
+  lit les tableaux par pointeur. Les bouts de ligne au bord du bac ou d'un
+  bloc endormi restent à `diffuse_one()`, vérifiée.
+
 ## Résultats
 
 ### Premières mesures, avant l'étape 0
@@ -237,14 +249,22 @@ porter si Rust revient sur la table.
 
 ### Mesures à jour
 
-Après ces corrections, avec `pulled()` et `flat()` reportés dans lib.rs
-(29 septembre 2026, mêmes réserves sur la variation) :
+Après ces corrections, avec `pulled()` et `flat()` reportés dans lib.rs,
+la table par matière et les cellules intérieures sans vérification de
+bornes (29 septembre 2026, trois exécutions, mêmes réserves sur la
+variation) :
 
 | Scène | Tick JS | `thermal()` JS | Rust f64 | Rust SIMD f64×2 | Rust SIMD f32×4 |
 | --- | --- | --- | --- | --- | --- |
-| chantier 1920×1080, 34 % des blocs éveillés | 29 ms | 3,6 ms (12 % du tick) | ×1,5 à 1,8 | ×1,8 à 1,9 | ×1,9 |
-| mer de lave 1920×1080, 6 % des blocs éveillés | 5,3 ms | 2,1 ms (40 % du tick) | ×2,2 à 2,4 | ×2,9 à 3,2 | ×3 à 3,2 |
-| fonderie 1917×1077, 20 % des blocs éveillés | 20 ms | 7,9 ms (39 % du tick) | ×2 à 2,2 | ×2 à 3 | ×3 |
+| chantier 1920×1080, 34 % des blocs éveillés | 29 ms | 3,6 ms (12 % du tick) | ×1,5 | ×1,7 à 1,9 | ×1,8 à 1,9 |
+| mer de lave 1920×1080, 6 % des blocs éveillés | 5,3 ms | 2,1 ms (40 % du tick) | ×2,4 à 2,7 | ×2,7 à 3,3 | ×3,4 à 3,9 |
+| fonderie 1917×1077, 20 % des blocs éveillés | 20 ms | 7,9 ms (39 % du tick) | ×2,2 à 2,6 | ×2,7 à 3 | ×3,2 à 3,7 |
+
+En temps absolu, la table et les cellules intérieures ont fait gagner
+environ 15 % au mode 0 sur la mer de lave (0,9 → 0,8 ms) et la fonderie
+(3,9 → 3,2 ms), et 15 à 20 % au mode f32×4. **Rien sur le chantier** : ses
+blocs éveillés sont presque tous à l'ambiante, `flat()` les recopie sans
+passer par la diffusion, et ce qu'il reste est surtout du trafic mémoire.
 
 Le gain de Rust sur la chaleur tient (×2 environ, au bit près). Mais la
 chaleur ne pèse lourd que là où le reste du tick s'est effondré : les 40 %
