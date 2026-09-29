@@ -147,6 +147,38 @@ fn heat_chunk(g: &mut Grid, t: &Tables, c: usize) {
     }
 }
 
+/// Les voisins du bloc qui dorment (`awake == 0`), dans l'ordre haut, bas,
+/// gauche, droite : comme dans `diffuseChunk()`. Stable pendant la passe 2 :
+/// elle ne pose que des 2, jamais de 0.
+#[derive(Clone, Copy)]
+struct Asleep {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+}
+
+fn asleep(g: &Grid, c: usize) -> Asleep {
+    let (x0, y0, x1, y1) = bounds(g, c);
+    Asleep {
+        up: y0 > 0 && g.awake[c - g.cols] == 0,
+        down: y1 < g.h && g.awake[c + g.cols] == 0,
+        left: x0 > 0 && g.awake[c - 1] == 0,
+        right: x1 < g.w && g.awake[c + 1] == 0,
+    }
+}
+
+/// `pulled()` d'engine.ts : la température d'une cellule d'un bloc endormi,
+/// tirée vers la `heat` de sa source comme le ferait `heat_chunk()`, arrondie
+/// en f32 pareil. Sans elle, la mer de lave diverge de JavaScript de 3,7 °C
+/// à chaque frontière entre bloc endormi et bloc éveillé.
+#[inline(always)]
+fn pulled(g: &Grid, tb: &Tables, j: usize) -> f64 {
+    let heat = tb.heat[g.cells[j] as usize] as f64;
+    let t = g.temp[j] as f64;
+    if heat == heat { (t + (heat - t) * 0.5) as f32 as f64 } else { t }
+}
+
 /// Changement d'état sur place, comme `convert()` : réveille le bloc, pose la matière et sa `life`.
 fn convert(g: &mut Grid, t: &Tables, i: usize, into: u8) {
     let y = i / g.w;
@@ -171,16 +203,19 @@ fn after(g: &mut Grid, tb: &Tables, i: usize, t: f64, next: f64, still: &mut boo
     }
 }
 
-/// Une cellule en f64, bords compris : ce que fait `diffuseChunk()` pour chaque cellule.
+/// Une cellule en f64, bords compris : ce que fait `diffuseChunk()` pour
+/// chaque cellule, `pulled()` compris au bord d'un bloc endormi.
 #[inline(always)]
-fn diffuse_one(g: &mut Grid, tb: &Tables, x: usize, y: usize, still: &mut bool) {
+fn diffuse_one(g: &mut Grid, tb: &Tables, b: (usize, usize, usize, usize), s: Asleep, x: usize, y: usize, still: &mut bool) {
     let (w, h) = (g.w, g.h);
+    let (x0, y0, x1, y1) = b;
     let i = y * w + x;
     let t = g.temp[i] as f64;
-    let sum = (if y > 0 { g.temp[i - w] as f64 } else { t })
-        + (if y < h - 1 { g.temp[i + w] as f64 } else { t })
-        + (if x > 0 { g.temp[i - 1] as f64 } else { t })
-        + (if x < w - 1 { g.temp[i + 1] as f64 } else { t });
+    let read = |g: &Grid, j: usize, edge: bool| if edge { pulled(g, tb, j) } else { g.temp[j] as f64 };
+    let sum = (if y > 0 { read(g, i - w, y == y0 && s.up) } else { t })
+        + (if y < h - 1 { read(g, i + w, y == y1 - 1 && s.down) } else { t })
+        + (if x > 0 { read(g, i - 1, x == x0 && s.left) } else { t })
+        + (if x < w - 1 { read(g, i + 1, x == x1 - 1 && s.right) } else { t });
     let next = t + CONDUCTION * (sum - 4.0 * t) + COOLING * (g.ambient - t);
     g.next[i] = next as f32;
     after(g, tb, i, t, next, still);
@@ -197,11 +232,13 @@ fn close(g: &mut Grid, c: usize, still: bool) {
 
 /// Mode 0 : `diffuseChunk()` ligne à ligne.
 fn diffuse_scalar(g: &mut Grid, tb: &Tables, c: usize) {
-    let (x0, y0, x1, y1) = bounds(g, c);
+    let b = bounds(g, c);
+    let (x0, y0, x1, y1) = b;
+    let s = asleep(g, c);
     let mut still = true;
     for y in y0..y1 {
         for x in x0..x1 {
-            diffuse_one(g, tb, x, y, &mut still);
+            diffuse_one(g, tb, b, s, x, y, &mut still);
         }
     }
     close(g, c, still);
@@ -213,18 +250,22 @@ fn load2(s: &[f32], i: usize) -> v128 {
     f64x2_promote_low_f32x4(unsafe { v128_load64_zero(s.as_ptr().add(i) as *const u64) })
 }
 
-/// Mode 1 : deux cellules intérieures à la fois en f64x2, dans l'ordre exact des opérations de JavaScript.
+/// Mode 1 : deux cellules intérieures à la fois en f64x2 (les bords d'un bloc
+/// endormi, qui passent par `pulled()`, restent à `diffuse_one()`), dans l'ordre exact des opérations de JavaScript.
 fn diffuse_f64x2(g: &mut Grid, tb: &Tables, c: usize) {
-    let (x0, y0, x1, y1) = bounds(g, c);
+    let b = bounds(g, c);
+    let (x0, y0, x1, y1) = b;
+    let s = asleep(g, c);
     let (w, h) = (g.w, g.h);
     let (k, cool, four, amb) = (f64x2_splat(CONDUCTION), f64x2_splat(COOLING), f64x2_splat(4.0), f64x2_splat(g.ambient));
     let mut still = true;
     for y in y0..y1 {
-        let inner = y > 0 && y < h - 1;
+        let inner = y > 0 && y < h - 1 && !(y == y0 && s.up) && !(y == y1 - 1 && s.down);
         let mut x = x0;
         while x < x1 {
-            if !inner || x == 0 || x + 2 > x1 || x + 1 >= w - 1 {
-                diffuse_one(g, tb, x, y, &mut still);
+            if !inner || x == 0 || x + 2 > x1 || x + 1 >= w - 1
+                || (x == x0 && s.left) || (x + 2 == x1 && s.right) {
+                diffuse_one(g, tb, b, s, x, y, &mut still);
                 x += 1;
                 continue;
             }
@@ -246,16 +287,19 @@ fn diffuse_f64x2(g: &mut Grid, tb: &Tables, c: usize) {
 
 /// Mode 2 : quatre cellules intérieures à la fois, tout en f32. Pas au bit près : mesure de ce que coûte l'exactitude.
 fn diffuse_f32x4(g: &mut Grid, tb: &Tables, c: usize) {
-    let (x0, y0, x1, y1) = bounds(g, c);
+    let b = bounds(g, c);
+    let (x0, y0, x1, y1) = b;
+    let s = asleep(g, c);
     let (w, h) = (g.w, g.h);
     let (k, cool, four, amb) = (f32x4_splat(CONDUCTION as f32), f32x4_splat(COOLING as f32), f32x4_splat(4.0), f32x4_splat(g.ambient as f32));
     let mut still = true;
     for y in y0..y1 {
-        let inner = y > 0 && y < h - 1;
+        let inner = y > 0 && y < h - 1 && !(y == y0 && s.up) && !(y == y1 - 1 && s.down);
         let mut x = x0;
         while x < x1 {
-            if !inner || x == 0 || x + 4 > x1 || x + 3 >= w - 1 {
-                diffuse_one(g, tb, x, y, &mut still);
+            if !inner || x == 0 || x + 4 > x1 || x + 3 >= w - 1
+                || (x == x0 && s.left) || (x + 4 == x1 && s.right) {
+                diffuse_one(g, tb, b, s, x, y, &mut still);
                 x += 1;
                 continue;
             }

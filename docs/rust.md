@@ -135,9 +135,18 @@ Trois versions, choisies par `mode` :
 
 | Mode | Calcul | Au bit près ? |
 | --- | --- | --- |
-| 0 | copie ligne à ligne de `diffuseChunk()`, f64 | oui |
+| 0 | copie ligne à ligne de `diffuseChunk()`, f64, `pulled()` compris | oui |
 | 1 | SIMD, deux cellules à la fois (f64×2) | oui : le SIMD fait les mêmes opérations IEEE, voie par voie |
 | 2 | SIMD, quatre cellules à la fois, tout en f32 (f32×4) | **non** : écart de l'ordre de 10⁻⁴ °C. Invisible à l'œil, mais un salon où un joueur tourne en JS et l'autre en WASM divergerait. Envisageable seulement si **tous** les clients tournent en WASM |
+
+Le port suit `diffuseChunk()`, y compris `pulled()` : au bord d'un bloc
+voisin endormi, la cellule lue est d'abord tirée vers la `heat` de sa source.
+Les modes SIMD laissent ces bordures à la version cellule par cellule. Tant
+que le port n'avait pas `pulled()`, `npm run rust` échouait sur la mer de
+lave (3840 températures jusqu'à 3,7 °C d'écart). Un changement de la chaleur
+dans engine.ts se reporte dans lib.rs, sinon ce script échoue. Le port n'a
+pas `flat()` : il n'en a pas besoin pour être exact, puisque le calcul complet
+rend la même chose au bit près, mais il fait le calcul que JavaScript saute.
 
 ## Résultats
 
@@ -206,6 +215,18 @@ temps propre) : la règle de la lave et le choix de la règle (`update`,
 (`updateLiquid`, ~16 %), la boucle de balayage (`block`, ~10 %), les
 déplacements (`swap`, `tryMove`, ~11 %). C'est ce profil qui dira quoi
 porter si Rust revient sur la table.
+
+Après ces corrections (et `pulled()` reporté dans lib.rs), `npm run rust`
+donne :
+
+| Scène 1920×1080 | Tick JS | `thermal()` JS | Rust f64 | Rust SIMD f64×2 | Rust SIMD f32×4 |
+| --- | --- | --- | --- | --- | --- |
+| chantier, 34 % des blocs éveillés | 29 ms | 3,6 ms (12 % du tick) | ×0,66 | ×1 | ×1,1 |
+| mer de lave, 6 % des blocs éveillés | 5,1 ms | 2,4 ms (47 % du tick) | ×2,1 | ×3,5 | ×5 |
+
+Le chantier est désormais **plus lent en Rust f64** : JavaScript saute ses
+blocs à l'ambiante avec `flat()`, que lib.rs ne porte pas. Pour comparer à
+armes égales, il faudrait porter `flat()` aussi.
 
 ## Brancher Rust sur le vrai moteur (pas fait)
 
