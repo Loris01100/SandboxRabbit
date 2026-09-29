@@ -168,6 +168,9 @@ function blit(frame: Extract<News, { t: "frame" }>): void {
   fresh = true;
 }
 
+/** Le miroir de la grille, en lecture : ce que voit le héros (sight.ts) s'y calcule. Null avant la première frame. */
+export const seen = (): Readonly<Grid> | null => mirror;
+
 /**
  * Pose ce qui a changé depuis l'appel précédent. Appelé par la boucle
  * `requestAnimationFrame` de la page : on dessine au rythme de l'écran, et

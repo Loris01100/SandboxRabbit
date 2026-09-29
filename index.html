@@ -33,6 +33,9 @@
     <main>
       <div class="stage">
         <canvas id="world" aria-label="Bac à sable"></canvas>
+        <!-- Ce que voit le héros (V) : une colonne d'un pixel, étirée en
+             encadré ou sur tout le bac. -->
+        <canvas id="sight" hidden aria-label="Vue du héros" width="1" height="120"></canvas>
         <!-- Deux repères posés par-dessus le bac, en pixels d'écran : ils ne
              touchent pas au rendu et suivent le zoom sans le savoir. -->
         <div id="ring" class="overlay" hidden aria-hidden="true"></div>
@@ -237,6 +240,7 @@
         <dt>Molette · <kbd>+</kbd> <kbd>−</kbd></dt><dd>Zoomer autour du curseur (ou du centre, au clavier), si le zoom est actif</dd>
         <dt><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · flèches</dt><dd>Déplacer la vue zoomée, tant que la touche est tenue — ou, s'il y a un héros, le piloter : marcher, sauter (Z), creuser dessous (S)</dd>
         <dt><kbd>E</kbd></dt><dd>Le héros creuse devant lui</dd>
+        <dt><kbd>V</kbd></dt><dd>Vue du héros : de côté, de côté avec l'encadré de ce qu'il voit, ou à la première personne</dd>
         <dt><kbd>R</kbd></dt><dd>Le héros pose la matière choisie devant ses pieds (une marche) — avec <kbd>Z</kbd>, sous lui (un pilier). Solides seulement, ni nanites, étincelle, braise ni source</dd>
         <dt>Clic du milieu</dt><dd>Déplacer la vue</dd>
         <dt>Deux doigts</dt><dd>Zoomer et déplacer la vue</dd>

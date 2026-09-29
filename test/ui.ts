@@ -4,7 +4,8 @@
  */
 import assert from "node:assert/strict";
 import { clampPan, goalText, panAfterZoom, parseGoal, pushRecent, ticksFor } from "../src/client/ui.ts";
-import { SAND, STONE, WATER } from "../src/client/sim/materials.ts";
+import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
+import { look } from "../src/client/sight.ts";
 
 // Objectifs : ce qui vient d'un autre visiteur ne passe pas sans contrôle.
 {
@@ -72,6 +73,25 @@ import { SAND, STONE, WATER } from "../src/client/sim/materials.ts";
   // Un onglet revenu au premier plan ne rattrape pas dix secondes d'un coup.
   assert.ok(ticksFor(4, 10_000, 0).ticks <= 8, "le rattrapage est plafonné");
   assert.equal(ticksFor(1, -5, 0).ticks, 0, "une horloge qui recule ne simule rien");
+}
+
+/**
+ * Ce que voit le héros : un mur de sable à sa droite, rien à sa gauche. Tourné
+ * vers le mur, le rayon du milieu le voit ; son propre corps ne lui bouche pas
+ * la vue ; tourné vers le vide, il voit le bord du monde, un mur de pierre.
+ */
+{
+  const W = 40, H = 20, cells = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) cells[y * W + 20] = SAND;
+  cells[10 * W + 10] = HERO;
+  cells[8 * W + 10] = HERO_HEAD;
+  const out = new Uint8ClampedArray(9 * 4);
+  const milieu = (): number[] => [...out.subarray(16, 19)];
+  look(cells, W, H, 10, 10, 1, out);
+  const sable = MATERIALS[SAND].color;
+  assert.ok(milieu()[0] > 0.9 * sable[0] && milieu()[0] <= sable[0], "droit devant, le sable, à peine assombri par la distance");
+  look(cells, W, H, 10, 10, -1, out);
+  assert.ok(milieu()[0] < MATERIALS[STONE].color[0] && milieu()[0] > MATERIALS[EMPTY].color[0], "de l'autre côté, le bord du monde, en pierre");
 }
 
 console.log("ok — panneau conforme");

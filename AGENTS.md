@@ -60,6 +60,7 @@ src/client/
   replay.ts              Recorder / Player                                  (pur)
   challenges.ts          défis et décors bâtis en code                      (pur)
   terrain.ts             monde généré par graine, bâti au repos             (pur)
+  sight.ts               ce que voit le héros : rayons → colonne de pixels  (pur)
   ui.ts                  logique pure du panneau + read/write/forget (localStorage)
   room.ts share.ts theme.ts   salon, galerie/exports, jour-nuit (reçoivent leurs dépendances par init…())
   sim/

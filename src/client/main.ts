@@ -6,7 +6,8 @@ import { clampPan, panAfterZoom, pushRecent, read, write } from "./ui.ts";
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
-import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, light, listen, onResize, order, present, resize, screen, type ClipData } from "./world.ts";
+import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, light, listen, onResize, order, present, resize, screen, seen, type ClipData } from "./world.ts";
+import { look } from "./sight.ts";
 import type { Knobs } from "./sim/sandbox.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
@@ -162,6 +163,7 @@ addEventListener("keydown", (e) => {
   if (!Number.isNaN(n) && SHORTCUTS[n - 1] !== undefined) select(SHORTCUTS[n - 1]);
   if (e.key === "0") select(EMPTY);
   if (e.key === "g") flipGravity();
+  if (e.key === "v" && !e.ctrlKey && !e.metaKey) nextView();
   // Taille du pinceau : le réglage le plus repris, et il fallait redéplier son
   // groupe à chaque fois. L'événement rejoué borne la valeur et retient tout.
   if (e.key === "[" || e.key === "]") {
@@ -372,7 +374,37 @@ function meet(): void {
     const r = canvas.getBoundingClientRect();
     zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(WIDTH / 160));
   }
-  statusEl.textContent = "Héros : Q/D pour marcher, Z pour sauter (et nager), S pour creuser dessous, E devant, R pour poser la matière choisie (Z+R : sous lui). Le métal résiste.";
+  statusEl.textContent = "Héros : Q/D pour marcher, Z pour sauter (et nager), S pour creuser dessous, E devant, R pour poser la matière choisie (Z+R : sous lui). V change de vue. Le métal résiste.";
+}
+
+/** Les vues que V fait défiler : de côté, de côté avec l'encadré de ce que voit le héros, à la première personne. */
+const VIEWS = ["side", "inset", "eyes"] as const;
+const VIEW_NAMES = ["de côté", "de côté, avec ce que voit le héros", "à la première personne"];
+let view = 0;
+const sightEl = document.querySelector<HTMLCanvasElement>("#sight")!;
+const sightCtx = sightEl.getContext("2d")!;
+const sightImg = sightCtx.createImageData(1, sightEl.height);
+
+/** Passe à la vue suivante et la nomme dans la barre de statut. */
+function nextView(): void {
+  view = (view + 1) % VIEWS.length;
+  sightEl.dataset.view = VIEWS[view];
+  statusEl.textContent = `Vue ${VIEW_NAMES[view]}${hero ? "" : " — elle attend un héros (Vivant → Héros)"}. V pour changer.`;
+}
+
+/**
+ * Redessine ce que voit le héros, s'il y en a un et que la vue le montre. Son
+ * sens se lit dans le `life` de son cœur (bit 7 = tourné vers la gauche, voir
+ * engine.ts) : le miroir le porte déjà, la frame n'a rien à ajouter.
+ */
+function gaze(): void {
+  const grid = seen();
+  if (!hero || !grid || view === 0) { sightEl.hidden = true; return; }
+  sightEl.hidden = false;
+  const [x, y] = hero;
+  const face = grid.life[y * grid.width + x] & 128 ? -1 : 1;
+  look(grid.cells, grid.width, grid.height, x, y, face, sightImg.data);
+  sightCtx.putImageData(sightImg, 0, 0);
 }
 
 /** Zoome autour d'un point de l'écran, qui ne bouge pas (math dans ui.ts). */
@@ -1060,6 +1092,7 @@ function frame(now: number): void {
   if (hero) { if (!loose) follow(); }
   else if (held.size > 0) scroll();
   if (present()) frames++;
+  gaze();
   captureFrame(); // vidéo en cours : la frame y part aussi
 
   if (now - lastReport >= 500) {

@@ -79,6 +79,17 @@ canvas {
    elle) : elle doit alors remplir l'écran, fond compris. */
 .stage:fullscreen { width: 100%; height: 100%; background: var(--bg); }
 
+/* Ce que voit le héros : une colonne d'un pixel étirée, par-dessus le bac. */
+#sight {
+  position: absolute;
+  aspect-ratio: auto;
+  max-height: none;
+  pointer-events: none;
+  z-index: 2;
+}
+#sight[data-view="eyes"] { inset: 1rem; width: calc(100% - 2rem); height: calc(100% - 2rem); }
+#sight[data-view="inset"] { right: 1.5rem; bottom: 1.5rem; width: 22%; height: 30%; border-color: var(--edge); }
+
 .overlay {
   position: fixed;
   pointer-events: none;

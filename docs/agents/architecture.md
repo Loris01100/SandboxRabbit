@@ -137,6 +137,17 @@ large (`meet()`). Glisser au clic du milieu (ou pincer) passe `loose` à vrai :
 `follow()` ne tourne plus, la vue reste où on l'a mise ; un clic du milieu
 sans bouger (moins de `CLICK` pixels) la raccroche, et `meet()` aussi.
 
+V fait défiler trois vues (`VIEWS` de main.ts) : de côté, de côté avec
+l'encadré de ce que voit le héros, à la première personne. Les deux dernières
+dessinent dans le canvas `#sight`, posé sur le bac : `gaze()` appelle, à
+chaque image, `look()` de [sight.ts](../../src/client/sight.ts) sur le miroir
+(`seen()` de world.ts) — 120 rayons en éventail de 120° depuis sa tête, du ciel
+à ses pieds, arrêtés sur la première cellule non vide. Le héros vit dans un
+plan : son œil ne reçoit qu'une ligne, une colonne d'un pixel de large que le
+CSS étire (`data-view` = `inset` ou `eyes`). Son sens se lit dans le `life` de
+son cœur (bit 7), déjà dans le miroir. Rien ne passe par le Worker, et le bac
+de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixels.
+
 ## Salon partagé (bac multijoueur)
 
 - Serveur : [src/worker/room.ts](../../src/worker/room.ts), un Durable Object par
@@ -255,9 +266,10 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
 | [main.ts](../../src/client/main.ts) | palette, souris, zoom et caméra (bornes par `clampPan`, ZQSD / WASD / flèches tenues, `+` / `-`), réglages, défis, boucle rAF, câblage de tout le DOM | non |
-| [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille | non |
+| [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille (lu par `seen()`) | non |
 | [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, secours 2D par `Renderer` (sans éclairage) | non |
 | [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence), accès `localStorage` tolérant | **oui** (test/ui.ts) |
+| [sight.ts](../../src/client/sight.ts) | ce que voit le héros : `look()` lance un éventail de rayons dans une grille et rend une colonne de pixels | **oui** (test/ui.ts) |
 | [gestures.ts](../../src/client/gestures.ts) | `Gesture` + `applyGesture(engine, g)` + météo | **oui** |
 | [replay.ts](../../src/client/replay.ts) | `Recorder` / `Player` | **oui** |
 | [challenges.ts](../../src/client/challenges.ts) | défis et décors bâtis en code | **oui** |
