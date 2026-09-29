@@ -1,0 +1,6 @@
+# Version de Rust et cible, lues par rustup à chaque appel de cargo depuis ce
+# dossier : il les installe tout seul s'il ne les a pas. Voir docs/rust.md.
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+targets = ["wasm32-unknown-unknown"]

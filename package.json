@@ -12,6 +12,7 @@
     "cf-typegen": "wrangler types",
     "bench": "node test/bench.ts",
     "directions": "node test/directions.ts",
+    "rust": "cd rust && cargo build --release && cd .. && node test/rust.ts",
     "loc": "node test/loc.ts"
   },
   "devDependencies": {

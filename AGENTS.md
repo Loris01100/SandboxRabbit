@@ -24,6 +24,7 @@ npm run typecheck  # QUATRE projets tsc : client (DOM), Worker, tests (Node + DO
 npm run check      # asserts : test/sim.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts (Node exécute le TS)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
 npm run directions # mesure de décision : 1 cœur, N cœurs, projection (GPU : test/gpu.html sous npm run dev)
+npm run rust       # prototype Rust/WASM de thermal() contre le moteur JS (demande Rust : docs/rust.md)
 npm run build      # typecheck puis vite build
 npm run preview    # build puis wrangler dev sur le bundle
 npm run loc        # taille du projet par poste
@@ -42,6 +43,7 @@ pas de linter.
 | [docs/agents/simulation.md](docs/agents/simulation.md) | modifier `engine.ts`, `materials.ts` ou `render.ts`. Tous les invariants du moteur, les usages de `life`. |
 | [docs/agents/recettes.md](docs/agents/recettes.md) | ajouter une matière, une règle, un défi, un geste, un ordre, un contrôle, un raccourci, une route, une migration. |
 | [docs/agents/tests.md](docs/agents/tests.md) | écrire ou corriger un test, mettre à jour l'empreinte du moteur, comprendre la CI et ses budgets. |
+| [docs/rust.md](docs/rust.md) | toucher à `rust/` : installer Rust, le prototype WASM de `thermal()`, ses mesures, le déterminisme f64, ce qu'il faudrait pour brancher Rust sur le moteur. |
 
 Le [README](README.md) décrit le jeu du point de vue du joueur (une ligne par
 fonctionnalité) : le tenir à jour quand un comportement visible change.
@@ -75,6 +77,7 @@ src/worker/
   room.ts                Durable Object du salon (relaie, ne simule pas)
   relay.ts               qui a le droit de dire quoi dans un salon      (pur)
 migrations/              schéma D1, un fichier numéroté par changement
+rust/                    prototype : thermal() en Rust → WASM, mesuré par test/rust.ts (pas branché sur le bac)
 test/                    scripts d'assert (+ bench.ts, loc.ts)
 ```
 
@@ -206,6 +209,7 @@ local, faute de frappe, refactor interne). Le dire explicitement.
 | `main.ts`, `index.html`, `style.css`, `ui.ts`, `share.ts`, `room.ts`, `theme.ts` | [architecture.md](docs/agents/architecture.md) (modules, galerie, salon, clés `localStorage`) ; README si une fonctionnalité visible change |
 | `src/worker/*`, `migrations/`, `wrangler.jsonc` | [architecture.md](docs/agents/architecture.md) (API, stockage) ; README (tableau de l'API) |
 | `test/*`, scripts de `package.json`, `.github/` | [tests.md](docs/agents/tests.md) ; section Commandes de ce fichier |
+| `rust/` | [docs/rust.md](docs/rust.md) (et ses résultats, s'ils changent) |
 | une nouvelle marche à suivre récurrente | [recettes.md](docs/agents/recettes.md) |
 | une nouvelle règle à ne pas enfreindre | « Règles à ne pas enfreindre » ci-dessus **et** le guide concerné |
 

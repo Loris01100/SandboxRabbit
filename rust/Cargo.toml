@@ -1,0 +1,17 @@
+[package]
+name = "thermal"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Une bibliothèque chargée par JavaScript, sans wasm-bindgen : aucune
+# dépendance, donc rien à compiler pour Windows (ni Visual Studio, ni MinGW).
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

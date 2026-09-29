@@ -122,6 +122,12 @@ Rust sur Cloudflare passe par WebAssembly. Deux usages possibles :
    par un module `wasm-bindgen` en gardant la même interface (`step`, `paint`,
    `cells`).
 
+   Premier essai mesuré : `thermal()` porté en Rust dans [rust/](rust/)
+   (`npm run rust`). En SIMD, il est deux fois plus rapide que JavaScript, au
+   bit près. Mais la chaleur ne pèse que 10 à 20 % du tick en 1920×1080 : ce
+   sont les règles des cellules qu'il faudrait porter pour que ça se sente.
+   Détails et installation de Rust dans [docs/rust.md](docs/rust.md).
+
 ## Commandes
 
 ```bash
@@ -131,6 +137,7 @@ npm run typecheck  # client, worker et tests ont chacun leur tsconfig (DOM, runt
 npm run check      # auto-vérifications : simulation, panneau, API, protocole du bac, moteur multi-fils (test/*.ts, Node exécute le TS tel quel)
 npm run bench      # coût du tick sur cinq tailles de grille ; échoue au-delà de 4 ms en 320×180
 npm run directions # que rapporteraient plusieurs cœurs ? (la carte graphique : test/gpu.html sous npm run dev)
+npm run rust       # que rapporterait Rust ? thermal() en Rust/WASM contre le moteur JS (installer Rust : docs/rust.md)
 npm run loc        # taille du projet par poste
 npm run build      # typecheck puis vite build
 npm run preview    # build puis exécution du Worker en local

@@ -10,6 +10,7 @@
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
 | `npm run directions` | mesure de décision, pas un test : voir [Choisir une direction](#choisir-une-direction) |
+| `npm run rust` | compile [rust/](../../rust/) en WASM puis lance [test/rust.ts](../../test/rust.ts) : `thermal()` en JavaScript contre sa version Rust, temps et égalité au bit près. Demande Rust installé ([docs/rust.md](../rust.md)) ; hors CI |
 
 Il n'y a **pas de framework de test** ni de linter. Node ≥ 24 exécute le
 TypeScript directement.
@@ -44,6 +45,11 @@ n'est pas dans la CI :
    (http://localhost:5173/test/gpu.html). Mêmes noyaux en WebGPU, le sable
    reformulé en blocs de Margolus (sans balayage ni horloge — la réécriture
    qu'imposerait le moteur), en 1920×1080, 4K et 8K.
+
+5. **Rust / WASM** : `npm run rust` porte `thermal()` en Rust (trois
+   versions, dont deux exactes au bit près) et le compare au moteur sur deux
+   scènes 1920×1080. Il échoue si une version exacte ne l'est plus. Résultats
+   et marche à suivre dans [docs/rust.md](../rust.md).
 
 Les noyaux sont un **minorant** : le vrai moteur a cinquante matières, des
 créatures et des explosions. La dernière ligne du rapport compare le coût par

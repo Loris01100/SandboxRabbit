@@ -1,0 +1,7 @@
+# Lu quand cargo est lancé depuis rust/ (npm run rust s'y place).
+[build]
+target = "wasm32-unknown-unknown"
+
+# SIMD WASM (128 bits) : tous les navigateurs récents et Node l'ont.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]
