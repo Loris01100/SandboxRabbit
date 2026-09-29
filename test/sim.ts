@@ -1237,6 +1237,22 @@ function top(e: Engine, id: MaterialId): number {
 }
 
 /**
+ * Une mer de lave à l'équilibre s'endort. Une source endormie ne fait pas le
+ * tirage vers sa `heat` : lue telle quelle par un bloc éveillé voisin, elle
+ * montrait 23 °C d'écart à chaque frontière, et aucun bloc ne se calmait —
+ * en 1920×1080, 70 % du bac restait éveillé et le tick passait 150 ms sans
+ * qu'une cellule ne bouge. `pulled()` lui applique ce tirage à la lecture.
+ */
+{
+  const w = 128, h = 72;
+  const e = new Engine(w, h, 21);
+  e.rect(0, 24, w - 1, h - 1, LAVA);
+  for (let t = 0; t < 800; t++) e.step();
+  assert.equal(e.busy, 0, "une mer de lave à l'équilibre dort entièrement (surface à mi-bloc : avant, ses 40 blocs restaient éveillés)");
+  assert.ok(Math.abs(e.temp[(h - 5) * w + w / 2] - 1153.7) < 0.1, "à sa température d'équilibre");
+}
+
+/**
  * Blocs de veille : un bloc où rien ne bouge n'est plus balayé — `busy`, le
  * nombre de blocs éveillés, tombe à zéro au repos. Tout ce qui écrit ou
  * change la scène doit le réveiller, et un rejeu

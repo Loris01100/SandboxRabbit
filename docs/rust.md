@@ -163,6 +163,30 @@ Ce qu'on en tire :
   sort) : en attendre plutôt le ×1,5 de la version sans SIMD, à confirmer par
   un prototype du même genre sur `block()`.
 
+### Étape 0 : mesurer avant de porter (29 septembre 2026)
+
+Avant d'aller plus loin en Rust, le coût du tick a été décortiqué. Deux
+trouvailles en TypeScript, qui pèsent bien plus que tout portage :
+
+- **La mer de lave ne s'endormait jamais.** Aucune cellule ne bougeait, mais
+  66 % des blocs restaient éveillés : un bloc endormi ne tire pas ses sources
+  vers leur `heat`, et ses voisins éveillés le lisaient 23 °C trop froid (voir
+  `pulled()` dans engine.ts et
+  [simulation.md](agents/simulation.md#blocs-de-veille)). Corrigé :
+  **181,7 → 0,6 ms par tick** en 1920×1080 une fois la lave posée. Le tick de
+  147 ms du tableau ci-dessus était en fait ce bogue.
+- **La règle de la lave relisait ses voisines pour rien** (`ignite()` sans
+  combustible autour) : 40 % du tick d'un lac qui coule. Corrigé, mêmes
+  tirages, même empreinte : **48,6 → 42,9 ms par tick** sur de la lave qui
+  coule en 1920×1080.
+
+Ce qui reste sur de la lave qui coule (profil `node --cpu-prof`, part du
+temps propre) : la règle de la lave et le choix de la règle (`update`,
+~32 %), la chaleur (`diffuseChunk`, ~22 %), l'étalement des liquides
+(`updateLiquid`, ~16 %), la boucle de balayage (`block`, ~10 %), les
+déplacements (`swap`, `tryMove`, ~11 %). C'est ce profil qui dira quoi
+porter si Rust revient sur la table.
+
 ## Brancher Rust sur le vrai moteur (pas fait)
 
 Si les mesures le justifient, voici ce qu'il faudrait :

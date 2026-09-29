@@ -116,7 +116,16 @@ milliseconde par tick, au lieu de 30. Un bloc est traité si lui ou un voisin a
   tente qu'un côté par tick, tiré au sort, et resterait suspendu ;
 - **la chaleur** : un bloc dont une cellule varie de plus de `STILL`
   (0,001 °C/tick) reste éveillé. Un bloc refroidi recopie sa température dans
-  l'autre tampon, pour lire la même chose endormi.
+  l'autre tampon, pour lire la même chose endormi. Un bloc endormi ne fait
+  pas le tirage de ses sources vers leur `heat` : quand la diffusion d'un bloc
+  éveillé lit une voisine dans un bloc endormi (`awake` = 0), elle passe par
+  `pulled()`, qui lui applique ce tirage. Sans ça, une mer de lave à
+  l'équilibre (1153,7 °C avant tirage, 1176,9 après) montrait 23 °C d'écart à
+  chaque frontière entre blocs endormi et éveillé, et restait éveillée pour
+  toujours : 180 ms par tick en 1920×1080 sans qu'une cellule ne bouge, 0,6
+  depuis. test/sim.ts le vérifie (mer de lave en 128×72, surface à mi-bloc).
+  Tester `awake === 0` est sans risque en multi-fils : pendant la diffusion,
+  un bloc ne passe que de 1 à 2, jamais par 0.
 
 Invariants :
 
@@ -209,6 +218,14 @@ chargement, en tableaux typés indexés par id : `KIND`, `DENSITY`, `HEAT`,
 tirage. Lire `MATERIALS[id].density` dans `displaces()` ou
 `.noise` dans `draw()` annule le gain (le tick est passé de 1,6 à 0,7 ms en
 320×180). Une nouvelle propriété lue dans le chemin chaud mérite sa table.
+
+Pour savoir ce qui coûte : `node --cpu-prof` sur un script qui fait tourner
+une scène, puis additionner le temps propre (`timeDeltas`) par fonction du
+`.cpuprofile`. V8 intègre les petites règles dans `update()` : son temps
+propre est surtout celui des règles de matière. C'est ainsi que la lave a été
+vue relisant ses quatre voisines dans `ignite()` sans rien d'inflammable
+autour (40 % du tick d'un lac qui coule) : elle ne l'appelle plus que si une
+voisine brûle, à tirages identiques.
 
 - Les boucles en disque (`paint`, `setFrozen`) bornent leur carré englobant
   via `disc()` : leur coût est celui du bac, jamais du rayon demandé (un pair

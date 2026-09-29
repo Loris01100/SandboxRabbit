@@ -259,6 +259,21 @@ const Shareable: new (bytes: number) => ArrayBufferLike =
     ? SharedArrayBuffer
     : ArrayBuffer;
 
+/**
+ * La température de la cellule `j` d'un bloc **endormi**, telle que la
+ * verrait sa voisine s'il était éveillé : tirée vers la `heat` de sa source
+ * comme le fait `heatChunk()`, et arrondie pareil (32 bits). Endormi, un bloc
+ * ne fait pas ce tirage : une mer de lave à l'équilibre (1153,7 °C avant le
+ * tirage, 1176,9 après) montrait 23 °C d'écart à chaque frontière entre bloc
+ * endormi et bloc éveillé, qui ne se calmaient jamais et se réveillaient l'un
+ * l'autre — 70 % du bac restait éveillé, sans qu'une cellule ne bouge.
+ */
+function pulled(cells: Uint8Array, temp: Float32Array, j: number): number {
+  const heat = HEAT[cells[j]];
+  const t = temp[j];
+  return heat === heat ? Math.fround(t + (heat - t) * 0.5) : t;
+}
+
 /** Mélange 32 bits (finale de murmur3) : une graine par bloc et par tick, tirée de celle du tick, sans suite partagée. */
 function mix(h: number): number {
   h ^= h >>> 16;
@@ -1154,6 +1169,10 @@ export class Engine {
    * ne tient son bloc éveillé (`wake`) que si elle a l'un ou l'autre à côté.
    * Une poche enfermée dans la pierre dort — sa chaleur, elle, reste diffusée
    * par `thermal()` tant qu'elle n'est pas à l'équilibre.
+   *
+   * `ignite()` seulement si une voisine brûle : sans combustible il ne fait
+   * rien et ne tire rien, mais relisait quatre voisines pour chaque cellule
+   * d'un lac de lave — la règle pesait 40 % du tick d'un lac qui coule.
    */
   private updateLava(i: number, x: number, y: number): void {
     let busy = false;
@@ -1168,8 +1187,10 @@ export class Engine {
       if (n === SAND || FLAMMABLE[n] > 0) busy = true;
       if (n === SAND && this.rand() < 0.01) this.become(nx, ny, LAVA);
     }
-    if (busy) this.wake(i);
-    this.ignite(x, y, 2);
+    if (busy) {
+      this.wake(i);
+      this.ignite(x, y, 2);
+    }
     this.updateLiquid(i, x, y, LAVA);
   }
 
@@ -1553,10 +1574,9 @@ export class Engine {
    * (`2t - heat`) : un glaçon à l'équilibre est tiré vers -20 puis rendu par
    * la diffusion, et mesuré après ce tirage il ne s'endormirait jamais.
    *
-   * ponytail: une source endormie au bord d'un bloc éveillé est lue sans son
-   * tirage — un demi-écart à sa `heat` sur une cellule de bord. Invisible
-   * tant que l'équilibre est atteint ; à revoir si une matière chauffe sans
-   * être active et loin de son équilibre.
+   * Une source endormie ne fait pas son tirage : lue au bord d'un bloc
+   * éveillé, elle passe par `pulled()`, qui le lui applique. Voir `pulled()`
+   * pour la mer de lave qui ne s'endormait jamais.
    */
   private thermal(): void {
     const { awake, stir, jobs } = this;
@@ -1598,14 +1618,19 @@ export class Engine {
     const { width: w, height: h, cells, temp, tempNext, ambient, awake, stir } = this;
     const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
+    const cols = this.cols;
+    const upAsleep = y0 > 0 && awake[c - cols] === 0, downAsleep = y1 < h && awake[c + cols] === 0;
+    const leftAsleep = x0 > 0 && awake[c - 1] === 0, rightAsleep = x1 < w && awake[c + 1] === 0;
     let still = true;
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         const i = y * w + x;
         const t = temp[i];
         const sum =
-          (y > 0 ? temp[i - w] : t) + (y < h - 1 ? temp[i + w] : t) +
-          (x > 0 ? temp[i - 1] : t) + (x < w - 1 ? temp[i + 1] : t);
+          (y > 0 ? (y === y0 && upAsleep ? pulled(cells, temp, i - w) : temp[i - w]) : t) +
+          (y < h - 1 ? (y === y1 - 1 && downAsleep ? pulled(cells, temp, i + w) : temp[i + w]) : t) +
+          (x > 0 ? (x === x0 && leftAsleep ? pulled(cells, temp, i - 1) : temp[i - 1]) : t) +
+          (x < w - 1 ? (x === x1 - 1 && rightAsleep ? pulled(cells, temp, i + 1) : temp[i + 1]) : t);
         const next = t + CONDUCTION * (sum - 4 * t) + COOLING * (ambient - t);
         tempNext[i] = next;
         const id = cells[i];
