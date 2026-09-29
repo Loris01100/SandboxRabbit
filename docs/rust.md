@@ -56,9 +56,13 @@ Pour tout désinstaller : `rustup self uninstall`.
 
 **« 'cargo' n'est pas reconnu… »** alors que Rust est installé : le terminal
 a gardé le `PATH` d'avant l'installation. Dans VS Code, ouvrir un nouveau
-terminal ne suffit pas, car il hérite de l'environnement de VS Code lui-même :
-fermer **toutes** ses fenêtres et le relancer. En dépannage, pour le seul
-terminal ouvert :
+terminal ne suffit pas, car il hérite de l'environnement de VS Code lui-même.
+Fermer les fenêtres ne suffit pas toujours non plus : le processus principal
+de VS Code peut survivre (une autre fenêtre ouverte, une restauration de
+session) et garder l'ancien `PATH`. Quitter par **Fichier → Quitter**
+(`Ctrl+Q`) dans chaque fenêtre, vérifier dans le Gestionnaire des tâches qu'il
+ne reste aucun « Visual Studio Code », puis relancer. En dépannage, pour le
+seul terminal ouvert :
 
 ```powershell
 $env:Path += ";$env:USERPROFILE\.cargo\bin"
