@@ -2,7 +2,7 @@ import "./style.css";
 import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PILOT, SAND, SHORTCUTS, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
-import { ACTIONS, clampPan, combo, keyLabel, keymap, keyOf, panAfterZoom, parseBindings, pushRecent, read, rebind, forget, write, type Action } from "./ui.ts";
+import { KEY_GROUPS, clampPan, combo, keyLabel, keymap, keyOf, panAfterZoom, parseBindings, pushRecent, read, rebind, forget, write, type Action } from "./ui.ts";
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
@@ -177,6 +177,11 @@ addEventListener("keydown", (e) => {
     case "heat": heatmapInput.checked = !heatmapInput.checked; set({ heatmap: heatmapInput.checked }); return;
     case "help": if (!shortcutsEl.open) shortcutsEl.showModal(); return;
     case "view": nextView(); return;
+    case "retry": lastChallenge?.click(); return;
+    case "step": case "terrain": case "surprise": case "full": case "clear": case "save":
+      document.querySelector<HTMLButtonElement>(`#${action}`)!.click();
+      return;
+    case "gallery": document.querySelector<HTMLButtonElement>("#gallery-open")!.click(); return;
   }
 });
 
@@ -421,6 +426,14 @@ const ACTION_NAMES: Record<Action, string> = {
   zoomIn: "Zoomer (au centre), si le zoom est actif",
   zoomOut: "Dézoomer (au centre), si le zoom est actif",
   help: "Cette fenêtre",
+  step: "Avancer d'un pas (bac en pause)",
+  terrain: "Nouveau monde généré",
+  surprise: "Un décor tiré au sort",
+  full: "Plein écran",
+  clear: "Vider le bac",
+  retry: "Recommencer le dernier défi lancé",
+  save: "Sauvegarder le monde dans la galerie",
+  gallery: "Ouvrir la galerie",
   left: "Vue ou héros vers la gauche",
   right: "Vue ou héros vers la droite",
   up: "Vue vers le haut · le héros saute (et nage)",
@@ -429,18 +442,36 @@ const ACTION_NAMES: Record<Action, string> = {
   place: "Le héros pose la matière choisie devant ses pieds — saut tenu, sous lui. Solides seulement, ni nanites, étincelle, braise ni source",
   view: "Vue du héros : de côté, avec l'encadré de ce qu'il voit, ou à la première personne",
 };
-const bindingsEl = document.querySelector<HTMLDListElement>("#bindings")!;
+const bindingsEl = document.querySelector<HTMLDivElement>("#bindings")!;
+const keysMenuEl = document.querySelector<HTMLElement>("#keys-menu")!;
 /** L'action qui attend sa nouvelle touche, ou null. */
 let waiting: Action | null = null;
+/** L'encadré ouvert dans la fenêtre des raccourcis (index dans `KEY_GROUPS`). */
+let shownGroup = 0;
 
 /**
- * Remplit la liste des touches : un bouton par action, qu'on clique puis qui
- * prend la combinaison suivante (Ctrl, Alt, Maj n'attendent que leur touche).
- * Échap annule ; une touche déjà prise par une autre action s'échange avec
- * elle, une touche réservée (Tab, Entrée, Maj seule…) est refusée.
+ * Remplit la fenêtre des raccourcis : un menu d'onglets, un par encadré de
+ * `KEY_GROUPS`, et l'encadré ouvert — un bouton par action, qu'on clique puis
+ * qui prend la combinaison suivante (Ctrl, Alt, Maj n'attendent que leur
+ * touche), puis les gestes de souris. Échap annule ; une touche déjà prise par
+ * une autre action s'échange avec elle, une touche réservée (Tab, Entrée, Maj
+ * seule…) est refusée.
  */
 function listBindings(): void {
-  bindingsEl.replaceChildren(...ACTIONS.flatMap((action) => {
+  keysMenuEl.replaceChildren(...KEY_GROUPS.map((group, n) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.textContent = group.name;
+    tab.setAttribute("aria-pressed", String(n === shownGroup));
+    tab.addEventListener("click", () => { shownGroup = n; waiting = null; listBindings(); });
+    return tab;
+  }));
+  const group = KEY_GROUPS[shownGroup];
+  const title = document.createElement("h3");
+  title.textContent = group.name;
+  const list = document.createElement("dl");
+  list.className = "keys";
+  for (const action of group.actions) {
     const dt = document.createElement("dt");
     const button = document.createElement("button");
     button.type = "button";
@@ -450,8 +481,16 @@ function listBindings(): void {
     dt.append(button);
     const dd = document.createElement("dd");
     dd.textContent = action.startsWith("mat") ? `Matière : ${MATERIALS[SHORTCUTS[Number(action.slice(3)) - 1]].name}` : ACTION_NAMES[action];
-    return [dt, dd];
-  }));
+    list.append(dt, dd);
+  }
+  for (const [gesture, effect] of group.mouse) {
+    const dt = document.createElement("dt");
+    dt.textContent = gesture;
+    const dd = document.createElement("dd");
+    dd.textContent = effect;
+    list.append(dt, dd);
+  }
+  bindingsEl.replaceChildren(title, list);
 }
 
 /** Retient de nouvelles touches (null : celles d'origine) et les applique tout de suite. */
@@ -982,6 +1021,8 @@ const goalEl = document.querySelector<HTMLParagraphElement>("#goal")!;
 const challengesEl = document.querySelector<HTMLDivElement>("#challenges")!;
 /** Horloge murale : la pause et le ralenti comptent aussi, c'est un chrono de joueur. */
 let startedAt = 0;
+/** Le bouton du dernier défi lancé : la touche « recommencer » le reclique. */
+let lastChallenge: HTMLButtonElement | null = null;
 
 // Meilleur temps par défi, en secondes. ponytail: local à la machine, pas de classement.
 const RECORDS = "sandbox-rabbit:records";
@@ -1011,6 +1052,7 @@ for (const c of CHALLENGES) {
   button.type = "button";
   button.textContent = c.name;
   button.addEventListener("click", () => {
+    lastChallenge = button;
     // Les scènes sont écrites en dur pour 320×180 : on y revient si besoin.
     fit(320);
     // Le bac connaît la scène par son nom : c'est lui qui la bâtit et qui

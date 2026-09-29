@@ -99,13 +99,15 @@ export function panAfterZoom(client: number, edge: number, size: number, pan: nu
 }
 
 /**
- * Tout ce que le clavier commande, réassignable : pause, matières, pinceau,
- * réglages, annulation, zoom, aide, puis les quatre directions (la vue, ou le
- * héros quand il y en a un), creuser, poser, changer de vue.
+ * Tout ce que le clavier commande, réassignable : matières, pinceau,
+ * simulation, physique, défis, mondes, puis la vue et le héros — les quatre
+ * directions (la vue, ou le héros quand il y en a un), creuser, poser,
+ * changer de vue.
  */
 export const ACTIONS = [
   "pause", "mat1", "mat2", "mat3", "mat4", "mat5", "mat6", "mat7", "mat8", "mat9", "eraser",
   "brushDown", "brushUp", "gravity", "freeze", "heat", "undo", "redo", "paste", "zoomIn", "zoomOut", "help",
+  "step", "terrain", "surprise", "full", "clear", "retry", "save", "gallery",
   "left", "right", "up", "down", "dig", "place", "view",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
@@ -116,6 +118,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   pause: " ", mat1: "1", mat2: "2", mat3: "3", mat4: "4", mat5: "5", mat6: "6", mat7: "7", mat8: "8", mat9: "9", eraser: "0",
   brushDown: "[", brushUp: "]", gravity: "g", freeze: "f", heat: "h", undo: "Ctrl+z", redo: "Ctrl+y", paste: "Ctrl+v",
   zoomIn: "+", zoomOut: "-", help: "?",
+  step: ".", terrain: "n", surprise: "u", full: "p", clear: "Ctrl+Delete", retry: "t", save: "Ctrl+s", gallery: "o",
   left: "q", right: "d", up: "z", down: "s", dig: "e", place: "r", view: "v",
 };
 
@@ -186,3 +189,39 @@ export function keyLabel(c: string): string {
   const key = bare(c);
   return c.slice(0, c.length - key.length) + (names[key] ?? (key.length === 1 ? key.toUpperCase() : key));
 }
+
+/**
+ * La fenêtre des raccourcis, en encadrés calqués sur les sections du panneau :
+ * les actions de chacun, et les gestes de souris qui s'y rattachent (fixes,
+ * libellé puis effet). Chaque action est dans un encadré et un seul
+ * (test/ui.ts) : une action oubliée ici n'aurait plus de bouton pour la changer.
+ */
+export const KEY_GROUPS: { name: string; actions: Action[]; mouse: [string, string][] }[] = [
+  {
+    name: "Matière",
+    actions: ["mat1", "mat2", "mat3", "mat4", "mat5", "mat6", "mat7", "mat8", "mat9", "eraser"],
+    mouse: [["Alt + clic", "Pipette : reprendre la matière sous le curseur"], ["Clic droit", "Remplir la poche de matière sous le curseur"]],
+  },
+  {
+    name: "Pinceau",
+    actions: ["brushDown", "brushUp", "freeze", "undo", "redo", "paste"],
+    mouse: [
+      ["Maj + clic", "Ligne droite depuis le dernier point posé"],
+      ["Glisser", "Tracer le rectangle des outils Rectangle et Copier"],
+      ["Clic", "Sur un interrupteur ou un aimant posé : le basculer"],
+    ],
+  },
+  { name: "Simulation", actions: ["pause", "step", "terrain", "surprise", "full", "clear", "help"], mouse: [] },
+  { name: "Physique du monde", actions: ["gravity", "heat"], mouse: [] },
+  { name: "Défis", actions: ["retry"], mouse: [] },
+  { name: "Mondes", actions: ["save", "gallery"], mouse: [] },
+  {
+    name: "Héros et vue",
+    actions: ["left", "right", "up", "down", "dig", "place", "view", "zoomIn", "zoomOut"],
+    mouse: [
+      ["Molette", "Zoomer autour du curseur, si le zoom est actif"],
+      ["Clic du milieu", "Déplacer la vue — sans bouger, la raccrocher au héros"],
+      ["Deux doigts", "Zoomer et déplacer la vue"],
+    ],
+  },
+];

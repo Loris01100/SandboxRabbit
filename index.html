@@ -222,22 +222,12 @@
         <h2>Raccourcis</h2>
         <button type="submit">Fermer</button>
       </form>
-      <!-- Le clavier est rempli par main.ts (listBindings) : un bouton par
-           action, cliquer puis presser la nouvelle touche ou combinaison. -->
-      <h3>Clavier — cliquer une touche pour la changer</h3>
-      <dl class="keys" id="bindings"></dl>
+      <!-- Rempli par main.ts (listBindings) depuis KEY_GROUPS d'ui.ts : un
+           onglet par encadré, un bouton par touche à changer. -->
+      <nav id="keys-menu" class="keys-menu" aria-label="Encadrés des raccourcis"></nav>
+      <div id="bindings"></div>
+      <p class="hint">Cliquer une touche, puis presser la nouvelle (Échap annule). Les flèches marchent toujours.</p>
       <button id="bindings-reset" type="button">Touches d'origine</button>
-      <h3>Souris</h3>
-      <dl class="keys">
-        <dt><kbd>Maj</kbd> + clic</dt><dd>Ligne droite depuis le dernier point posé</dd>
-        <dt><kbd>Alt</kbd> + clic</dt><dd>Pipette : reprendre la matière sous le curseur</dd>
-        <dt>Clic droit</dt><dd>Remplir la poche de matière sous le curseur</dd>
-        <dt>Clic</dt><dd>Sur un interrupteur ou un aimant posé : le basculer</dd>
-        <dt>Glisser</dt><dd>Tracer le rectangle des outils <em>Rectangle</em> et <em>Copier</em></dd>
-        <dt>Molette</dt><dd>Zoomer autour du curseur, si le zoom est actif</dd>
-        <dt>Clic du milieu</dt><dd>Déplacer la vue</dd>
-        <dt>Deux doigts</dt><dd>Zoomer et déplacer la vue</dd>
-      </dl>
     </dialog>
   </body>
 </html>

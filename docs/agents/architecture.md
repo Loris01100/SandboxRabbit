@@ -139,11 +139,15 @@ sans bouger (moins de `CLICK` pixels) la raccroche, et `meet()` aussi.
 
 ### Clavier réassignable
 
-**Tous** les raccourcis clavier sont des actions (`ACTIONS` d'ui.ts : pause,
-matières 1-9, gomme, pinceau, gravité, figer, vue thermique, annuler,
-rétablir, coller, zoom, aide, les quatre directions, creuser, poser, vue),
-réassignables dans la fenêtre des raccourcis (liste `#bindings`, remplie par
-`listBindings()` ; seule la souris reste en dur dans index.html).
+**Tous** les raccourcis clavier sont des actions (`ACTIONS` d'ui.ts),
+réassignables dans la fenêtre des raccourcis. Elle est rangée en encadrés
+calqués sur les sections du panneau (`KEY_GROUPS` d'ui.ts : Matière,
+Pinceau, Simulation, Physique du monde, Défis, Mondes, Héros et vue), chacun
+avec ses gestes de souris, fixes ; un menu d'onglets (`#keys-menu`) en ouvre
+un à la fois (`shownGroup`), `listBindings()` remplit le tout. Chaque action
+est dans un encadré et un seul (test/ui.ts). Les actions de Simulation et de
+Mondes, et « recommencer le dernier défi » (`lastChallenge`), cliquent
+simplement le bouton du panneau.
 `combo()` écrit l'événement en combinaison (`Ctrl+z`, `Ctrl+Maj+z`, `g` :
 Cmd vaut Ctrl, Maj ne compte qu'avec Ctrl ou Alt, puisque les chiffres AZERTY
 la demandent), et `bound`, la table combinaison → action de `keymap()`, la

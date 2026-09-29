@@ -3,7 +3,7 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { DEFAULT_BINDINGS, clampPan, combo, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, ticksFor } from "../src/client/ui.ts";
+import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, ticksFor } from "../src/client/ui.ts";
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 
@@ -126,6 +126,9 @@ import { look } from "../src/client/sight.ts";
   assert.deepEqual(parseBindings(JSON.stringify(b)), b, "relues telles qu'écrites");
   assert.deepEqual(parseBindings("{abîmé"), DEFAULT_BINDINGS, "illisible : les touches d'origine");
   assert.deepEqual(parseBindings(JSON.stringify({ up: "Enter", left: 3 })), DEFAULT_BINDINGS, "réservée ou pas une chaîne : écartée");
+  const rangées = KEY_GROUPS.flatMap((g) => g.actions);
+  assert.deepEqual([...rangées].sort(), [...ACTIONS].sort(), "chaque action est dans un encadré, et un seul");
+  assert.equal(new Set(Object.values(DEFAULT_BINDINGS)).size, ACTIONS.length, "les touches d'origine sont toutes différentes");
 }
 
 console.log("ok — panneau conforme");

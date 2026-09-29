@@ -298,6 +298,10 @@ kbd {
 /* Un raccourci par ligne : la touche à gauche, ce qu'elle fait à droite.
    `max-content` sur la colonne des touches, et surtout aucune liste longue
    dedans — c'est la colonne de gauche qui décide de la largeur du tableau. */
+/* Menu de la fenêtre des raccourcis : un onglet par encadré. */
+.keys-menu { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.75rem; }
+.keys-menu button[aria-pressed="true"] { border-color: var(--accent); background: var(--pressed); }
+
 .keys {
   display: grid;
   grid-template-columns: max-content 1fr;
