@@ -76,17 +76,26 @@ npm run rust
 
 Ce script compile `rust/` en WASM (`cargo build --release`, deux secondes la
 première fois, instantané ensuite), puis lance [test/rust.ts](../test/rust.ts).
-Celui-ci construit deux scènes en 1920×1080, un chantier (eau, sable, bois en
-feu) et une mer de lave, et pour chacune :
+Celui-ci construit trois scènes : un chantier (eau, sable, bois en feu) et
+une mer de lave en 1920×1080, et une **fonderie** en 1917×1077. Pour chacune :
 
 1. mesure un tick complet du moteur JavaScript, et la part de `thermal()` ;
 2. fait repartir `thermal()` du même état en JavaScript puis dans les trois
    versions Rust, sur un seul fil ;
-3. compare chaque résultat à celui de JavaScript, cellule par cellule :
-   température des deux tampons, matière, `life`, blocs de veille.
+3. compare chaque résultat à celui de JavaScript, cellule par cellule
+   (température des deux tampons, matière, `life`, blocs de veille), sur
+   **10 ticks successifs** du moteur.
 
-Le script échoue si le `.wasm` manque, ou si une version annoncée exacte ne
-rend pas exactement ce que rend JavaScript. Il ne garde aucun budget de
+La fonderie couvre ce que les deux autres ne couvrent presque pas. Sur un
+tick, le chantier ne compte que 2 changements d'état et la mer de lave aucun ;
+ses bandes de matières (eau, glace, cire, azote, mercure…) posées sur la lave
+en font plus de 1500 en 10 ticks. Ses dimensions, pas multiples de 16, font
+des blocs incomplets à droite et en bas. Son ambiante de -0 vérifie le +0
+qu'écrit `flat()` : sans le `+ 0.0`, 317 952 températures diffèrent.
+
+Le script échoue si le `.wasm` manque, si une version annoncée exacte ne
+rend pas exactement ce que rend JavaScript, ou si les trois scènes comptent
+trop peu de changements d'état pour vérifier `convert()`. Il ne garde aucun budget de
 temps : comme `npm run directions`, c'est un instrument de décision, pas un
 test. Il ne tourne pas en CI, qui n'a pas Rust.
 
@@ -98,7 +107,7 @@ test. Il ne tourne pas en CI, qui n'a pas Rust.
 | `Cargo.toml` | la bibliothèque `thermal`, compilée en `cdylib` (un `.wasm` chargeable), optimisée au maximum en `release` |
 | `.cargo/config.toml` | cible par défaut `wasm32-unknown-unknown`, SIMD 128 bits activé. Lu seulement quand `cargo` est lancé **depuis** `rust/` : `npm run rust` s'y place |
 | `src/lib.rs` | le code : `reserve()` et `thermal()` |
-| `target/` | le résultat de la compilation (ignoré par git) : `target/wasm32-unknown-unknown/release/thermal.wasm`, 6 Ko |
+| `target/` | le résultat de la compilation (ignoré par git) : `target/wasm32-unknown-unknown/release/thermal.wasm`, 10 Ko |
 
 ## Comment JavaScript et Rust se parlent
 
@@ -135,21 +144,31 @@ Trois versions, choisies par `mode` :
 
 | Mode | Calcul | Au bit près ? |
 | --- | --- | --- |
-| 0 | copie ligne à ligne de `diffuseChunk()`, f64, `pulled()` compris | oui |
+| 0 | copie ligne à ligne de `diffuseChunk()`, f64 | oui |
 | 1 | SIMD, deux cellules à la fois (f64×2) | oui : le SIMD fait les mêmes opérations IEEE, voie par voie |
-| 2 | SIMD, quatre cellules à la fois, tout en f32 (f32×4) | **non** : écart de l'ordre de 10⁻⁴ °C. Invisible à l'œil, mais un salon où un joueur tourne en JS et l'autre en WASM divergerait. Envisageable seulement si **tous** les clients tournent en WASM |
+| 2 | SIMD, quatre cellules à la fois, tout en f32 (f32×4) | **non** : écart de l'ordre de 10⁻⁴ °C. Invisible à l'œil, mais pas sans effet : dans la fonderie, en 10 ticks, il fait basculer l'état de 12 cellules près de leur seuil, et l'écart monte alors à 24 °C. Un salon où un joueur tourne en JS et l'autre en WASM divergerait. Envisageable seulement si **tous** les clients tournent en WASM |
 
-Le port suit `diffuseChunk()`, y compris `pulled()` : au bord d'un bloc
-voisin endormi, la cellule lue est d'abord tirée vers la `heat` de sa source.
-Les modes SIMD laissent ces bordures à la version cellule par cellule. Tant
-que le port n'avait pas `pulled()`, `npm run rust` échouait sur la mer de
-lave (3840 températures jusqu'à 3,7 °C d'écart). Un changement de la chaleur
-dans engine.ts se reporte dans lib.rs, sinon ce script échoue. Le port n'a
-pas `flat()` : il n'en a pas besoin pour être exact, puisque le calcul complet
-rend la même chose au bit près, mais il fait le calcul que JavaScript saute.
+Le port suit `thermal()` jusque dans ses raccourcis. Un changement de la
+chaleur dans engine.ts se reporte dans lib.rs, sinon ce script échoue ou
+mesure autre chose :
+
+- **`pulled()`** : au bord d'un bloc voisin endormi, la cellule lue est
+  d'abord tirée vers la `heat` de sa source. Les modes SIMD laissent ces
+  bordures à la version cellule par cellule. Tant que le port ne l'avait pas,
+  `npm run rust` échouait sur la mer de lave (3840 températures jusqu'à 3,7 °C
+  d'écart).
+- **`flat()`** : un bloc à l'ambiante exacte, bordure comprise, est recopié
+  sans calcul, avant le choix du mode. Le port s'en passerait sans perdre
+  l'exactitude, puisque le calcul complet y rend la même chose au bit près,
+  mais il faisait alors le calcul que JavaScript saute : le chantier tombait à
+  ×0,66 en Rust f64.
 
 ## Résultats
 
+### Premières mesures, avant l'étape 0
+
+Ces mesures datent d'avant les corrections de l'étape 0 ci-dessous, qui ont
+rendu le moteur JavaScript bien plus rapide ; les mesures à jour suivent.
 Mesurés le 29 septembre 2026 avec Node 24, sur un seul fil. Les temps varient
 de 10 à 20 % d'une exécution à l'autre ; relancer `npm run rust` pour sa
 machine.
@@ -216,17 +235,21 @@ temps propre) : la règle de la lave et le choix de la règle (`update`,
 déplacements (`swap`, `tryMove`, ~11 %). C'est ce profil qui dira quoi
 porter si Rust revient sur la table.
 
-Après ces corrections (et `pulled()` reporté dans lib.rs), `npm run rust`
-donne :
+### Mesures à jour
 
-| Scène 1920×1080 | Tick JS | `thermal()` JS | Rust f64 | Rust SIMD f64×2 | Rust SIMD f32×4 |
+Après ces corrections, avec `pulled()` et `flat()` reportés dans lib.rs
+(29 septembre 2026, mêmes réserves sur la variation) :
+
+| Scène | Tick JS | `thermal()` JS | Rust f64 | Rust SIMD f64×2 | Rust SIMD f32×4 |
 | --- | --- | --- | --- | --- | --- |
-| chantier, 34 % des blocs éveillés | 29 ms | 3,6 ms (12 % du tick) | ×0,66 | ×1 | ×1,1 |
-| mer de lave, 6 % des blocs éveillés | 5,1 ms | 2,4 ms (47 % du tick) | ×2,1 | ×3,5 | ×5 |
+| chantier 1920×1080, 34 % des blocs éveillés | 29 ms | 3,6 ms (12 % du tick) | ×1,5 à 1,8 | ×1,8 à 1,9 | ×1,9 |
+| mer de lave 1920×1080, 6 % des blocs éveillés | 5,3 ms | 2,1 ms (40 % du tick) | ×2,2 à 2,4 | ×2,9 à 3,2 | ×3 à 3,2 |
+| fonderie 1917×1077, 20 % des blocs éveillés | 20 ms | 7,9 ms (39 % du tick) | ×2 à 2,2 | ×2 à 3 | ×3 |
 
-Le chantier est désormais **plus lent en Rust f64** : JavaScript saute ses
-blocs à l'ambiante avec `flat()`, que lib.rs ne porte pas. Pour comparer à
-armes égales, il faudrait porter `flat()` aussi.
+Le gain de Rust sur la chaleur tient (×2 environ, au bit près). Mais la
+chaleur ne pèse lourd que là où le reste du tick s'est effondré : les 40 %
+de la mer de lave ne font que 2 ms. La conclusion ci-dessus reste : ce sont
+les règles des cellules qu'il faudrait porter pour que ça se sente.
 
 ## Brancher Rust sur le vrai moteur (pas fait)
 

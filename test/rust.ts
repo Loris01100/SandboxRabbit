@@ -2,14 +2,22 @@
  * Le prototype Rust de `thermal()` (rust/src/lib.rs) contre le vrai moteur :
  * `npm run rust`, qui compile d'abord le Rust en WASM. Voir docs/rust.md.
  *
- * Sur deux scènes en 1920×1080 — le chantier de `npm run directions` et une
- * mer de lave, celle qui descendait à 12 fps en ×4 :
+ * Sur trois scènes — le chantier de `npm run directions` et une mer de lave,
+ * celle qui descendait à 12 fps en ×4, en 1920×1080 ; une fonderie en
+ * 1917×1077 à l'ambiante -0 :
  * 1. la part de la chaleur dans un tick du moteur JavaScript ;
  * 2. `thermal()` en JavaScript, puis ses trois versions Rust, chacune repartie
  *    du même état du bac, un seul fil ;
- * 3. pour chacune, l'écart avec JavaScript : au bit près sur toutes les
- *    cellules (température des deux tampons, matière, `life`, blocs de
- *    veille), ou l'écart de température maximal.
+ * 3. pour chacune, l'écart avec JavaScript sur `CHECKS` ticks successifs : au
+ *    bit près sur toutes les cellules (température des deux tampons, matière,
+ *    `life`, blocs de veille), ou l'écart de température maximal.
+ *
+ * La fonderie est là pour les chemins que les deux autres ne prennent
+ * presque pas : sur un tick, le chantier ne compte que 2 changements d'état et
+ * la mer de lave aucun. Ses bandes de matières posées sur la lave changent
+ * d'état à chaque tick ; ses dimensions, pas multiples de 16, font des blocs
+ * incomplets à droite et en bas ; son ambiante -0 vérifie le +0 qu'écrit
+ * `flat()`.
  *
  * Rien ici ne garde de budget ni n'échoue sur un temps : c'est un instrument
  * de décision, comme `npm run directions`. Il échoue seulement si le `.wasm`
@@ -18,10 +26,13 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
-import { FIRE, LAVA, MATERIALS, SAND, STONE, WATER, WOOD } from "../src/client/sim/materials.ts";
+import {
+  ALCOHOL, CEMENT, FIRE, ICE, LAVA, MATERIALS, MERCURY, NITROGEN, SALTWATER, SAND, SNOW, STONE, WATER, WAX, WOOD,
+} from "../src/client/sim/materials.ts";
 
-const W = 1920, H = 1080, N = W * H;
 const RUNS = 30;
+/** Ticks successifs comparés au bit près, chacun reparti de l'état du moteur JavaScript. */
+const CHECKS = 10;
 const WASM = new URL("../rust/target/wasm32-unknown-unknown/release/thermal.wasm", import.meta.url);
 
 /** Ce que `thermal()` lit et écrit, champs privés du moteur compris. */
@@ -62,6 +73,7 @@ function tables(): { f32s: Float32Array; u8s: Uint8Array } {
 
 /** Le chantier de `npm run directions` : une bande d'eau, du sable, du bois en feu dans une cuvette. */
 function worksite(e: Engine): void {
+  const { width: W, height: H } = e;
   const s = W / 320;
   for (let x = 0; x < W; x++) {
     const bowl = Math.round(H - 12 * s - 26 * s * Math.sin((x / W) * Math.PI));
@@ -75,13 +87,28 @@ function worksite(e: Engine): void {
 
 /** Une mer de lave sur les deux tiers du bac, sous un plafond de pierre percé. */
 function lavaSea(e: Engine): void {
+  const { width: W, height: H } = e;
   e.rect(0, H / 3, W - 1, H - 1, LAVA);
   e.rect(0, 0, W - 1, 40, STONE);
   for (let x = 100; x < W; x += 200) e.rect(x, 0, x + 60, 40, 0);
 }
 
+/**
+ * Un lac de lave au fond, et posées dessus des bandes de matières qui fondent,
+ * gèlent ou s'évaporent, séparées par de l'air resté à l'ambiante -0.
+ */
+function foundry(e: Engine): void {
+  const { width: W, height: H } = e;
+  e.ambient = -0;
+  e.clear();
+  e.rect(0, H - 200, W - 1, H - 1, LAVA);
+  const bands = [WATER, ICE, SAND, WAX, SNOW, NITROGEN, MERCURY, SALTWATER, CEMENT, ALCOHOL];
+  for (let k = 0, x = 0; x < W; k++, x += 90) e.rect(x, H - 320, Math.min(W - 1, x + 59), H - 201, bands[k % bands.length]);
+}
+
 /** Le module Rust instancié, ses tampons réservés dans sa mémoire et les vues JavaScript posées dessus. */
-async function rust() {
+async function rust(W: number, H: number) {
+  const N = W * H;
   if (!existsSync(WASM)) {
     console.error("rust/target/…/thermal.wasm absent : lancer `npm run rust` (qui compile), voir docs/rust.md.");
     process.exit(1);
@@ -131,14 +158,16 @@ function gap(a: Uint8Array | Float32Array, b: Uint8Array | Float32Array): { coun
 }
 
 const ms = (t: number): string => `${t.toFixed(2)} ms`;
-const wasm = await rust();
 const MODES = [
   { mode: 0, name: "Rust, f64 (copie)", exact: true },
   { mode: 1, name: "Rust SIMD f64×2", exact: true },
   { mode: 2, name: "Rust SIMD f32×4", exact: false },
 ];
 
-for (const [name, build] of [["chantier", worksite], ["mer de lave", lavaSea]] as const) {
+const SCENES = [["chantier", 1920, 1080, worksite], ["mer de lave", 1920, 1080, lavaSea], ["fonderie", 1917, 1077, foundry]] as const;
+let conversions = 0;
+for (const [name, W, H, build] of SCENES) {
+  const wasm = await rust(W, H);
   const engine = new Engine(W, H, 5);
   build(engine);
   for (let t = 0; t < 50; t++) engine.step();
@@ -152,7 +181,7 @@ for (const [name, build] of [["chantier", worksite], ["mer de lave", lavaSea]] a
   }
   tick /= 20;
 
-  const start = snapshot(e);
+  let start = snapshot(e);
   const refs = { temp: e.temp, next: e.tempNext };
   /** Remet le moteur dans l'état `start`, tampons de température compris. */
   const restore = () => {
@@ -171,33 +200,61 @@ for (const [name, build] of [["chantier", worksite], ["mer de lave", lavaSea]] a
   }
   js /= RUNS;
   restore();
-  e.thermal();
-  const expected = snapshot(e);
 
   const awake = start.awake.reduce((n, a, c) => n + (a | start.stir[c] ? 1 : 0), 0) / start.awake.length;
-  console.log(`\n${name} — 1920×1080, ${(awake * 100).toFixed(0)} % des blocs éveillés`);
+  console.log(`
+${name} — ${W}×${H}, ${(awake * 100).toFixed(0)} % des blocs éveillés`);
   console.log(`  tick complet (JS)        ${ms(tick)}`);
   console.log(`  thermal() JavaScript     ${ms(js)}   (${((js / tick) * 100).toFixed(0)} % du tick)`);
 
-  for (const { mode, name: label, exact } of MODES) {
-    let time = 0;
+  const time = MODES.map(({ mode }) => {
+    let sum = 0;
     for (let r = 0; r < RUNS; r++) {
       wasm.load(start);
       const t0 = performance.now();
       wasm.run(e.ambient, mode);
-      time += performance.now() - t0;
+      sum += performance.now() - t0;
     }
-    time /= RUNS;
-    wasm.load(start);
-    wasm.run(e.ambient, mode);
-    const v = wasm.view;
-    const temp = gap(expected.temp, v.next), next = gap(expected.next, v.temp);
-    const others = gap(expected.cells, v.cells).count + gap(expected.life, v.life).count
-      + gap(expected.awake, v.awake).count + gap(expected.stir, v.stir).count;
-    const same = temp.count + next.count + others === 0;
-    const verdict = same ? "identique au bit près"
-      : `${temp.count + next.count} températures différentes (écart max ${temp.max.toExponential(1)} °C), ${others} autres cases`;
-    console.log(`  ${label.padEnd(24)} ${ms(time)}   ×${(js / time).toFixed(2)}   ${verdict}`);
-    if (exact) assert.ok(same, `${label} doit rendre exactement ce que rend JavaScript`);
+    return sum / RUNS;
+  });
+
+  /** Pour chaque version, l'écart cumulé sur les `CHECKS` ticks. */
+  const diff = MODES.map(() => ({ temps: 0, max: 0, others: 0 }));
+  let changed = 0;
+  for (let k = 0; k < CHECKS; k++) {
+    if (k > 0) {
+      engine.step();
+      start = snapshot(e);
+      refs.temp = e.temp; refs.next = e.tempNext;
+    }
+    restore();
+    e.thermal();
+    const expected = snapshot(e);
+    for (let i = 0; i < start.cells.length; i++) if (start.cells[i] !== expected.cells[i]) changed++;
+    MODES.forEach(({ mode }, m) => {
+      wasm.load(start);
+      wasm.run(e.ambient, mode);
+      const v = wasm.view;
+      const temp = gap(expected.temp, v.next), next = gap(expected.next, v.temp);
+      diff[m].temps += temp.count + next.count;
+      diff[m].max = Math.max(diff[m].max, temp.max, next.max);
+      diff[m].others += gap(expected.cells, v.cells).count + gap(expected.life, v.life).count
+        + gap(expected.awake, v.awake).count + gap(expected.stir, v.stir).count;
+    });
+    restore();
   }
+  conversions += changed;
+  console.log(`  ${CHECKS} ticks comparés, ${changed} changements d'état`);
+
+  MODES.forEach(({ name: label, exact }, m) => {
+    const d = diff[m];
+    const same = d.temps + d.others === 0;
+    const verdict = same ? "identique au bit près"
+      : `${d.temps} températures différentes (écart max ${d.max.toExponential(1)} °C), ${d.others} autres cases`;
+    console.log(`  ${label.padEnd(24)} ${ms(time[m])}   ×${(js / time[m]).toFixed(2)}   ${verdict}`);
+    if (exact) assert.ok(same, `${label} doit rendre exactement ce que rend JavaScript (${name})`);
+  });
 }
+
+// Sans changement d'état, `convert()` côté Rust ne serait vérifié par rien.
+assert.ok(conversions > 100, `trop peu de changements d'état comparés (${conversions}) : la fonderie ne joue plus son rôle`);

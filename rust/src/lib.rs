@@ -2,8 +2,11 @@
 //! mesurer ce qu'un noyau Rust ferait gagner au moteur (`npm run rust`,
 //! test/rust.ts). Pas branché sur le bac : le moteur reste engine.ts.
 //!
-//! Trois façons de faire la diffusion, choisies par `mode` :
-//! - 0 : la copie ligne à ligne d'engine.ts, calcul en f64 comme JavaScript ;
+//! Comme engine.ts, un bloc à l'ambiante exacte est recopié sans calcul
+//! (`flat()`). Pour les autres, trois façons de faire la diffusion, choisies
+//! par `mode` :
+//! - 0 : la copie ligne à ligne de `diffuseChunk()`, calcul en f64 comme
+//!   JavaScript, `pulled()` compris ;
 //! - 1 : la même en SIMD, deux cellules à la fois (f64x2) — même résultat au
 //!   bit près, l'arithmétique IEEE ne dépend pas du nombre de voies ;
 //! - 2 : SIMD en f32, quatre cellules à la fois (f32x4) — plus rapide, mais
@@ -51,6 +54,9 @@ struct Tables<'a> {
     boil_into: &'a [u8],
     freeze_into: &'a [u8],
     life: &'a [u8],
+    /// `calm` d'engine.ts : ni source, ni matière que l'ambiante ferait
+    /// changer d'état. Recalculé à chaque appel, l'ambiante pouvant changer.
+    calm: [bool; 256],
 }
 
 /// La grille, vue depuis Rust : les tableaux qu'engine.ts range dans `Memory`.
@@ -86,10 +92,15 @@ pub unsafe extern "C" fn thermal(
     let cols = w.div_ceil(CHUNK);
     let chunks = cols * h.div_ceil(CHUNK);
     let (f, b) = unsafe { (core::slice::from_raw_parts(f32s, 768), core::slice::from_raw_parts(u8s, 768)) };
-    let t = Tables {
+    let mut t = Tables {
         heat: &f[..256], boil_at: &f[256..512], freeze_at: &f[512..],
         boil_into: &b[..256], freeze_into: &b[256..512], life: &b[512..],
+        calm: [false; 256],
     };
+    for id in 0..256 {
+        let heat = t.heat[id];
+        t.calm[id] = heat != heat && !(ambient > t.boil_at[id] as f64) && !(ambient < t.freeze_at[id] as f64);
+    }
     let mut g = unsafe {
         Grid {
             w, h, cols,
@@ -115,10 +126,21 @@ pub unsafe extern "C" fn thermal(
         heat_chunk(&mut g, &t, c as usize);
     }
     for &c in &jobs[..count] {
+        let c = c as usize;
+        // Dans la même boucle que la diffusion, pas avant : un changement
+        // d'état d'un bloc déjà diffusé change la bordure lue par `flat()`.
+        if flat(&g, &t, c) {
+            let (x0, y0, x1, y1) = bounds(&g, c);
+            for y in y0..y1 {
+                g.next[y * w + x0..y * w + x1].fill((ambient + 0.0) as f32);
+            }
+            g.awake[c] = 2;
+            continue;
+        }
         match mode {
-            1 => diffuse_f64x2(&mut g, &t, c as usize),
-            2 => diffuse_f32x4(&mut g, &t, c as usize),
-            _ => diffuse_scalar(&mut g, &t, c as usize),
+            1 => diffuse_f64x2(&mut g, &t, c),
+            2 => diffuse_f32x4(&mut g, &t, c),
+            _ => diffuse_scalar(&mut g, &t, c),
         }
     }
     for &c in &jobs[..count] {
@@ -131,6 +153,26 @@ fn bounds(g: &Grid, c: usize) -> (usize, usize, usize, usize) {
     let x0 = (c % g.cols) << SHIFT;
     let y0 = (c / g.cols) << SHIFT;
     (x0, y0, (x0 + CHUNK).min(g.w), (y0 + CHUNK).min(g.h))
+}
+
+/// `flat()` d'engine.ts : le bloc et sa bordure sont-ils tous à l'ambiante
+/// exacte et calmes ? La diffusion y rendrait `t` au bit près : on la saute.
+/// Sans ce raccourci, le chantier était 1,5 fois plus lent en Rust f64 qu'en
+/// JavaScript, qui l'a. `ambient + 0.0` (à l'appel) écrit +0 là où l'ambiante
+/// vaut -0, comme le calcul complet.
+fn flat(g: &Grid, tb: &Tables, c: usize) -> bool {
+    let (x0, y0, x1, y1) = bounds(g, c);
+    let (ya, yb) = (y0.saturating_sub(1), (y1 + 1).min(g.h));
+    let (xa, xb) = (x0.saturating_sub(1), (x1 + 1).min(g.w));
+    for y in ya..yb {
+        let row = y * g.w;
+        for i in row + xa..row + xb {
+            if g.temp[i] as f64 != g.ambient || !tb.calm[g.cells[i] as usize] {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// Passe 1 : les sources tirent leur cellule vers leur température (NaN = ne chauffe pas).
@@ -250,8 +292,9 @@ fn load2(s: &[f32], i: usize) -> v128 {
     f64x2_promote_low_f32x4(unsafe { v128_load64_zero(s.as_ptr().add(i) as *const u64) })
 }
 
-/// Mode 1 : deux cellules intérieures à la fois en f64x2 (les bords d'un bloc
-/// endormi, qui passent par `pulled()`, restent à `diffuse_one()`), dans l'ordre exact des opérations de JavaScript.
+/// Mode 1 : deux cellules intérieures à la fois en f64x2, dans l'ordre exact
+/// des opérations de JavaScript. Les bords d'un bloc endormi, qui passent par
+/// `pulled()`, restent à `diffuse_one()`.
 fn diffuse_f64x2(g: &mut Grid, tb: &Tables, c: usize) {
     let b = bounds(g, c);
     let (x0, y0, x1, y1) = b;

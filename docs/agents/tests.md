@@ -47,8 +47,10 @@ n'est pas dans la CI :
    qu'imposerait le moteur), en 1920×1080, 4K et 8K.
 
 5. **Rust / WASM** : `npm run rust` porte `thermal()` en Rust (trois
-   versions, dont deux exactes au bit près) et le compare au moteur sur deux
-   scènes 1920×1080. Il échoue si une version exacte ne l'est plus. Résultats
+   versions, dont deux exactes au bit près) et le compare au moteur sur trois
+   scènes, dix ticks chacune ; la fonderie (1917×1077, ambiante -0) y force
+   des changements d'état et des blocs incomplets. Il échoue si une version
+   exacte ne l'est plus, ou si trop peu de changements d'état sont comparés. Résultats
    et marche à suivre dans [docs/rust.md](../rust.md).
 
 Les noyaux sont un **minorant** : le vrai moteur a cinquante matières, des
