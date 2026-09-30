@@ -212,9 +212,10 @@ Deux pistes distinctes, à ne pas confondre :
   des Workers accorde 10 ms par requête : il faudrait l'offre payante. Un
   classement qui croirait le temps annoncé se tricherait d'une requête.
 
-**Dette connue** : les `ponytail:` du code (perte de contexte WebGL, encodage
-de la grille, gravité inversée des créatures…). `/ponytail-debt` en fait la
-liste complète sous Claude Code ; ailleurs, `grep -rn "ponytail:" src test`.
+**Dette connue** : les `ponytail:` du code (perte de contexte WebGL, gravité
+inversée du lapin, éclairage absent du rendu de secours, salon sans identité ni
+prédiction locale, records locaux…). La skill `ponytail-debt` en fait la liste
+complète ; ailleurs, `grep -rn -A6 --exclude-dir=target "ponytail:" src test rust migrations .github index.html wrangler.jsonc`.
 
 ## Contribuer
 

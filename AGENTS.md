@@ -179,8 +179,9 @@ aucun test précis.
   densité et le ton des commentaires existants.
 - `ponytail:` en tête d'un commentaire marque un raccourci assumé et sa limite
   (« à revoir le jour où… »). En ajouter un plutôt que de laisser une dette
-  implicite. La liste complète : `grep -rn -A4 "ponytail:" src test index.html`
-  (`/ponytail-debt` sous Claude Code) ; le README la résume sous « Dette connue ».
+  implicite. La liste complète :
+  `grep -rn -A6 --exclude-dir=target "ponytail:" src test rust migrations .github index.html wrangler.jsonc`
+  (skill `ponytail-debt`) ; le README la résume sous « Dette connue ».
 - Pas de framework UI, DOM impératif, éléments récupérés par
   `querySelector<…>("#id")!`. Pas de dépendance client sans raison forte : la
   CI tient deux budgets de 80 Kio, la page (JS + CSS) et le moteur (Worker).
@@ -211,6 +212,7 @@ local, faute de frappe, refactor interne). Le dire explicitement.
 | `src/worker/*`, `migrations/`, `wrangler.jsonc` | [architecture.md](docs/agents/architecture.md) (API, stockage) ; README (tableau de l'API) |
 | `test/*`, scripts de `package.json`, `.github/` | [tests.md](docs/agents/tests.md) ; section Commandes de ce fichier |
 | `rust/` | [docs/rust.md](docs/rust.md) (et ses résultats, s'ils changent) |
+| une skill (`.claude/skills/` ou `.agents/skills/`) | l'autre copie, identique : les deux dossiers portent les mêmes skills |
 | une nouvelle marche à suivre récurrente | [recettes.md](docs/agents/recettes.md) |
 | une nouvelle règle à ne pas enfreindre | « Règles à ne pas enfreindre » ci-dessus **et** le guide concerné |
 
