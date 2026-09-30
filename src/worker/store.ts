@@ -30,7 +30,7 @@ export interface Store {
   save(world: World): Promise<void>;
   /** Supprime, mais seulement pour le bon jeton. False = ce n'est pas votre monde. */
   remove(id: string, token: string): Promise<boolean>;
-  /** Ne garde que les `keep` mondes les plus récents (ménage nocturne). */
+  /** Ne garde que les mondes choisis par `kept()` (ménage nocturne). */
   purge(keep: number): Promise<void>;
   /** Compte un chargement. Appelé par `GET /api/worlds/:id`, seul chemin de chargement. */
   see(id: string): Promise<void>;
@@ -51,10 +51,28 @@ export function createStore(env: Env): Store {
 
 const memory = new Map<string, World>();
 
+/**
+ * Mondes gardés, et montrés par la galerie : les `keep` plus récents **et** les
+ * `keep` plus vus. Avec les seuls récents, 50 sauvegardes vides (deux minutes
+ * et demie au débit permis) poussaient tous les autres mondes dehors, et le
+ * ménage nocturne les effaçait.
+ * ponytail: un spammeur à plusieurs IP peut encore gonfler les vues de ses
+ * mondes ; un compte ou un Turnstile le jour où ça arrive.
+ */
+function kept(worlds: World[], keep: number): World[] {
+  const recent = [...worlds].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const viewed = [...recent].sort((a, b) => b.views - a.views).slice(0, keep);
+  return recent.filter((w, i) => i < keep || viewed.includes(w));
+}
+
+/** Le choix de `kept()` en SQL, `?1` valant `keep`. */
+const KEPT =
+  "id IN (SELECT id FROM worlds ORDER BY created_at DESC LIMIT ?1) OR id IN (SELECT id FROM worlds ORDER BY views DESC, created_at DESC LIMIT ?1)";
+
 function memoryStore(): Store {
   return {
     async list() {
-      return [...memory.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(shown);
+      return kept([...memory.values()], 50).map(shown);
     },
     async get(id) {
       const world = memory.get(id);
@@ -74,8 +92,8 @@ function memoryStore(): Store {
       if (world) world.views++;
     },
     async purge(keep) {
-      const old = [...memory.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(keep);
-      for (const world of old) memory.delete(world.id);
+      const alive = kept([...memory.values()], keep);
+      for (const world of memory.values()) if (!alive.includes(world)) memory.delete(world.id);
     },
   };
 }
@@ -84,7 +102,8 @@ function d1Store(db: D1Database): Store {
   return {
     async list() {
       const { results } = await db
-        .prepare("SELECT id, name, width, height, data, created_at AS createdAt, views, goal FROM worlds ORDER BY created_at DESC LIMIT 50")
+        .prepare(`SELECT id, name, width, height, data, created_at AS createdAt, views, goal FROM worlds WHERE ${KEPT} ORDER BY created_at DESC`)
+        .bind(50)
         .all<World>();
       return results;
     },
@@ -111,7 +130,7 @@ function d1Store(db: D1Database): Store {
     },
     async purge(keep) {
       await db
-        .prepare("DELETE FROM worlds WHERE id NOT IN (SELECT id FROM worlds ORDER BY created_at DESC LIMIT ?)")
+        .prepare(`DELETE FROM worlds WHERE NOT (${KEPT})`)
         .bind(keep)
         .run();
     },

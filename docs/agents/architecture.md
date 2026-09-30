@@ -243,8 +243,8 @@ le charger dans Node. Ce qui en a besoin (le Durable Object) vit dans
 | Route | Rôle | Garde-fous |
 | --- | --- | --- |
 | `GET /api/health` | état + backend (`d1` / `memory`) | — |
-| `GET /api/worlds` | 50 mondes max, `data` **coupé au premier bloc** (matière seule, pour les vignettes) | — |
-| `GET /api/worlds/:id` | monde complet, **incrémente `views`** | seul chemin de chargement depuis la galerie |
+| `GET /api/worlds` | les 50 plus récents **et** les 50 plus vus (`kept()` de store.ts, 100 max), `data` **coupé au premier bloc** (matière seule, pour les vignettes) | — |
+| `GET /api/worlds/:id` | monde complet, **incrémente `views`** | seul chemin de chargement depuis la galerie ; au-delà du débit (compteur `vue:` à part), servi sans compter la vue |
 | `POST /api/worlds` | `{name, width, height, data, goal?}` → `201 {id, token}` | débit, `data` ≤ 200 000, dimensions entières et ≤ 1920×1080 cellules (`CELLS`, la plus grande grille du menu : en ajouter une plus grande = relever ce plafond), `goal` validé par regex |
 | `DELETE /api/worlds/:id` | en-tête `x-world-token` requis | débit, `403` si mauvais jeton |
 | `GET /api/room/:id` | upgrade WebSocket vers le DO | `503` sans binding `ROOM`, débit, `426` sans upgrade |
@@ -273,7 +273,9 @@ répond 500.
   nommées dans les `SELECT` D1). Ne jamais écrire `SELECT *`.
 - Le client garde ses jetons dans `localStorage` (`sandbox-rabbit:mondes`).
 - Ménage nocturne (cron `0 4 * * *`, `scheduled` dans index.ts) : garde les
-  50 plus récents. Les mondes à `token` NULL (d'avant la migration 0004) ne
+  mondes que la galerie montre, les 50 plus récents et les 50 plus vus
+  (`kept()` en mémoire, `KEPT` en SQL) : 50 sauvegardes de spam ne chassent
+  plus un monde que les joueurs chargent. Les mondes à `token` NULL (d'avant la migration 0004) ne
   partent que par là.
 - Schéma : un **nouveau** fichier numéroté dans [migrations/](../../migrations/),
   jamais de retouche d'un fichier existant. Appliquer avec

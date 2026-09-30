@@ -73,22 +73,26 @@ app.get("/api/worlds", async (c) => {
   return c.json(worlds.map((w) => ({ ...w, data: w.data.split(".")[0] })));
 });
 
-// Charger un monde compte une vue : c'est par ici que passe la galerie.
+// Charger un monde compte une vue : c'est par ici que passe la galerie. Les
+// vues gardent un monde au ménage nocturne : sans débit, une boucle de GET en
+// hissait n'importe lequel en tête, une écriture D1 par requête. Au-delà du
+// débit, le monde est servi quand même, sans vue.
 app.get("/api/worlds/:id", async (c) => {
   const store = createStore(c.env);
   const world = await store.get(c.req.param("id"));
   if (!world) return c.json({ error: "introuvable" }, 404);
-  await store.see(world.id);
+  if (!(await flooding(c, "vue:"))) await store.see(world.id);
   return c.json(world);
 });
 
 /**
  * Écriture ouverte à tous (pas de compte dans ce bac) : la seule protection est
  * le débit, 20 requêtes par IP et par minute. Sans le binding — `wrangler dev`
- * local — on laisse passer.
+ * local — on laisse passer. `counter` sépare les compteurs : parcourir la
+ * galerie ne doit pas empêcher de sauvegarder.
  */
-async function flooding(c: Context<{ Bindings: Env }>): Promise<boolean> {
-  const key = c.req.header("cf-connecting-ip") ?? "anonyme";
+async function flooding(c: Context<{ Bindings: Env }>, counter = ""): Promise<boolean> {
+  const key = counter + (c.req.header("cf-connecting-ip") ?? "anonyme");
   return c.env.RL ? !(await c.env.RL.limit({ key })).success : false;
 }
 

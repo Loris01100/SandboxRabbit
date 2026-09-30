@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import app from "../src/worker/app.ts";
 import { route } from "../src/worker/relay.ts";
+import { createStore, type World } from "../src/worker/store.ts";
 
 const env = {} as never;
 
@@ -97,6 +98,32 @@ const body = async <T,>(res: Response | Promise<Response>): Promise<T> => (await
   const world = await body<Monde>(app.request(`/api/worlds/${id}`, {}, env));
   assert.equal(world.goal, "ge:12:600", "l'objectif voyage avec le monde");
   await app.request(`/api/worlds/${id}`, { method: "DELETE", headers: { "x-world-token": token } }, env);
+}
+
+// Au-delà du débit, un monde se charge encore mais ne gagne plus de vue : une
+// boucle de GET ne le hisse pas en tête des plus vus.
+{
+  const { id } = await body<Monde>(app.request("/api/worlds", json(monde), env));
+  const saturé = { RL: { limit: async () => ({ success: false }) } } as never;
+  assert.equal((await app.request(`/api/worlds/${id}`, {}, saturé)).status, 200, "servi malgré le débit");
+  assert.equal((await body<Monde>(app.request(`/api/worlds/${id}`, {}, saturé))).views, 0, "sans vue comptée");
+}
+
+// Le ménage garde les plus récents et les plus vus : 50 sauvegardes vides ne
+// poussent plus dehors un monde que les joueurs chargent.
+{
+  const store = createStore(env);
+  const vieux = (id: string, views: number): World =>
+    ({ id, name: id, width: 4, height: 4, data: "AQE=", createdAt: "2000-01-01T00:00:00.000Z", views });
+  await store.save(vieux("aimé", 7));
+  await store.save(vieux("oublié", 0));
+  for (let i = 0; i < 50; i++) await store.save({ ...vieux(`spam${i}`, 0), createdAt: new Date().toISOString() });
+  const montrés = (await store.list()).map((w) => w.id);
+  assert.ok(montrés.includes("aimé"), "la galerie montre encore le monde vu");
+  assert.ok(!montrés.includes("oublié"), "pas le vieux monde jamais vu");
+  await store.purge(50);
+  assert.ok(await store.get("aimé"), "le ménage garde le monde vu");
+  assert.equal(await store.get("oublié"), null, "et efface l'autre");
 }
 
 // Le salon ne relaie plus à l'aveugle : l'hôte ne diffuse que sa partie, un

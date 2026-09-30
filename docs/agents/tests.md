@@ -19,7 +19,7 @@ TypeScript directement.
 | --- | --- | --- |
 | [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), blocs de veille (dont la mer de lave qui doit s'endormir), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
 | [test/ui.ts](../../test/ui.ts) | logique pure du panneau, touches réassignables ; ce que voit le héros | `ui.ts`, `sight.ts` |
-| [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, routage des messages du salon | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
+| [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, vues sous débit, ménage (récents + plus vus), routage des messages du salon | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
 | [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles | `Sandbox` avec un rappel `send` qui empile |
 | [test/pool.ts](../../test/pool.ts) | le moteur sur plusieurs fils : 400 ticks d'une partie chargée (monde généré, feu, explosifs, uranium, héros piloté) sur 1 fil et sur 4, **identiques au bit près** ; rebranchement sur un autre moteur | `Engine`, `Pool`, fils `worker_threads` ([test/helper.ts](../../test/helper.ts)) |
 

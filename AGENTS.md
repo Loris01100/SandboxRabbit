@@ -216,7 +216,7 @@ local, faute de frappe, refactor interne). Le dire explicitement.
 | une nouvelle marche à suivre récurrente | [recettes.md](docs/agents/recettes.md) |
 | une nouvelle règle à ne pas enfreindre | « Règles à ne pas enfreindre » ci-dessus **et** le guide concerné |
 
-Côté Claude Code, un hook `Stop` ([.claude/hooks/doc-sync.sh](.claude/hooks/doc-sync.sh))
+Côté Claude Code, un hook `Stop` ([.claude/hooks/doc-sync.mjs](.claude/hooks/doc-sync.mjs), en Node : pas de `jq` à installer)
 refuse de clore un tour quand du code a changé sans aucun `.md`. Les autres
 agents appliquent la règle d'eux-mêmes.
 

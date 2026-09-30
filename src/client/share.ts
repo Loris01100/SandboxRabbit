@@ -94,7 +94,7 @@ async function openGallery(): Promise<void> {
   drawGallery();
 }
 
-// Le tri se fait sur la liste déjà en main : elle est plafonnée à 50 mondes,
+// Le tri se fait sur la liste déjà en main : elle est plafonnée à 100 mondes,
 // inutile de redemander au Worker.
 const sortInput = document.querySelector<HTMLSelectElement>("#gallery-sort")!;
 sortInput.addEventListener("change", drawGallery);
