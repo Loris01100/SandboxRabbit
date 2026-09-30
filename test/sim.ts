@@ -15,6 +15,7 @@ import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE,
+  ACID, STEAM, HERO_HEAD, HERO_BODY, HERO_LEGS,
   CEMENT, FILINGS, HERO, HERO_HARM, HERO_SLOTS, MAGNET, PILOT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
@@ -1687,6 +1688,49 @@ for (let s = 0; s < DAY; s += 7) assert.ok(hourTint(s).every((v) => v >= 0 && v 
   r.tint = HOURS.nuit; r.draw();
   assert.ok(r.pixels[2] < jour[2], "la nuit doit assombrir la pierre");
   assert.equal(r.pixels[6], jour[6], "la nuit ne doit pas assombrir la lave");
+}
+
+/**
+ * Le pire cas de chaque matière : un bac **plein d'elle seule**. Il doit
+ * s'endormir (`busy` = 0), sinon il coûte à chaque tick pour toujours — en
+ * 1920×1080, un bac plein d'aimants coûtait 2 s par tick à chercher de la
+ * limaille qui n'y était pas, plein de sel ou de sources 70 à 150 ms.
+ *
+ * Une matière inerte s'endort en quelques ticks (la lave et la glace le temps
+ * de se mettre à l'ambiante). Celles de `WORKS` travaillent vraiment à chaque
+ * tick — c'est leur règle, pas du gaspillage —, mais finissent par s'éteindre.
+ * Une nouvelle matière qui reste éveillée sans rien faire casse ce test : la
+ * faire appeler `wake(i)` quand elle a de quoi agir plutôt que la mettre dans
+ * `ACTIVE` (docs/agents/simulation.md, « Blocs de veille »). Et si elle
+ * travaille vraiment, l'ajouter à `WORKS` avec sa raison.
+ */
+{
+  /** Ticks au plus pour qu'un bac plein d'une matière inerte s'endorme. */
+  const INERT = 30;
+  /** Ticks au plus pour une matière de `WORKS` (l'acide, le plus lent, met ~1500 ticks). */
+  const LONG = 2000;
+  const WORKS: Partial<Record<MaterialId, string>> = {
+    [FIRE]: "brûle et vieillit, puis la chaleur retombe",
+    [SMOKE]: "vieillit", [STEAM]: "vieillit et se condense", [FIREDAMP]: "vieillit", [FALLOUT]: "vieillit",
+    [NANITE]: "vieillit", [EMBER]: "vieillit en fumée, et chauffe",
+    [ACID]: "ronge le bord du bac (hors grille = pierre) et s'use en fumée",
+    [MOLTEN_GLASS]: "refroidit jusqu'à se figer en verre",
+    [URANIUM]: "s'emballe en masse et saute",
+    [RABBIT]: "vit, puis meurt de faim", [RABBIT_BODY]: "sans cœur, le corps se défait", [RABBIT_EYE]: "idem", [RABBIT_TAIL]: "idem",
+    [HERO_HEAD]: "sans cœur, le corps se défait", [HERO_BODY]: "idem", [HERO_LEGS]: "idem",
+  };
+  for (const key of Object.keys(MATERIALS)) {
+    const id = Number(key) as MaterialId;
+    // Le héros ne s'endort jamais : il attend les commandes du joueur (créature, donc `ACTIVE`).
+    if (id === EMPTY || id === HERO) continue;
+    const e = new Engine(64, 64, 1234);
+    e.rect(0, 0, 63, 63, id);
+    const limit = WORKS[id] ? LONG : INERT;
+    let t = 0;
+    while (t < limit && (t === 0 || e.busy > 0)) { e.step(); t++; }
+    assert.equal(e.busy, 0, `un bac plein de ${MATERIALS[id].name} (${id}) doit s'endormir en ${limit} ticks : il reste ${e.busy} blocs éveillés`
+      + (WORKS[id] ? ` (${WORKS[id]})` : " — une matière inerte ne doit pas tenir son bloc éveillé"));
+  }
 }
 
 console.log("ok — simulation conforme");

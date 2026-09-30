@@ -35,6 +35,10 @@ jobs:
       # reperdre sans s'en apercevoir. Il est large exprès (le runner partagé
       # varie du simple au triple) : il attrape un effondrement, pas une dérive.
       - run: npm run bench
+      # Les pires cas : un bac plein de chaque matière, explosion en chaîne,
+      # onde de pression, lave, aimants, bandes 1920×1080. Un bac plein
+      # d'aimants coûtait 2 s par tick sans que rien ne le montre.
+      - run: npm run stress
       # Un client sans framework grossit lentement et sans bruit. Deux budgets de
       # 80 ko non compressés : la page (JS + CSS, ce qui s'affiche d'abord) et
       # le moteur (le Worker de simulation, qui sert aussi de fil auxiliaire).

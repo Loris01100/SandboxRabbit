@@ -24,6 +24,7 @@ npm run typecheck  # QUATRE projets tsc : client (DOM), Worker, tests (Node + DO
 npm run check      # asserts : test/sim.ts, test/libm.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts (Node exécute le TS)
 npm run browser    # Chromium (Playwright) : shader WebGL2 = Renderer, page qui charge sans erreur (docs/navigateur.md)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
+npm run stress     # pires cas : bac plein de chaque matière, explosions, pression, lave, aimants, bandes 1920×1080 ; chacun sous un plafond
 npm run directions # mesure de décision : 1 cœur, N cœurs, projection (GPU : test/gpu.html sous npm run dev)
 npm run rust       # prototype Rust/WASM de thermal() et de la pression contre le moteur JS, libm.ts contre la crate libm (demande Rust : docs/rust.md)
 npm run build      # typecheck puis vite build
@@ -88,7 +89,7 @@ src/worker/
   relay.ts               qui a le droit de dire quoi dans un salon      (pur)
 migrations/              schéma D1, un fichier numéroté par changement
 rust/                    prototype : thermal() et la pression en Rust → WASM, et la crate libm, référence de libm.ts ; mesurés par test/rust.ts (pas branchés sur le bac)
-test/                    scripts d'assert (+ bench.ts, loc.ts) ; browser.ts + screen.html : tests dans Chromium
+test/                    scripts d'assert (+ bench.ts, stress.ts, loc.ts) ; browser.ts + screen.html : tests dans Chromium
 ```
 
 ## Règles à ne pas enfreindre
@@ -241,7 +242,7 @@ agents appliquent la règle d'eux-mêmes.
 
 1. `npm run typecheck` (les quatre projets, tests compris).
 2. `npm run check`.
-3. `npm run bench` si le moteur ou le rendu a bougé ; `npm run browser` si
+3. `npm run bench` et `npm run stress` si le moteur ou le rendu a bougé ; `npm run browser` si
    render.ts, screen.ts, main.ts, world.ts ou index.html a bougé.
 4. `npm run build` si des dépendances, index.html ou le CSS ont changé (budget
    de bundle).

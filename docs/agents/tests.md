@@ -8,6 +8,7 @@
 | `npm run check` | les cinq scripts d'`assert`, dans l'ordre : sim, ui, api, sandbox, pool |
 | `npm run browser` | dans Chromium sans fenêtre (Playwright) : le shader WebGL2 contre `Renderer` à une unité près, et la page du jeu qui charge sans erreur. Demande `npx playwright install chromium` une fois par machine ; tout est dans [docs/navigateur.md](../navigateur.md) |
 | `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
+| `npm run stress` | les pires cas, chacun sous un plafond, sur un seul fil ([test/stress.ts](../../test/stress.ts)) : un bac 320×180 plein de **chaque** matière (≤ 800 ns par cellule et par tick ; les plus chères font 110 à 160, l'aimant en faisait 4000), TNT en chaîne, souffle en plein air, mer de lave sous la pluie, aimants sur la limaille, et les bandes d'un bac 1920×1080 tout changé (préparation côté bac, pose côté page). Plafonds à ~5 fois la mesure de référence ; `STRESS_SLACK=2` les double. ~10 s |
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
 | `npm run directions` | mesure de décision, pas un test : voir [Choisir une direction](#choisir-une-direction) |
@@ -155,6 +156,17 @@ ambiante sous zéro réveillent les blocs endormis, et un rejeu lancé sur un ba
 le mettre dans un bassin qu'il remplit exactement : sur un sol plat, sa
 dernière rangée incomplète glisse sans fin et tient son bloc éveillé.
 
+Pire cas de chaque matière (fin de test/sim.ts, sans chronomètre) : un bac
+64×64 plein d'une seule matière doit s'endormir (`busy` = 0) — en 30 ticks
+pour une matière inerte, en 2000 pour celles de `WORKS`, qui travaillent
+vraiment (gaz qui vieillissent, acide qui ronge le bord, uranium qui saute,
+verre fondu qui refroidit, créatures), chacune avec sa raison. Seul le héros
+ne s'endort jamais. Une nouvelle matière qui tient son bloc éveillé pour rien
+casse ce test : la faire appeler `wake(i)` quand elle a de quoi agir (voir
+« Blocs de veille » dans [simulation.md](simulation.md)). Remettre l'aimant
+dans `ACTIVE` le fait tomber. Le coût, lui, est chronométré par
+`npm run stress`.
+
 Mondes générés (fin de test/sim.ts) : même graine → même grille quel que soit
 le tirage du bac, aucun tirage consommé, poches de pétrole et de lave closes,
 uranium sans amas, et moins de 1 % des cellules qui bougent en 200 ticks. Un
@@ -186,7 +198,10 @@ Node 24 :
    mesure dépend beaucoup de la charge de la machine (de 2,8 à 5 ms d'une
    exécution à l'autre sur un poste occupé) : relancer avant de conclure à une
    régression.
-7. **Deux budgets de bundle, 81 920 octets chacun**, non compressés
+7. `npm run stress` — les pires cas sous leurs plafonds (voir le tableau
+   ci-dessus). Il a été vérifié contre le moteur d'avant l'optimisation des
+   matières inactives : il y tombe sur l'aimant (4032 ns par cellule).
+8. **Deux budgets de bundle, 81 920 octets chacun**, non compressés
    (`dist/client/assets`) : la **page** (`index-*.js` + `*.css`, ce qui
    s'affiche d'abord) et le **moteur** (`worker-*.js`, le Worker de
    simulation, qui sert aussi de fil auxiliaire). Un seul total ne disait pas

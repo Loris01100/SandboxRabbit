@@ -13,6 +13,7 @@
     "cf-typegen": "wrangler types",
     "browser": "node test/browser.ts",
     "bench": "node test/bench.ts",
+    "stress": "node test/stress.ts",
     "directions": "node test/directions.ts",
     "rust": "cd rust && cargo build --release && cd .. && node test/rust.ts",
     "loc": "node test/loc.ts"

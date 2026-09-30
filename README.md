@@ -142,6 +142,7 @@ npm run typecheck  # client, worker et tests ont chacun leur tsconfig (DOM, runt
 npm run check      # auto-vérifications : simulation, panneau, API, protocole du bac, moteur multi-fils (test/*.ts, Node exécute le TS tel quel)
 npm run browser    # dans Chromium : shader WebGL2 = rendu JS, page qui charge (npx playwright install chromium la première fois)
 npm run bench      # coût du tick sur cinq tailles de grille ; échoue au-delà de 4 ms en 320×180
+npm run stress     # pires cas (bac plein de chaque matière, explosions, lave, aimants…) sous leurs plafonds
 npm run directions # que rapporteraient plusieurs cœurs ? (la carte graphique : test/gpu.html sous npm run dev)
 npm run rust       # que rapporterait Rust ? thermal() en Rust/WASM contre le moteur JS (installer Rust : docs/rust.md)
 npm run loc        # taille du projet par poste
