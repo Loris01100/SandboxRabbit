@@ -3,7 +3,7 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor } from "../src/client/ui.ts";
+import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, framePeriod, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor } from "../src/client/ui.ts";
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 import { REPORT, reporter } from "../src/client/errors.ts";
@@ -83,6 +83,9 @@ import { REPORT, reporter } from "../src/client/errors.ts";
   assert.equal(refreshPeriod([]), 1000 / 60, "rien de mesuré : 60 Hz");
   assert.equal(refreshPeriod([40, 40, 40]), 1000 / 60, "une page qui rame ne ralentit pas le Worker sous 60 Hz");
   assert.equal(refreshPeriod([1, 1, 1]), 1000 / 240, "240 Hz au plus");
+  assert.equal(framePeriod(hz144, 0), hz144, "sans limite : l'écran");
+  assert.equal(framePeriod(hz144, 30), 1000 / 30, "limité à 30 images par seconde");
+  assert.equal(framePeriod(1000 / 60, 144), 1000 / 60, "une limite au-dessus de l'écran ne l'accélère pas");
 }
 
 /**

@@ -13,7 +13,7 @@
  * fichier à part embarquait une seconde copie du moteur : 35 Ko de plus à
  * télécharger.
  */
-import { Sandbox, type News, type Order } from "./sandbox.ts";
+import { SLICE, Sandbox, type News, type Order } from "./sandbox.ts";
 import { Pool, serve, type Helper } from "./pool.ts";
 
 // `self` typé à la main : le projet compile avec la lib DOM, pas celle des
@@ -64,22 +64,23 @@ worker.onmessage = (e) => {
     loop();
     return;
   }
-  // La page a mesuré son écran (world.ts) : borné ici aussi, un nombre venu
-  // d'ailleurs ne doit pas faire tourner la boucle à vide.
+  // La page a mesuré son écran, ou le joueur a limité les images (world.ts) :
+  // borné ici aussi, un nombre venu d'ailleurs ne doit pas faire tourner la
+  // boucle à vide.
   if (message.t === "pace") {
-    if (Number.isFinite(message.ms)) period = Math.min(Math.max(message.ms, 1000 / 240), 1000 / 60);
+    if (Number.isFinite(message.ms)) period = Math.min(Math.max(message.ms, 1000 / 240), 1000 / 30);
     return;
   }
   bac?.order(message);
 };
 
-/** L'écart visé entre deux frames : 60 Hz jusqu'à ce que la page dise la fréquence de son écran (`pace`). */
+/** L'écart visé entre deux frames : 60 Hz jusqu'à ce que la page dise la fréquence de son écran ou sa limite (`pace`). */
 let period = 1000 / 60;
 /** L'heure à laquelle la prochaine frame est due. */
 let due = performance.now();
 
 /**
- * Au rythme de l'écran (60 Hz par défaut, 240 au plus). Le vrai rythme, c'est le temps écoulé : le bac fait ses comptes avec.
+ * Au rythme de l'écran (60 Hz par défaut, 240 au plus, 30 au moins). Le vrai rythme, c'est le temps écoulé : le bac fait ses comptes avec.
  * On vise une échéance fixe plutôt qu'un délai après le travail : attendre
  * 16,7 ms *après* une frame qui en coûte 10 ne livrait que ~37 images par
  * seconde. En retard de plus d'une frame (onglet en veille, tick trop lourd), on
@@ -94,7 +95,9 @@ function loop(): void {
   // exception du moteur arrêtait la boucle pour de bon — plus un tick, plus une
   // image, jusqu'au rechargement de la page.
   try {
-    bac?.frame(elapsed);
+    // Une frame deux fois plus longue (limite à 30 images) simule deux fois
+    // plus longtemps : sans ça, un bac chargé ralentissait de moitié.
+    bac?.frame(elapsed, SLICE * Math.max(1, period / (1000 / 60)));
   } finally {
     due += period;
     const after = performance.now();

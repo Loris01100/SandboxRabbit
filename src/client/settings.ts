@@ -3,7 +3,7 @@ import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
 import { current, paletteEl, select } from "./palette.ts";
 import { stored, write } from "./ui.ts";
 import { zoomInput } from "./view.ts";
-import { WIDTH, airView, hour, light, resize, screen, set } from "./world.ts";
+import { WIDTH, airView, hour, light, lightDetail, limitFps, resize, screen, set } from "./world.ts";
 
 /** Rayon du pinceau, en cellules. */
 export let brush = 5;
@@ -106,6 +106,18 @@ if (screen.kind === "2d") {
   lightingInput.parentElement!.title = "Demande WebGL2, absent de ce navigateur";
 }
 
+// Graphismes (fenêtre Paramètres), pour les petits PC : moins d'images par
+// seconde, un éclairage plus grossier. Réglages de la page seule — le bac
+// simule pareil, le salon n'en sait rien.
+const fpsCapInput = document.querySelector<HTMLSelectElement>("#fps-cap")!;
+fpsCapInput.addEventListener("input", () => limitFps(Number(fpsCapInput.value)));
+const lightDetailInput = document.querySelector<HTMLSelectElement>("#light-detail")!;
+lightDetailInput.addEventListener("input", () => lightDetail(Number(lightDetailInput.value)));
+if (screen.kind === "2d") {
+  lightDetailInput.disabled = true;
+  lightDetailInput.parentElement!.title = "Demande WebGL2, absent de ce navigateur";
+}
+
 // Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
 // que de dupliquer les handlers ci-dessus.
 // ponytail: un blob JSON sans version — un réglage renommé repart au défaut.
@@ -119,6 +131,7 @@ const SETTINGS = "sandbox-rabbit:reglages";
 const SAVED = [
   brushInput, speedInput, windInput, ambientInput, sizeInput,
   toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, airmapInput, lightingInput, hourInput,
+  fpsCapInput, lightDetailInput,
 ];
 const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";

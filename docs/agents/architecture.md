@@ -46,7 +46,10 @@ flowchart LR
    (case « Éclairage », `light()` de world.ts) est lui aussi un réglage de
    la page seule : en WebGL2, screen.ts recalcule la lumière de tout le bac à
    chaque frame arrivée (quelques passes à basse résolution, voir `SCENE`
-   dans screen.ts) ; au repos, rien n'arrive et rien n'est recalculé.
+   dans screen.ts) ; au repos, rien n'arrive et rien n'est recalculé. Sa
+   finesse (Paramètres › Graphismes, `lightDetail()` de world.ts →
+   `screen.detail()`) est la largeur maximale de la grille de lumière : 480,
+   240 ou 120 texels.
    L'heure (menu « Heure », `hour()` de world.ts, teintes `HOURS` de
    render.ts) aussi : un `vec3 tint` du shader, tout recolorié quand elle
    change — une fois par seconde en mode « Cycle » (`setInterval` de settings.ts),
@@ -66,11 +69,15 @@ flowchart LR
    et renvoie des **nouvelles**. Sa cadence suit l'écran : la page mesure ses
    rafraîchissements (`beat()` de world.ts, médiane par `refreshPeriod()` de
    ui.ts) et envoie `{t: "pace", ms}`, traité par worker.ts lui-même (pas un
-   `Order` du bac), borné entre 60 et 240 Hz. La vitesse de la simulation
+   `Order` du bac), borné entre 30 et 240 Hz. Le joueur peut la limiter à 60
+   ou 30 images par seconde (Paramètres › Graphismes, `limitFps()` de
+   world.ts, `framePeriod()` d'ui.ts) : réglage de la page seule, le salon
+   n'en sait rien. La vitesse de la simulation
    n'en dépend pas (`ticksFor` compte en 60es de seconde) : un écran plus
    rapide montre plus d'images, pas plus de ticks. L'échéance suivante est posée dans un
    `finally` : une exception du moteur ne coupe plus la boucle pour de bon.
-   Une frame s'accorde au plus `SLICE` (12 ms) de simulation — bac, rejeu ou
+   Une frame s'accorde au plus `SLICE` (12 ms à 60 Hz, au prorata au-dessous :
+   24 ms à 30 images par seconde, sinon un bac chargé ralentissait de moitié) de simulation — bac, rejeu ou
    invité qui rattrape — et abandonne le reste de son retard : sinon une frame
    lente en réclame plus à la suivante, et en grande grille la boucle montait
    à huit ticks par frame. Un bac trop chargé ralentit, la page reste fluide.
@@ -167,8 +174,8 @@ avec ses gestes de souris, fixes ; un menu d'onglets (`#keys-menu`) en montre
 un à la fois (`shownGroup`), `listBindings()` remplit le tout. Tous sont posés
 dans la même case de grille, les autres en `visibility: hidden` : chacun a la
 taille du plus grand, la fenêtre ne saute pas d'un onglet à l'autre. La
-fenêtre Paramètres a elle-même une hauteur fixe (style.css) : l'onglet Général
-et l'onglet Raccourcis ont la même taille, et un contenu trop long défile
+fenêtre Paramètres a elle-même une hauteur fixe (style.css) : les onglets Général,
+Graphismes et Raccourcis ont la même taille, et un contenu trop long défile
 (dans Raccourcis, seule la liste `#bindings` défile, menu et bouton restent). Chaque action
 est dans un encadré et un seul (test/ui.ts). Les actions de Simulation et de
 Mondes, et « recommencer le dernier défi » (`lastChallenge`), cliquent
@@ -341,7 +348,7 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | [main.ts](../../src/client/main.ts) | souris, raccourcis, défis, rejeu, chargement du bac, boucle rAF, câblage de tout le DOM | non |
 | [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`hero`, relevée par `track()`), fiche de l'encadré Héros (`card()` : nom, santé, âge, température, compteurs lus dans le miroir ; `nameInput`, `heroId`), cadre `#halo` autour du héros piloté dans les vues de côté (`mark()`, repère posé sur la scène, pas dans le rendu), caméra décrochée (`loose`), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
 | [palette.ts](../../src/client/palette.ts) | palette des matières et six récentes ; `select()`, qui tient `current` et `emit` (matière des sources) | non |
-| [settings.ts](../../src/client/settings.ts) | contrôles du panneau (pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage) et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
+| [settings.ts](../../src/client/settings.ts) | contrôles du panneau (pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage), ceux de l'onglet Graphismes de la fenêtre Paramètres (limite d'images par seconde, finesse de l'éclairage) et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
 | [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan` | non |
 | [keys.ts](../../src/client/keys.ts) | touches réassignables (`bindings`, `bound`), touches tenues (`held`), fenêtre Paramètres (`openSettings()`, onglet Raccourcis) | non |
 | [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille (lu par `seen()`), `cellBox()` : où sont les cellules à l'écran, bordure du canvas exclue (le zoom la grossit) — tout passage cellule ↔ pixel (clic, sélection, cadre du héros) passe par lui | non |

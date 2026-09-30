@@ -363,7 +363,9 @@ kbd {
 #settings-keys > * { flex: none; margin: 0; }
 #settings-keys > #bindings { flex: 1; min-height: 0; overflow-y: auto; }
 #settings-keys > button { align-self: start; }
-#settings .row { grid-template-columns: 4.2rem 1fr; }
+/* Plus large que dans le panneau : « Finesse de l'éclairage » tient sur une ligne. */
+#settings .row { grid-template-columns: 9rem 1fr; }
+#settings .row + .row { margin-top: 0.5rem; }
 /* Les onglets des paramètres, séparés par un filet des onglets de raccourcis. */
 .tabs { padding-bottom: 0.75rem; border-bottom: 1px solid var(--line); }
 #gallery::backdrop, #settings::backdrop { background: light-dark(#3339, #000a); }

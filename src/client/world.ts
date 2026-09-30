@@ -18,7 +18,7 @@ import { AIR_LEVELS, HOURS, type Grid, type Tint } from "./sim/render.ts";
 import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
 import { watchErrors } from "./errors.ts";
-import { refreshPeriod } from "./ui.ts";
+import { framePeriod, refreshPeriod } from "./ui.ts";
 
 export const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
 /** Ce qui colorie le canvas : WebGL2, sinon 2D (screen.ts). */
@@ -246,27 +246,52 @@ export function present(): boolean {
   return arrived;
 }
 
-/** Les derniers écarts entre deux rafraîchissements, et la période déjà dite au Worker. */
+/** Les derniers écarts entre deux rafraîchissements, la période de l'écran, la limite choisie et la période déjà dite au Worker. */
 const gaps: number[] = [];
 let lastBeat = 0;
+let refresh = 1000 / 60;
+let cap = 0;
 let told = 1000 / 60;
+
+/** Dit au Worker la période visée (`pace`), si elle a bougé de plus de 5 % : le bruit des mesures ne doit pas faire un message par seconde. */
+function pace(): void {
+  const period = framePeriod(refresh, cap);
+  if (Math.abs(period - told) / told < 0.05) return;
+  told = period;
+  sim.postMessage({ t: "pace", ms: period });
+}
 
 /**
  * À appeler à chaque `requestAnimationFrame` : mesure la fréquence de l'écran
- * et la dit au Worker (`pace`), qui cadence ses frames dessus. Remesurée en
- * continu — une fenêtre passée sur un autre écran change de fréquence. On ne
- * redit la période qu'au-delà de 5 % d'écart : le bruit des mesures ne doit
- * pas faire un message par seconde.
+ * et la dit au Worker, qui cadence ses frames dessus. Remesurée en continu —
+ * une fenêtre passée sur un autre écran change de fréquence.
  */
 export function beat(now: number): void {
   if (lastBeat > 0) gaps.push(now - lastBeat);
   lastBeat = now;
   if (gaps.length < 60) return;
-  const period = refreshPeriod(gaps);
+  refresh = refreshPeriod(gaps);
   gaps.length = 0;
-  if (Math.abs(period - told) / told < 0.05) return;
-  told = period;
-  sim.postMessage({ t: "pace", ms: period });
+  pace();
+}
+
+/**
+ * Limite les images par seconde du Worker (0 : celles de l'écran). Réglage
+ * de la page seule (Paramètres › Graphismes) : le bac simule à la même
+ * vitesse, le salon n'en sait rien.
+ */
+export function limitFps(hz: number): void {
+  cap = hz;
+  pace();
+}
+
+/**
+ * La finesse de l'éclairage : largeur de sa grille en texels (screen.ts).
+ * Réglage de la page seule, comme l'éclairage lui-même ; on recolorie tout.
+ */
+export function lightDetail(width: number): void {
+  screen.detail(width);
+  repaint = true;
 }
 
 sim.addEventListener("message", (e: MessageEvent<News>) => {

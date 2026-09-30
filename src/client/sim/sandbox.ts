@@ -98,8 +98,8 @@ const GRID_CELLS = 640 * 360;
 const TURN = 50;
 const SUM = 60;
 const CATCH_UP = 32;
-/** Temps de simulation qu'une frame s'accorde, en ms : de quoi rendre et répondre sous 16,7 ms. */
-const SLICE = 12;
+/** Temps de simulation qu'une frame s'accorde à 60 Hz, en ms : de quoi rendre et répondre sous 16,7 ms. */
+export const SLICE = 12;
 const FOLLOW = "Vous suivez l'hôte : c'est lui qui mène le bac.";
 /** Ambiante à laquelle se bâtit un défi : celle d'un bac neuf. */
 const AMBIENT = 20;
@@ -131,6 +131,8 @@ export class Sandbox {
   private cursor = { x: -1, y: -1 };
   /** Reliquat de tick quand la vitesse n'est pas entière (ralenti). */
   private pending = 0;
+  /** Temps de simulation de la frame en cours (`frame()`), lu par `late()`. */
+  private slice = SLICE;
   private sinceStats = 0;
   private sinceGrid = 0;
   /** Le bac a changé depuis la dernière copie de secours (`grid`) : un ordre, ou un tick où quelque chose était éveillé. */
@@ -258,8 +260,11 @@ export class Sandbox {
    * la suivante — en 1920×1080, un lac qui s'étale coûte 16 ms le tick, et la
    * boucle montait à huit ticks par frame, 130 ms entre deux images, le
    * pinceau autant en retard. Un bac trop chargé ralentit, il ne rame plus.
+   * `slice` : ce plafond, plus large quand les frames sont plus espacées
+   * (images limitées à 30 par seconde, worker.ts).
    */
-  frame(ms: number): void {
+  frame(ms: number, slice = SLICE): void {
+    this.slice = slice;
     const budget = ticksFor(this.knobs.speed, ms, this.pending);
     this.pending = budget.pending;
     const start = performance.now();
@@ -352,7 +357,7 @@ export class Sandbox {
    * l'attend.
    */
   private late(start: number): boolean {
-    if (performance.now() - start < SLICE) return false;
+    if (performance.now() - start < this.slice) return false;
     this.pending = 0;
     return true;
   }

@@ -266,6 +266,7 @@
       </form>
       <nav class="keys-menu tabs" aria-label="Onglets des paramètres">
         <button type="button" data-tab="settings-general">Général</button>
+        <button type="button" data-tab="settings-graphics">Graphismes</button>
         <button type="button" data-tab="settings-keys">Raccourcis</button>
       </nav>
       <section id="settings-general">
@@ -277,6 +278,27 @@
             <option value="dark">Nuit</option>
           </select>
         </label>
+      </section>
+      <!-- Pour les petits PC : réglages de la page seule (settings.ts), le bac
+           simule pareil et le salon n'en sait rien. -->
+      <section id="settings-graphics" hidden>
+        <label class="row" title="Moins d'images, c'est moins de travail pour la page et la carte graphique. La simulation garde sa vitesse.">
+          <span>Images par seconde</span>
+          <select id="fps-cap">
+            <option value="0">Fréquence de l'écran</option>
+            <option value="60">60 au plus</option>
+            <option value="30">30 au plus</option>
+          </select>
+        </label>
+        <label class="row" title="La lumière du feu et de la lave est calculée sur une grille plus grossière que le bac : plus grossière, elle coûte moins à la carte graphique.">
+          <span>Finesse de l'éclairage</span>
+          <select id="light-detail">
+            <option value="480">Fine</option>
+            <option value="240">Moyenne</option>
+            <option value="120">Grossière</option>
+          </select>
+        </label>
+        <p class="hint">Ça rame encore ? Dans le panneau, Physique du monde : décocher l'Éclairage soulage la carte graphique, et une Grille plus petite le processeur — 640 × 360, c'est quatre fois moins de cellules que 1280 × 720.</p>
       </section>
       <!-- Rempli par main.ts (listBindings) depuis KEY_GROUPS d'ui.ts : un
            onglet par encadré, un bouton par touche à changer. -->

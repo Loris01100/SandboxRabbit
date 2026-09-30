@@ -106,6 +106,17 @@ export function refreshPeriod(gaps: readonly number[]): number {
 }
 
 /**
+ * La période que vise le Worker : celle de l'écran, ralentie jusqu'à `cap`
+ * images par seconde si le joueur l'a limitée (Paramètres › Graphismes, 0 =
+ * pas de limite). Sur un petit PC, 30 images au lieu de 60, c'est moitié
+ * moins d'envois, de copies dans le miroir et de passes d'éclairage — la
+ * simulation, elle, garde sa vitesse (`ticksFor` compte le temps écoulé).
+ */
+export function framePeriod(screen: number, cap: number): number {
+  return cap > 0 ? Math.max(screen, 1000 / cap) : screen;
+}
+
+/**
  * Décalage de la vue ramené dans ses bornes : le bac agrandi recouvre
  * toujours son cadre, on ne le pousse plus hors de l'écran. `size` est la
  * taille du cadre (le canvas sans transformation), en pixels d'écran ; le

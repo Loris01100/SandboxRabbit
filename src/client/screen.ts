@@ -34,6 +34,12 @@ export interface Screen {
    * vue thermique ou vue pression — les deux dernières sans éclairage.
    */
   paint(grid: Grid, x0: number, y0: number, x1: number, y1: number, view: View, lit: boolean, tint: Tint): void;
+  /**
+   * Largeur maximale de la grille de lumière, en texels (`LIGHT_WIDTH` par
+   * défaut) : la moitié, c'est quatre fois moins de texels à éclairer, pour une
+   * carte graphique modeste. Sans effet en 2D, qui n'éclaire pas.
+   */
+  detail(width: number): void;
 }
 
 /** L'écran du canvas : WebGL2 s'il le peut, sinon 2D. Un canvas n'a qu'un contexte : le choix est définitif. */
@@ -271,7 +277,7 @@ void main() {
   color = vec4(best, 1.0);
 }`;
 
-/** Largeur maximale de la grille de lumière, en texels : au-delà, un texel couvre plusieurs cellules. */
+/** Largeur maximale de la grille de lumière, en texels, d'origine : au-delà, un texel couvre plusieurs cellules. */
 const LIGHT_WIDTH = 480;
 /** Nombre maximal de cascades : la dernière porte à (4⁶ − 1)/3 = 1365 texels. */
 const CASCADES = 6;
@@ -364,6 +370,8 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   };
   /** Ce que lit la dernière cascade, qui n'a pas de dessus : un texel noir, jamais la texture où elle écrit. */
   const none = target(UPPER, 1, 1, gl.RGBA8, gl.NEAREST);
+  /** Largeur maximale de la grille de lumière, réglable (`detail()`). */
+  let lightWidth = LIGHT_WIDTH;
   let lights: { scale: number; scene: Target; cascades: Target[]; light: Target } | null = null;
 
   /** Refait les cibles de l'éclairage pour un bac `bw` × `bh`. */
@@ -372,7 +380,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
       gl.deleteTexture(old.texture);
       gl.deleteFramebuffer(old.fb);
     }
-    const scale = Math.ceil(bw / LIGHT_WIDTH);
+    const scale = Math.ceil(bw / lightWidth);
     const lw = Math.ceil(bw / scale), lh = Math.ceil(bh / scale);
     const format = hdr ? gl.RGBA16F : gl.RGBA8;
     let count = 1;
@@ -425,6 +433,11 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   let w = 0, h = 0;
   return {
     kind: "webgl2",
+    detail(width) {
+      if (width === lightWidth || !(width > 0)) return;
+      lightWidth = width;
+      if (w > 0) resize(w, h); // avant la première frame, paint() s'en charge
+    },
     paint(grid, x0, y0, x1, y1, view, lit, tint) {
       if (grid.width !== w || grid.height !== h) {
         w = grid.width; h = grid.height;
@@ -472,6 +485,7 @@ function flatScreen(canvas: HTMLCanvasElement): Screen {
   let image: ImageData | null = null;
   return {
     kind: "2d",
+    detail() {},
     paint(grid, x0, y0, x1, y1, view, _lit, tint) {
       if (grid !== of || !renderer || !image) {
         of = grid;
