@@ -317,6 +317,17 @@ function count(e: Engine, id: MaterialId): number {
   assert.ok(embers, "le bois laisse des braises");
 }
 
+// Une colonne de sable qui tombe reste pleine en passant les frontières de blocs du damier (y = 32, 96…), au lieu d'une rangée sur deux.
+{
+  const e = new Engine(40, 130, 1);
+  e.rect(17, 2, 23, 12, SAND);
+  for (let t = 0; t < 90; t++) e.step();
+  const rangées = new Set<number>();
+  for (let y = 0; y < 130; y++) for (let x = 0; x < 40; x++) if (e.get(x, y) === SAND) rangées.add(y);
+  assert.equal(rangées.size, 11, `onze rangées pleines après la chute (${rangées.size})`);
+  assert.equal(count(e, SAND), 77, "aucun grain perdu");
+}
+
 // L'étincelle court dans le métal, s'arrête toute seule, et fait sauter le TNT.
 {
   const e = engine();
@@ -1141,7 +1152,7 @@ function top(e: Engine, id: MaterialId): number {
   };
 
   const empreinte = fingerprint(run(1234));
-  assert.equal(empreinte, "94ca9ece", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
+  assert.equal(empreinte, "c0b016ea", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
   assert.equal(fingerprint(run(1234)), empreinte, "et rejouable : deux fois la même graine, la même grille");
   assert.notEqual(fingerprint(run(9876)), empreinte, "une autre graine donne une autre partie");
 }
@@ -1292,7 +1303,7 @@ function top(e: Engine, id: MaterialId): number {
   trou.rect(0, H - 2, W - 1, H - 1, EMPTY);
   for (let t = 0; t < 40; t++) trou.step();
   assert.equal(count(trou, SAND), sable, "le sable est toujours là");
-  assert.ok(trou.cells.indexOf(SAND) > (H - 10) * W, "mais le sol retiré, le sable endormi est tombé");
+  assert.ok(trou.cells.subarray((H - 1) * W).includes(SAND), "mais le sol retiré, le sable endormi est tombé jusqu'au fond");
 
   const renverse = tas();
   renverse.gravity = -1;

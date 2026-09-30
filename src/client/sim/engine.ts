@@ -217,6 +217,10 @@ for (const key of Object.keys(MATERIALS)) {
 }
 for (const id of [ACID, THERMITE, URANIUM, SALT, NANITE, SOURCE, BATTERY, EMBER, SPARK, MAGNET]) ACTIVE[id] = 1;
 
+/** 1 = poudre ou liquide, hors créatures : ce qui tombe d'une case par tick, et que `hold()` peut différer. */
+const FALLS = new Uint8Array(256);
+for (let id = 0; id < 256; id++) if ((KIND[id] === KINDS.powder || KIND[id] === KINDS.liquid) && !CREATURE[id]) FALLS[id] = 1;
+
 /**
  * Côté d'un bloc du damier, en cellules : deux blocs de veille. Un tick traite
  * les blocs en quatre phases — (x pair, y pair), (impair, pair), (pair,
@@ -237,7 +241,7 @@ for (const id of [TNT, NITRO, C4, MINE, URANIUM]) EXPLOSIVE[id] = 1;
 /** Les travaux que `run()` répartit entre les fils, exécutés par `job()`. */
 export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, stop: 9 } as const;
 /** Cases de `control` (Int32 partagé) : génération, travail, prochain, finis, nombre, différés, héros. */
-export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6 } as const;
+export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6, held: 7 } as const;
 /** Cases de `params` (Float64 partagé) : ce qu'un fil auxiliaire recopie avant chaque travail (`sync`). */
 const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pilot: 6, flip: 7 } as const;
 
@@ -250,7 +254,7 @@ const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pi
 export interface Memory {
   width: number;
   height: number;
-  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "jobs" | "control" | "params", ArrayBufferLike>;
+  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "held" | "waiting" | "jobs" | "control" | "params", ArrayBufferLike>;
 }
 
 /** Le constructeur de tampon à employer : partagé si la plateforme le permet (Node, page isolée). */
@@ -366,6 +370,10 @@ export class Engine {
   readonly jobs: Int32Array;
   /** Explosions différées du tick : (cellule, rayon | 256 si nucléaire), jouées par `settle()`. */
   private readonly later: Int32Array;
+  /** 1 = cellule différée à ce tick par `hold()` ; remis à 0 par `release()`. */
+  private readonly held: Uint8Array;
+  /** Les cellules différées du tick, dans l'ordre où les fils les ont posées ; `release()` les trie. */
+  private readonly waiting: Int32Array;
   /**
    * Les fils auxiliaires, quand il y en a : posé par `Pool.bind()` une fois
    * qu'ils sont prêts. Sans lui, `run()` fait tout le travail ici, au même
@@ -441,6 +449,8 @@ export class Engine {
       clock: new Shareable(n), frozen: new Shareable(n), noise: new Shareable(n),
       awake: new Shareable(chunks), stir: new Shareable(chunks),
       later: new Shareable(Math.max(64, n >> 2) * 8), jobs: new Shareable(chunks * 4),
+      // Au pire, toutes les cellules des rangées paires de blocs : la moitié du bac, plus une rangée de blocs.
+      held: new Shareable(n), waiting: new Shareable(((n >> 1) + PART * width) * 4),
       control: new Shareable(8 * 4), params: new Shareable(8 * 8),
     };
     this.memory = { width, height, buffers: b };
@@ -456,6 +466,8 @@ export class Engine {
     this.awake = new Uint8Array(b.awake);
     this.stir = new Uint8Array(b.stir);
     this.later = new Int32Array(b.later);
+    this.held = new Uint8Array(b.held);
+    this.waiting = new Int32Array(b.waiting);
     this.jobs = new Int32Array(b.jobs);
     this.control = new Int32Array(b.control);
     this.params = new Float64Array(b.params);
@@ -857,9 +869,11 @@ export class Engine {
    * 1. `rouse()` : quels blocs de veille sont éveillés ;
    * 2. le damier : quatre phases de blocs `PART`×`PART` (`block()`), deux
    *    blocs d'une même phase ne se touchant jamais ;
-   * 3. `settle()` : les explosions mises de côté, une à une, dans l'ordre des
+   * 3. `release()` : les chutes différées par `hold()`, dans l'ordre des
+   *    cellules ;
+   * 4. `settle()` : les explosions mises de côté, une à une, dans l'ordre des
    *    cellules — elles portent trop loin pour le damier ;
-   * 4. la chaleur, en trois passes par bloc de veille (`thermal()`).
+   * 5. la chaleur, en trois passes par bloc de veille (`thermal()`).
    *
    * **Le résultat ne dépend pas du nombre de fils** : chaque bloc a un seul
    * fil, tire au sort depuis sa propre graine (`mix(graine du tick, bloc)`),
@@ -874,11 +888,14 @@ export class Engine {
     const tick = this.state;
     this.tickSeed = mix(tick);
     Atomics.store(this.control, CTL.later, 0);
+    Atomics.store(this.control, CTL.held, 0);
     this.publish();
     for (let p = 0; p < 4; p++) {
       const count = this.phase(p & 1, p >> 1);
       if (count > 0) this.run(JOB.cells, count);
     }
+    this.state = mix(tick ^ 0x27d4eb2f);
+    this.release();
     this.state = mix(tick ^ 0x5bd1e995);
     this.settle();
     this.state = xorshift(tick);
@@ -995,8 +1012,76 @@ export class Engine {
         if (clock[i] === parity || ACTIVE[id] || (id === METAL && life[i] > 0)) stir[c] = 1;
         if (clock[i] === parity) continue;
         clock[i] = parity;
+        if (FALLS[id] && this.hold(i, x, y)) continue;
         this.update(i, x, y, id);
       }
+    }
+  }
+
+  /**
+   * Diffère une cellule qui tombe sur une matière en chute d'un bloc pas
+   * encore balayé : elle sera jouée par `release()`, une fois tout le damier
+   * passé. Les rangées de blocs paires passent avant les impaires ; à une
+   * frontière sur deux (y = 32, 96…), le bloc du haut passe donc avant celui
+   * du bas. Sans ça, le grain du bas du bloc voyait la case d'en dessous encore
+   * pleine — son voisin n'avait pas encore bougé —, glissait en diagonale ou
+   * restait sur place, puis le voisin descendait : un trou par tick. Une
+   * colonne versée au pinceau tombait en une rangée sur deux, avec des traits
+   * sur les côtés.
+   *
+   * La matière d'en dessous ne compte que si elle tombe vraiment : une colonne
+   * de poudre ou de liquide pas encore jouée, avec du vide ou du gaz à moins de
+   * 15 cellules (au-delà, un fil d'une autre phase peut y écrire). Un tas ou un
+   * lac au repos ne diffère rien. Et une cellule posée sur une cellule
+   * différée l'est aussi : elle ne peut tomber qu'après elle.
+   */
+  private hold(i: number, x: number, y: number): boolean {
+    const { fall, width: w, cells, clock, frozen, parity } = this;
+    const below = y + fall;
+    if (below < 0 || below >= this.height) return false;
+    const j = i + fall * w;
+    if (!this.held[j]) {
+      if ((y >> PART_SHIFT) & 1 || below >> PART_SHIFT === y >> PART_SHIFT) return false;
+      if (!FALLS[cells[j]] || clock[j] === parity || frozen[j]) return false;
+      for (let k = 1; ; k++) {
+        const yy = below + k * fall;
+        if (k === 15 || yy < 0 || yy >= this.height) return false;
+        const c = yy * w + x, kind = KIND[cells[c]];
+        if (kind === KINDS.empty || kind === KINDS.gas) break;
+        if (!FALLS[cells[c]] || clock[c] === parity || frozen[c]) return false;
+      }
+    }
+    this.held[i] = 1;
+    this.waiting[Atomics.add(this.control, CTL.held, 1)] = i;
+    return true;
+  }
+
+  /**
+   * Joue les cellules différées par `hold()`, seul et dans l'ordre du
+   * balayage (celles du bas d'abord) : ce qui ne dépend ni du nombre de fils
+   * ni de l'ordre où ils les ont posées.
+   *
+   * ponytail: une cellule différée qu'une règle voisine a échangée entre-temps
+   * (un liquide plus dense qui passe dessous) est jouée à sa nouvelle place
+   * par ce qui l'a remplacée, qui a déjà bougé à ce tick : un pas de trop,
+   * rare. Suivre `held` dans `swap()` le jour où ça se voit.
+   */
+  private release(): void {
+    const count = Atomics.load(this.control, CTL.held);
+    if (count === 0) return;
+    const { width: w, height: h, held, cells, frozen } = this;
+    const down = this.fall === 1, leftToRight = this.parity === 0;
+    const order = this.waiting.subarray(0, count);
+    for (let k = 0; k < count; k++) {
+      const at = order[k], x = at % w, y = (at / w) | 0;
+      order[k] = (down ? h - 1 - y : y) * w + (leftToRight ? x : w - 1 - x);
+    }
+    order.sort();
+    for (let k = 0; k < count; k++) {
+      const ry = (order[k] / w) | 0, rx = order[k] - ry * w;
+      const x = leftToRight ? rx : w - 1 - rx, y = down ? h - 1 - ry : ry, i = y * w + x;
+      held[i] = 0;
+      if (cells[i] !== EMPTY && !frozen[i]) this.update(i, x, y, cells[i]);
     }
   }
 

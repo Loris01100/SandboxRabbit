@@ -44,10 +44,25 @@ tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
 3. `update()` : d'abord un `switch` sur les ids à règle propre (feu, lave,
    acide, TNT, étincelle…), sinon mouvement générique selon `kind`
    (`powder` / `liquid` / `gas`, `static` ne bouge pas).
-4. `settle()` : les explosions mises de côté pendant le damier (`blast()`),
+   Avant `update()`, `hold()` peut **différer** une poudre ou un liquide
+   (`FALLS`, créatures exclues). Les rangées de blocs paires passent avant
+   les impaires, donc à une frontière sur deux (y = 32, 96…) le bloc du haut
+   est balayé avant celui du bas. Un grain posé sur une colonne qui tombe
+   dans le bloc du bas, pas encore jouée, attend la fin du damier. Sans ça,
+   il voyait la case pleine, glissait en diagonale, et la colonne tombait en
+   une rangée sur deux. La colonne ne compte comme « en chute » que si du
+   vide ou du gaz se trouve à moins de 15 cellules : au-delà, un fil d'une
+   autre phase peut écrire. Une très longue colonne garde donc une rangée
+   trouée toutes les 16 environ. Une cellule posée sur une cellule différée
+   est différée aussi (`held`).
+4. `release()` : les cellules différées, triées dans l'ordre du balayage
+   (celles du bas d'abord) et jouées seules, avec une graine à elles
+   (`mix(tick ^ 0x27d4eb2f)`) : ni le nombre de fils ni l'ordre où ils les
+   ont posées (`waiting`, `CTL.held`) ne comptent.
+5. `settle()` : les explosions mises de côté pendant le damier (`blast()`),
    jouées une à une dans l'ordre du balayage. Une charge déjà emportée par
    une voisine ne saute plus (`EXPLOSIVE`).
-5. `thermal()`, en trois passes par bloc de veille éveillé ou écrit : les
+6. `thermal()`, en trois passes par bloc de veille éveillé ou écrit : les
    sources (`heat`) tirent leur cellule vers leur température
    (`heatChunk`), puis diffusion (`CONDUCTION`), retour vers `ambient`
    (`COOLING`) et changements d'état `boil` / `freeze` (`diffuseChunk`),
