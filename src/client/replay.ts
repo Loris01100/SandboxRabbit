@@ -21,7 +21,8 @@ export interface Scene {
   ambient: number;
   gravity: 1 | -1;
   emit: MaterialId;
-  weather: boolean;
+  /** Niveau de météo (gestures.ts) ; un booléen dans les enregistrements d'avant l'orage. */
+  weather: number | boolean;
   /**
    * Commandes du héros tenues (`engine.pilot`). Ses changements arrivent par
    * gestes ; il est ici pour le départ — un enregistrement lancé touche
@@ -59,7 +60,7 @@ export interface Recording {
   ticks: number;
 }
 
-const sceneOf = (e: Engine, rain: boolean): Scene => ({
+const sceneOf = (e: Engine, rain: number): Scene => ({
   wind: e.wind, ambient: e.ambient, gravity: e.gravity, emit: e.emit, weather: rain, pilot: e.pilot,
 });
 
@@ -114,7 +115,7 @@ export class Recorder {
   readonly rec: Recording;
   private engine: Engine;
 
-  constructor(engine: Engine, rain: boolean) {
+  constructor(engine: Engine, rain: number) {
     this.engine = engine;
     this.rec = {
       v: 1, w: engine.width, h: engine.height,
@@ -135,7 +136,7 @@ export class Recorder {
   }
 
   /** À appeler **juste avant** `engine.step()`, météo comprise. */
-  tick(rain: boolean): void {
+  tick(rain: number): void {
     const now = sceneOf(this.engine, rain);
     const last = this.scene();
     if (!same(now, last)) this.rec.beats.push({ at: this.rec.ticks, scene: now });
@@ -216,7 +217,7 @@ export class Player {
       else put(this.engine, b.grid, b.clock, this.scene.ambient);
     }
     if (this.tick >= this.rec.ticks) return false;
-    if (this.scene.weather) weather(this.engine);
+    weather(this.engine, +this.scene.weather);
     this.engine.step();
     this.tick++;
     return true;
@@ -267,7 +268,7 @@ function readable(data: unknown, n: number): data is string {
 
 function isScene(s: unknown): s is Scene {
   return isObject(s) && finite(s.wind) && finite(s.ambient) && (s.gravity === 1 || s.gravity === -1)
-    && int(s.emit) && MATERIALS[s.emit as MaterialId] !== undefined && typeof s.weather === "boolean"
+    && int(s.emit) && MATERIALS[s.emit as MaterialId] !== undefined && (typeof s.weather === "boolean" || (int(s.weather) && s.weather >= 0 && s.weather <= 3))
     && (s.pilot === undefined || int(s.pilot));
 }
 

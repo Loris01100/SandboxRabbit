@@ -319,11 +319,11 @@ function jouer(s: ReturnType<typeof salon>, frames: number): void {
   jouer(s, 30);
   s.hôte.order({ t: "do", g: { t: "paint", x: 40, y: 4, r: 5, id: WATER, d: 1, over: true } });
   jouer(s, 30);
-  s.hôte.order({ t: "set", k: { wind: 0.8, gravity: -1, weather: true } });
+  s.hôte.order({ t: "set", k: { wind: 0.8, gravity: -1, weather: 3 } });
   jouer(s, 60);
   s.hôte.order({ t: "edit", do: "clear" });
   s.hôte.order({ t: "do", g: { t: "rect", x: 10, y: 10, x2: 30, y2: 14, id: SAND, over: true } });
-  s.hôte.order({ t: "set", k: { wind: 0, gravity: 1, weather: false } });
+  s.hôte.order({ t: "set", k: { wind: 0, gravity: 1, weather: 0 } });
   jouer(s, 120);
   s.hôte.order({ t: "set", k: { running: false } });
   jouer(s, 40);

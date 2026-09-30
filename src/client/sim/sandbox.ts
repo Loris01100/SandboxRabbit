@@ -27,7 +27,8 @@ export interface Knobs {
   ambient: number;
   gravity: 1 | -1;
   emit: MaterialId;
-  weather: boolean;
+  /** 0 sec, 1 pluie, 2 orage, 3 gros orage (gestures.ts). */
+  weather: number;
   /** Ticks par 60e de seconde (0,25 à 4). */
   speed: number;
   running: boolean;
@@ -116,7 +117,7 @@ export class Sandbox {
   private readonly pool: Pool | null;
   knobs: Knobs = {
     wind: 0, ambient: 20, gravity: 1, emit: WATER,
-    weather: false, speed: 1, running: true, heatmap: false,
+    weather: 0, speed: 1, running: true, heatmap: false,
   };
 
   private send: (news: News) => void;
@@ -382,7 +383,7 @@ export class Sandbox {
     const rain = this.knobs.weather;
     this.rec?.tick(rain); // avant le pas : c'est l'état de la scène qui va servir
     this.stream?.tick(rain);
-    if (rain) weather(this.engine);
+    weather(this.engine, rain);
     this.engine.step();
     const ticks = this.stream?.rec.ticks;
     if (ticks !== undefined && ticks % SUM === 0) this.sums.push([ticks, fingerprint(this.engine.cells)]);

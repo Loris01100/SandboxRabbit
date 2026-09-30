@@ -336,6 +336,17 @@ function count(e: Engine, id: MaterialId): number {
   assert.equal(count(boom, TNT), 0, "l'étincelle met le feu aux poudres à l'autre bout");
 }
 
+// Orage : l'éclair descend en feu à travers la pluie et électrise le métal qu'il frappe ; la pluie seule n'en lance pas.
+{
+  const e = engine();
+  for (let x = 0; x < e.width; x++) e.set(x, e.height - 1, METAL);
+  for (let t = 0; t < 1000; t++) weather(e, 1);
+  assert.equal(count(e, FIRE) + count(e, SPARK), 0, "pas d'éclair sous la simple pluie");
+  for (let t = 0; t < 5000 && count(e, SPARK) === 0; t++) weather(e, 3);
+  assert.equal(count(e, SPARK), 1, "l'éclair frappe le métal");
+  assert.ok(count(e, FIRE) >= e.height - 2, "et laisse un trait de feu du ciel au sol");
+}
+
 // Figer : la matière garde son identité mais ne bouge plus, et rien ne la pousse.
 {
   const e = engine();
@@ -1168,8 +1179,8 @@ function top(e: Engine, id: MaterialId): number {
   // tirage ne sont plus ceux du constructeur, c'est tout l'intérêt.
   for (let t = 0; t < 7; t++) e.step();
 
-  const rec = new Recorder(e, false);
-  let rain = false;
+  const rec = new Recorder(e, 0);
+  let rain = 0;
   for (let t = 0; t < 150; t++) {
     for (const [at, g] of gestures) {
       if (at !== t) continue;
@@ -1178,12 +1189,12 @@ function top(e: Engine, id: MaterialId): number {
     }
     // Réglages changés en cours de route : ils partent dans l'enregistrement
     // sans que personne ne les lui signale (il les compare à chaque tick).
-    if (t === 30) { e.wind = 0.6; rain = true; }
+    if (t === 30) { e.wind = 0.6; rain = 3; }
     if (t === 70) { e.gravity = -1; e.ambient = -20; }
     // Une grille posée d'un coup (annulation, monde chargé) : là il faut le dire.
     if (t === 90) { e.clear(); e.rect(0, 0, W - 1, 4, SAND); rec.stamp(); }
     rec.tick(rain);
-    if (rain) weather(e);
+    weather(e, rain);
     e.step();
   }
   assert.equal(rec.rec.ticks, 150, "un tick enregistré par pas de simulation");
@@ -1293,14 +1304,14 @@ function top(e: Engine, id: MaterialId): number {
   assert.ok(runUntil(gel, ICE, 600), "une ambiante sous zéro gèle le lac endormi");
 
   const e = tas();
-  const rec = new Recorder(e, false);
+  const rec = new Recorder(e, 0);
   const gestes: [number, Gesture][] = [
     [5, { t: "paint", x: 14, y: H - 2, r: 2, id: EMPTY, d: 1, over: true }],
     [30, { t: "paint", x: 40, y: 5, r: 2, id: FIRE, d: 1, over: true }],
   ];
   for (let t = 0; t < 120; t++) {
     for (const [at, g] of gestes) if (at === t) { applyGesture(e, g); rec.gesture(g); }
-    rec.tick(false);
+    rec.tick(0);
     e.step();
   }
   const suivi = new Player(rec.rec, new Engine(W, H, 3));
@@ -1446,11 +1457,11 @@ function top(e: Engine, id: MaterialId): number {
 
   const e = plaine();
   e.rect(30, SOL - 1, 31, SOL - 1, SAND);
-  const rec = new Recorder(e, false);
+  const rec = new Recorder(e, 0);
   const commandes: [number, number][] = [[3, PILOT.right], [25, PILOT.right | PILOT.up], [40, PILOT.right | PILOT.dig], [70, 0]];
   for (let t = 0; t < 100; t++) {
     for (const [at, keys] of commandes) if (at === t) { const g: Gesture = { t: "pilot", keys }; applyGesture(e, g); rec.gesture(g); }
-    rec.tick(false);
+    rec.tick(0);
     e.step();
   }
   const rejoué = new Player(rec.rec, new Engine(W, H, 5));

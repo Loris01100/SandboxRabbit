@@ -144,9 +144,14 @@
             <span>Gravité</span>
             <button id="gravity" type="button">Vers le bas ↓</button>
           </div>
-          <label class="check">
-            <input id="weather" type="checkbox" />
-            <span>Météo : il pleut du haut du bac — de la neige si l'ambiante est sous zéro</span>
+          <label class="row" title="Il pleut du haut du bac — de la neige si l'ambiante est sous zéro. L'orage pleut plus fort et lance des éclairs.">
+            <span>Météo</span>
+            <select id="weather">
+              <option value="0">Sec</option>
+              <option value="1">Pluie</option>
+              <option value="2">Orage</option>
+              <option value="3">Gros orage</option>
+            </select>
           </label>
           <label class="check">
             <input id="heatmap" type="checkbox" />

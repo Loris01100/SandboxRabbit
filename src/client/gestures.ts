@@ -10,7 +10,7 @@
  */
 import { decode, decodeFrozen } from "./sim/codec.ts";
 import { type Engine } from "./sim/engine.ts";
-import { EMPTY, MATERIALS, placeable, SNOW, WATER, type MaterialId } from "./sim/materials.ts";
+import { EMPTY, FIRE, MATERIALS, METAL, placeable, SNOW, SPARK, WATER, type MaterialId } from "./sim/materials.ts";
 
 export type Gesture =
   | { t: "paint"; x: number; y: number; r: number; id: MaterialId; d: number; over: boolean; only?: MaterialId }
@@ -62,18 +62,59 @@ export function applyGesture(engine: Engine, g: Gesture): void {
   }
 }
 
+/** Chance d'un éclair par tick, par niveau de météo : ~1 toutes les 5 s à l'orage, ~1 par seconde au gros orage. */
+const BOLT = [0, 0, 1 / 300, 1 / 60];
+
 /**
  * Météo : quelques gouttes par tick sur la ligne d'où vient la matière (donc en
  * bas si la gravité est inversée). L'ambiante décide de leur nature — c'est ce
- * qui donne enfin à voir le curseur de température.
+ * qui donne enfin à voir le curseur de température. `level` : 0 sec, 1 pluie,
+ * 2 orage, 3 gros orage — autant de fois plus de gouttes, et des éclairs.
  *
  * Le tirage passe par `engine.rand()`, pas par `Math.random()` : la pluie fait
- * partie de la partie, un rejeu doit la retrouver goutte pour goutte.
+ * partie de la partie, un rejeu doit la retrouver goutte pour goutte. La simple
+ * pluie ne tire rien de plus qu'avant l'orage : ses rejeus restent les mêmes.
  */
-export function weather(engine: Engine): void {
+export function weather(engine: Engine, level: number): void {
+  if (!(level > 0)) return;
   const id = engine.ambient <= 0 ? SNOW : WATER;
   const y = engine.gravity === 1 ? 0 : engine.height - 1;
-  for (let n = Math.max(2, (engine.width / 160) | 0); n > 0; n--) {
+  for (let n = Math.max(2, (engine.width / 160) | 0) * level; n > 0; n--) {
     engine.set(Math.floor(engine.rand() * engine.width), y, id);
   }
+  if (level > 1 && engine.rand() < BOLT[level]) bolt(engine, Math.floor(engine.rand() * engine.width), y);
 }
+
+/**
+ * Un éclair : une ligne de feu qui zigzague depuis le ciel jusqu'à la première
+ * matière qui l'arrête. Il traverse les gaz et les gouttes encore en l'air, pas
+ * un lac. Le métal touché reçoit une étincelle, qui court dans le circuit puis
+ * redevient métal ; ailleurs, une gerbe de feu autour de l'impact — le bois
+ * prend, le TNT saute, le sable finit en verre. Une cellule figée n'est pas
+ * touchée, comme sous le pinceau « ne pas remplacer ».
+ */
+function bolt(engine: Engine, x: number, y: number): void {
+  const g = engine.gravity;
+  for (; engine.inBounds(x, y); y += g) {
+    if (!open(engine, x, y) && !(falling(engine, x, y) && open(engine, x, y + g))) break;
+    engine.set(x, y, FIRE);
+    x = Math.min(engine.width - 1, Math.max(0, x + Math.floor(engine.rand() * 3) - 1));
+  }
+  if (!engine.inBounds(x, y) || engine.frozen[engine.index(x, y)]) return;
+  if (engine.get(x, y) === METAL) return engine.set(x, y, SPARK);
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) if (open(engine, x + dx, y + dy)) engine.set(x + dx, y + dy, FIRE);
+  }
+}
+
+/** Vide ou gaz : ce que l'éclair traverse. Hors grille, `get()` rend un mur. */
+const open = (engine: Engine, x: number, y: number): boolean => {
+  const kind = MATERIALS[engine.get(x, y)].kind;
+  return kind === "empty" || kind === "gas";
+};
+
+/** Une goutte ou un flocon (ceux de la météo), que l'éclair traverse s'ils sont en l'air. */
+const falling = (engine: Engine, x: number, y: number): boolean => {
+  const id = engine.get(x, y);
+  return id === WATER || id === SNOW;
+};

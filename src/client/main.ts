@@ -851,8 +851,8 @@ function fit(w: number): void {
 }
 
 // Météo : la pluie elle-même vit dans gestures.ts, avec le tirage du moteur.
-const weatherInput = document.querySelector<HTMLInputElement>("#weather")!;
-weatherInput.addEventListener("change", () => set({ weather: weatherInput.checked }));
+const weatherInput = document.querySelector<HTMLSelectElement>("#weather")!;
+weatherInput.addEventListener("input", () => set({ weather: Number(weatherInput.value) }));
 
 const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
 heatmapInput.addEventListener("change", () => set({ heatmap: heatmapInput.checked }));
@@ -905,7 +905,7 @@ const saved = stored<any>(SETTINGS, null);
 if (saved) {
   if (MATERIALS[saved.current as MaterialId]) select(saved.current as MaterialId);
   for (const el of SAVED) {
-    const value = saved[el.id];
+    const value = typeof saved[el.id] === "boolean" && !isCheck(el) ? Number(saved[el.id]) : saved[el.id];
     if (value === undefined) continue; // réglage absent d'une version précédente
     // L'événement est rejoué plutôt que les handlers dupliqués : c'est lui qui
     // pousse la valeur dans le moteur (vent, ambiante) ou dans le rendu.

@@ -298,7 +298,7 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, secours 2D par `Renderer` (sans éclairage) | non |
 | [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence, touches réassignables), accès `localStorage` tolérant | **oui** (test/ui.ts) |
 | [sight.ts](../../src/client/sight.ts) | ce que voit le héros : `look()` lance un éventail de rayons dans une grille et rend une colonne de pixels | **oui** (test/ui.ts) |
-| [gestures.ts](../../src/client/gestures.ts) | `Gesture` + `applyGesture(engine, g)` + météo | **oui** |
+| [gestures.ts](../../src/client/gestures.ts) | `Gesture` + `applyGesture(engine, g)` + météo (`weather(engine, niveau)` : 0 sec, 1 pluie, 2 orage, 3 gros orage, éclairs compris ; le niveau est le réglage `weather` et le champ `weather` d'une `Scene`, booléen dans les enregistrements d'avant l'orage) | **oui** |
 | [replay.ts](../../src/client/replay.ts) | `Recorder` / `Player` | **oui** |
 | [challenges.ts](../../src/client/challenges.ts) | défis et décors bâtis en code | **oui** |
 | [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
