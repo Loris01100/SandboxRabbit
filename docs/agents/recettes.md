@@ -153,7 +153,7 @@ Tout raccourci clavier est une **action réassignable** :
 3. Son `case` dans le `switch` du gestionnaire `keydown` de main.ts, qui lit
    `bound[combo(e)]` — jamais `e.key` directement, sinon la touche ne se
    réassigne pas. Une action tenue (qui agit tant que la touche l'est) va
-   plutôt dans `MOVES` (view.ts) ou `STEER` (main.ts).
+   plutôt dans `MOVES` (view.ts) ou `STEER` (hero.ts).
 4. Un assert dans [test/ui.ts](../../test/ui.ts) si la touche d'origine a une
    subtilité (combinaison, conflit).
 

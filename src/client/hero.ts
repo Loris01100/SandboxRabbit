@@ -1,0 +1,106 @@
+import { PILOT } from "./sim/materials.ts";
+import { current } from "./palette.ts";
+import { bindings, held } from "./keys.ts";
+import { keyLabel, type Action } from "./ui.ts";
+import { zoom, zoomCentered, zoomInput } from "./view.ts";
+import { WIDTH, seen } from "./world.ts";
+import { look } from "./sight.ts";
+
+const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
+
+/** Position du héros dans la dernière frame, en cellules ; null sans héros. Avec lui, les touches le pilotent et la caméra le suit. */
+export let hero: [number, number] | null = null;
+/**
+ * Caméra décrochée du héros : elle reste où on l'a mise, le héros vit sa vie
+ * hors champ. Glisser au clic du milieu la décroche (sans ça, la vue revient
+ * sur lui à l'image suivante et on ne peut rien regarder d'autre) ; un clic du
+ * milieu sans bouger la raccroche.
+ */
+export let loose = false;
+/** Commandes envoyées en dernier (bits de `PILOT`) : un geste ne part que quand elles changent. */
+let piloted = 0;
+
+/** Actions du héros : celles de la caméra, plus creuser devant lui et poser. */
+export const STEER: Partial<Record<Action, number>> = {
+  left: PILOT.left, right: PILOT.right, up: PILOT.up, down: PILOT.down, dig: PILOT.dig, place: PILOT.place,
+};
+
+/**
+ * Commandes tirées des touches tenues, ou null si elles n'ont pas changé.
+ * main.ts les envoie par `gesture()` : c'est un geste comme un coup de
+ * pinceau, que le rejeu enregistre et qu'un invité de salon relaie à l'hôte.
+ */
+export function pilot(): number | null {
+  let keys = 0;
+  if (hero) for (const action of held.values()) keys |= STEER[action] ?? 0;
+  if (keys & PILOT.place) keys |= current << 8;
+  if (keys === piloted) return null;
+  piloted = keys;
+  return keys;
+}
+
+/** Décroche la caméra du héros, s'il y en a un et qu'elle ne l'était pas ; dit si elle vient de l'être. */
+export function loosen(): boolean {
+  if (!hero || loose) return false;
+  loose = true;
+  return true;
+}
+
+/** Raccroche la caméra au héros, s'il y en a un et qu'elle était décrochée ; dit si elle vient de l'être. */
+export function tighten(): boolean {
+  if (!hero || !loose) return false;
+  loose = false;
+  return true;
+}
+
+/** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large) et la barre de statut donne les touches. */
+function meet(): void {
+  loose = false;
+  if (zoomInput.checked && zoom < WIDTH / 160) zoomCentered(WIDTH / 160);
+  const k = (a: Action) => keyLabel(bindings[a]);
+  statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
+}
+
+/**
+ * Relève la position du héros apportée par une frame : l'accueille s'il
+ * vient d'apparaître, annonce sa mort s'il vient de disparaître. Rend vrai
+ * dans ce dernier cas : ses commandes tenues sont à relâcher (`pilot()`).
+ */
+export function track(next: [number, number] | null): boolean {
+  const was = hero;
+  hero = next;
+  if (hero && !was) meet();
+  if (hero || !was) return false;
+  statusEl.textContent = "Le héros n'a pas survécu. Un autre : Vivant → Héros, ou un nouveau monde.";
+  return true;
+}
+
+/** Les vues que V fait défiler : de côté, de côté avec l'encadré de ce que voit le héros, à la première personne. */
+const VIEWS = ["side", "inset", "eyes"] as const;
+const VIEW_NAMES = ["de côté", "de côté, avec ce que voit le héros", "à la première personne"];
+let view = 0;
+const sightEl = document.querySelector<HTMLCanvasElement>("#sight")!;
+const sightCtx = sightEl.getContext("2d")!;
+const sightImg = sightCtx.createImageData(1, sightEl.height);
+
+/** Passe à la vue suivante et la nomme dans la barre de statut. */
+export function nextView(): void {
+  view = (view + 1) % VIEWS.length;
+  sightEl.dataset.view = VIEWS[view];
+  statusEl.textContent = `Vue ${VIEW_NAMES[view]}${hero ? "" : " — elle attend un héros (Vivant → Héros)"}. ${keyLabel(bindings.view)} pour changer.`;
+}
+
+/**
+ * Redessine ce que voit le héros, s'il y en a un et que la vue le montre. Son
+ * sens se lit dans le `life` de son cœur (bit 7 = tourné vers la gauche, voir
+ * engine.ts) : le miroir le porte déjà, la frame n'a rien à ajouter.
+ */
+export function gaze(): void {
+  const grid = seen();
+  if (!hero || !grid || view === 0) { sightEl.hidden = true; return; }
+  sightEl.hidden = false;
+  const [x, y] = hero;
+  const face = grid.life[y * grid.width + x] & 128 ? -1 : 1;
+  look(grid.cells, grid.width, grid.height, x, y, face, sightImg.data);
+  sightCtx.putImageData(sightImg, 0, 0);
+}

@@ -1,17 +1,17 @@
 import "./style.css";
-import { EMPTY, MAGNET, MATERIALS, PILOT, SHORTCUTS, SWITCH, type MaterialId } from "./sim/materials.ts";
+import { EMPTY, MAGNET, MATERIALS, SHORTCUTS, SWITCH, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
-import { combo, keyLabel, keyOf, read, stored, write, type Action } from "./ui.ts";
-import { bindings, bound, held, openSettings } from "./keys.ts";
+import { combo, keyOf, read, stored, write, type Action } from "./ui.ts";
+import { bound, held, openSettings } from "./keys.ts";
 import { MOVES, follow, panBy, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
 import { current, emit, select } from "./palette.ts";
 import { brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, toolInput } from "./settings.ts";
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
-import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, order, present, seen, set, type ClipData } from "./world.ts";
-import { look } from "./sight.ts";
+import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, order, present, set, type ClipData } from "./world.ts";
+import { STEER, gaze, hero, loose, loosen, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
 /**
@@ -178,73 +178,10 @@ addEventListener("blur", () => { held.clear(); steer(); });
 
 /* ------------------------------------------------------------------ héros */
 
-/** Position du héros dans la dernière frame, en cellules ; null sans héros. Avec lui, les touches le pilotent et la caméra le suit. */
-let hero: [number, number] | null = null;
-/**
- * Caméra décrochée du héros : elle reste où on l'a mise, le héros vit sa vie
- * hors champ. Glisser au clic du milieu la décroche (sans ça, la vue revient
- * sur lui à l'image suivante et on ne peut rien regarder d'autre) ; un clic du
- * milieu sans bouger la raccroche.
- */
-let loose = false;
-/** Commandes envoyées en dernier (bits de `PILOT`) : un geste ne part que quand elles changent. */
-let piloted = 0;
-
-/** Actions du héros : celles de la caméra, plus creuser devant lui et poser. */
-const STEER: Partial<Record<Action, number>> = {
-  left: PILOT.left, right: PILOT.right, up: PILOT.up, down: PILOT.down, dig: PILOT.dig, place: PILOT.place,
-};
-
-/**
- * Commandes tirées des touches tenues, envoyées par `gesture()` si elles ont
- * changé : c'est un geste comme un coup de pinceau, que le rejeu enregistre et
- * qu'un invité de salon relaie à l'hôte.
- */
+/** Envoie les commandes du héros si les touches tenues les ont changées (`pilot()` de hero.ts). */
 function steer(): void {
-  let keys = 0;
-  if (hero) for (const action of held.values()) keys |= STEER[action] ?? 0;
-  if (keys & PILOT.place) keys |= current << 8;
-  if (keys === piloted) return;
-  piloted = keys;
-  gesture({ t: "pilot", keys });
-}
-
-/** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large) et la barre de statut donne les touches. */
-function meet(): void {
-  loose = false;
-  if (zoomInput.checked && zoom < WIDTH / 160) zoomCentered(WIDTH / 160);
-  const k = (a: Action) => keyLabel(bindings[a]);
-  statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
-}
-
-/** Les vues que V fait défiler : de côté, de côté avec l'encadré de ce que voit le héros, à la première personne. */
-const VIEWS = ["side", "inset", "eyes"] as const;
-const VIEW_NAMES = ["de côté", "de côté, avec ce que voit le héros", "à la première personne"];
-let view = 0;
-const sightEl = document.querySelector<HTMLCanvasElement>("#sight")!;
-const sightCtx = sightEl.getContext("2d")!;
-const sightImg = sightCtx.createImageData(1, sightEl.height);
-
-/** Passe à la vue suivante et la nomme dans la barre de statut. */
-function nextView(): void {
-  view = (view + 1) % VIEWS.length;
-  sightEl.dataset.view = VIEWS[view];
-  statusEl.textContent = `Vue ${VIEW_NAMES[view]}${hero ? "" : " — elle attend un héros (Vivant → Héros)"}. ${keyLabel(bindings.view)} pour changer.`;
-}
-
-/**
- * Redessine ce que voit le héros, s'il y en a un et que la vue le montre. Son
- * sens se lit dans le `life` de son cœur (bit 7 = tourné vers la gauche, voir
- * engine.ts) : le miroir le porte déjà, la frame n'a rien à ajouter.
- */
-function gaze(): void {
-  const grid = seen();
-  if (!hero || !grid || view === 0) { sightEl.hidden = true; return; }
-  sightEl.hidden = false;
-  const [x, y] = hero;
-  const face = grid.life[y * grid.width + x] & 128 ? -1 : 1;
-  look(grid.cells, grid.width, grid.height, x, y, face, sightImg.data);
-  sightCtx.putImageData(sightImg, 0, 0);
+  const keys = pilot();
+  if (keys !== null) gesture({ t: "pilot", keys });
 }
 
 // Pincement : la molette n'existe pas sur mobile, tout le reste y marche déjà.
@@ -381,7 +318,7 @@ canvas.addEventListener("pointermove", (e) => {
       const now = span();
       // Le milieu des doigts déplace la vue, leur écartement la zoome autour de
       // ce même milieu : un seul geste pour les deux.
-      loose ||= hero !== null; // au doigt aussi, déplacer la vue la décroche du héros
+      loosen(); // au doigt aussi, déplacer la vue la décroche du héros
       panBy(now.x - pinch.x, now.y - pinch.y);
       zoomAt(now.x, now.y, zoom * (now.gap / pinch.gap));
       pinch = now;
@@ -390,8 +327,7 @@ canvas.addEventListener("pointermove", (e) => {
   }
   if (panning) {
     panned += Math.abs(e.movementX) + Math.abs(e.movementY);
-    if (hero && !loose && panned >= CLICK) {
-      loose = true;
+    if (panned >= CLICK && loosen()) {
       statusEl.textContent = "Caméra décrochée du héros — clic du milieu sans bouger pour la raccrocher.";
     }
     panBy(e.movementX, e.movementY);
@@ -428,8 +364,7 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
     }
     painting = false;
     // Clic du milieu sans glisser : raccroche la caméra au héros.
-    if (panning && type === "pointerup" && panned < CLICK && hero && loose) {
-      loose = false;
+    if (panning && type === "pointerup" && panned < CLICK && tighten()) {
       statusEl.textContent = "Caméra raccrochée au héros.";
     }
     panning = false;
@@ -800,13 +735,7 @@ listen((news) => {
       probeEl.textContent = news.probe
         ? `${MATERIALS[news.probe[0]].name} · ${Math.round(news.probe[1])} °C`
         : "–";
-      const was = hero;
-      hero = news.hero;
-      if (hero && !was) meet();
-      if (!hero && was) {
-        statusEl.textContent = "Le héros n'a pas survécu. Un autre : Vivant → Héros, ou un nouveau monde.";
-        steer();
-      }
+      if (track(news.hero)) steer();
       return;
     }
     case "stats":

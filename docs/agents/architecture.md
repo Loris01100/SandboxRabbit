@@ -9,7 +9,7 @@ la simulation est dans [simulation.md](simulation.md).
 flowchart LR
   subgraph Navigateur
     direction TB
-    page["Fil principal<br/>main.ts, view.ts, keys.ts, palette.ts, settings.ts, room.ts, share.ts, theme.ts<br/>(DOM, souris, panneau)"]
+    page["Fil principal<br/>main.ts, view.ts, keys.ts, palette.ts, settings.ts, hero.ts, room.ts, share.ts, theme.ts<br/>(DOM, souris, panneau)"]
     world["world.ts<br/>order() / listen()"]
     sim["Web Worker : sim/worker.ts<br/>→ Sandbox (sim/sandbox.ts)<br/>→ Engine + Renderer"]
     page --> world
@@ -45,7 +45,7 @@ flowchart LR
    dans screen.ts) ; au repos, rien n'arrive et rien n'est recalculé.
    L'heure (menu « Heure », `hour()` de world.ts, teintes `HOURS` de
    render.ts) aussi : un `vec3 tint` du shader, tout recolorié quand elle
-   change — une fois par seconde en mode « Cycle » (`setInterval` de main.ts),
+   change — une fois par seconde en mode « Cycle » (`setInterval` de settings.ts),
    qui avance aussi l'horloge `#clock` de la barre du haut (`CLOCK`, `clockAt()`).
 2. **Le Web Worker de simulation** ([sim/worker.ts](../../src/client/sim/worker.ts))
    héberge `Sandbox`, qui possède l'`Engine` et le `Tracker`. Quand la page
@@ -127,7 +127,8 @@ Une créature de taille fixe (le lapin) passe par le même `paint`, mais
 continu), et `paint()` côté moteur en pose une entière quel que soit le rayon
 reçu : un pair de salon ne peut pas en semer un disque.
 
-Les commandes du héros suivent le même chemin : `steer()` de main.ts envoie un
+Les commandes du héros suivent le même chemin : `steer()` de main.ts envoie,
+quand `pilot()` de hero.ts les voit changer, un
 geste `{t:"pilot", keys}` (bits de `PILOT`, plus la matière choisie en bits
 8-15 quand R est tenu) chaque fois que les touches tenues changent — jamais à
 chaque image. Le rejeu l'enregistre, l'hôte d'un salon le reçoit d'un invité ;
@@ -135,11 +136,11 @@ chaque image. Le rejeu l'enregistre, l'hôte d'un salon le reçoit d'un invité 
 l'accepte. Changer de matière R tenu ne renvoie rien : la nouvelle part au
 prochain changement de touches. Quand la frame porte un héros (`hero`), les
 touches de direction, de creusage et de pose le pilotent au lieu de déplacer la vue,
-et `follow()` recentre la caméra sur lui à chaque image (un cinquième du
+et `follow()` (view.ts) recentre la caméra sur lui à chaque image (un cinquième du
 chemin, bornes comprises). À son apparition la vue zoome à ~160 cellules de
-large (`meet()`). Glisser au clic du milieu (ou pincer) passe `loose` à vrai :
+large (`meet()` de hero.ts, appelé par `track()` à chaque frame). Glisser au clic du milieu (ou pincer) passe `loose` à vrai (`loosen()`) :
 `follow()` ne tourne plus, la vue reste où on l'a mise ; un clic du milieu
-sans bouger (moins de `CLICK` pixels) la raccroche, et `meet()` aussi.
+sans bouger (moins de `CLICK` pixels) la raccroche (`tighten()`), et `meet()` aussi.
 
 ### Clavier réassignable
 
@@ -169,7 +170,7 @@ touche prise par une autre action s'échange avec elle (`rebind()`) ; Tab,
 Entrée, Échap et les modificateurs seuls (`RESERVED`) sont refusés. Un
 écouteur en capture prend la touche attendue avant tout le reste.
 
-V fait défiler trois vues (`VIEWS` de main.ts) : de côté, de côté avec
+V fait défiler trois vues (`VIEWS` de hero.ts) : de côté, de côté avec
 l'encadré de ce que voit le héros, à la première personne. Les deux dernières
 dessinent dans le canvas `#sight`, posé sur le bac : `gaze()` appelle, à
 chaque image, `look()` de [sight.ts](../../src/client/sight.ts) sur le miroir
@@ -303,7 +304,8 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
-| [main.ts](../../src/client/main.ts) | souris, raccourcis, héros, défis, rejeu, chargement du bac, boucle rAF, câblage de tout le DOM | non |
+| [main.ts](../../src/client/main.ts) | souris, raccourcis, défis, rejeu, chargement du bac, boucle rAF, câblage de tout le DOM | non |
+| [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`hero`, relevée par `track()`), caméra décrochée (`loose`), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
 | [palette.ts](../../src/client/palette.ts) | palette des matières et six récentes ; `select()`, qui tient `current` et `emit` (matière des sources) | non |
 | [settings.ts](../../src/client/settings.ts) | contrôles du panneau (pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage) et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
 | [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan` | non |
@@ -350,7 +352,7 @@ kilo-octets de lien ne se déplient pas en gigaoctets. Le rejeu validé part au
 bac par `watch()` (rappel passé à `initShare()`) : ordre `reel`, puis lecture
 comme au bouton « Rejouer », taille du bac ajustée (`fit()`).
 
-Les modules périphériques (`room`, `share`, `theme`, `view`, `keys`, `palette`, `settings`) ne doivent **pas**
+Les modules périphériques (`room`, `share`, `theme`, `view`, `keys`, `palette`, `settings`, `hero`) ne doivent **pas**
 importer main.ts (cycle) : main.ts leur passe ce dont ils ont besoin par un
 `init…()` à rappels.
 
