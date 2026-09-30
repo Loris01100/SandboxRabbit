@@ -9,7 +9,7 @@ la simulation est dans [simulation.md](simulation.md).
 flowchart LR
   subgraph Navigateur
     direction TB
-    page["Fil principal<br/>main.ts, room.ts, share.ts, theme.ts<br/>(DOM, souris, panneau)"]
+    page["Fil principal<br/>main.ts, view.ts, keys.ts, room.ts, share.ts, theme.ts<br/>(DOM, souris, panneau)"]
     world["world.ts<br/>order() / listen()"]
     sim["Web Worker : sim/worker.ts<br/>→ Sandbox (sim/sandbox.ts)<br/>→ Engine + Renderer"]
     page --> world
@@ -146,7 +146,7 @@ sans bouger (moins de `CLICK` pixels) la raccroche, et `meet()` aussi.
 **Tous** les raccourcis clavier sont des actions (`ACTIONS` d'ui.ts),
 réassignables dans l'onglet Raccourcis de la fenêtre Paramètres (`#settings`,
 bouton ⚙ ; la touche `help`, `?` d'origine, l'ouvre sur cet onglet par
-`openSettings()` de main.ts). Il est rangé en encadrés
+`openSettings()` de keys.ts). Il est rangé en encadrés
 calqués sur les sections du panneau (`KEY_GROUPS` d'ui.ts : Matière,
 Pinceau, Simulation, Physique du monde, Défis, Mondes, Héros et vue), chacun
 avec ses gestes de souris, fixes ; un menu d'onglets (`#keys-menu`) en montre
@@ -303,7 +303,9 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
-| [main.ts](../../src/client/main.ts) | palette, souris, zoom et caméra (bornes par `clampPan`, ZQSD / WASD / flèches tenues, `+` / `-`), réglages, défis, boucle rAF, câblage de tout le DOM | non |
+| [main.ts](../../src/client/main.ts) | palette, souris, héros, réglages, défis, boucle rAF, câblage de tout le DOM | non |
+| [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan` | non |
+| [keys.ts](../../src/client/keys.ts) | touches réassignables (`bindings`, `bound`), touches tenues (`held`), fenêtre Paramètres (`openSettings()`, onglet Raccourcis) | non |
 | [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille (lu par `seen()`) | non |
 | [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, secours 2D par `Renderer` (sans éclairage) | non |
 | [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence, touches réassignables), accès `localStorage` tolérant | **oui** (test/ui.ts) |
@@ -314,7 +316,7 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
 | [room.ts](../../src/client/room.ts) | salon côté navigateur | non |
 | [share.ts](../../src/client/share.ts) | galerie, PNG, vidéo, lien ; export / import du rejeu | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
-| [theme.ts](../../src/client/theme.ts) | thème Système / Jour / Nuit, onglet Général de la fenêtre Paramètres (onglets câblés dans main.ts) | non |
+| [theme.ts](../../src/client/theme.ts) | thème Système / Jour / Nuit, onglet Général de la fenêtre Paramètres (onglets câblés dans keys.ts) | non |
 | [sim/*](../../src/client/sim/) | moteur, rendu, codec, registre, bac | **oui** |
 
 ### Galerie et mondes-défis
@@ -346,7 +348,7 @@ kilo-octets de lien ne se déplient pas en gigaoctets. Le rejeu validé part au
 bac par `watch()` (rappel passé à `initShare()`) : ordre `reel`, puis lecture
 comme au bouton « Rejouer », taille du bac ajustée (`fit()`).
 
-Les modules périphériques (`room`, `share`, `theme`) ne doivent **pas**
+Les modules périphériques (`room`, `share`, `theme`, `view`, `keys`) ne doivent **pas**
 importer main.ts (cycle) : main.ts leur passe ce dont ils ont besoin par un
 `init…()` à rappels.
 

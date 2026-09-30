@@ -2,11 +2,13 @@ import "./style.css";
 import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PILOT, SAND, SHORTCUTS, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
-import { KEY_GROUPS, clampPan, combo, keyLabel, keymap, keyOf, panAfterZoom, parseBindings, pushRecent, read, rebind, forget, write, type Action } from "./ui.ts";
+import { combo, keyLabel, keyOf, pushRecent, read, write, type Action } from "./ui.ts";
+import { bindings, bound, held, openSettings } from "./keys.ts";
+import { MOVES, follow, panBy, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
-import { HEIGHT, WIDTH, askClip, askLoad, canvas, hour, latestGrid, light, listen, onResize, order, present, resize, screen, seen, type ClipData } from "./world.ts";
+import { HEIGHT, WIDTH, askClip, askLoad, canvas, hour, latestGrid, light, listen, order, present, resize, screen, seen, type ClipData } from "./world.ts";
 import { look } from "./sight.ts";
 import type { Knobs } from "./sim/sandbox.ts";
 import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
@@ -163,8 +165,7 @@ addEventListener("keydown", (e) => {
       return;
     case "zoomIn": case "zoomOut": {
       if (!zoomInput.checked) return;
-      const r = canvas.getBoundingClientRect();
-      zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(zoom * (action === "zoomIn" ? 1.5 : 1 / 1.5)));
+      zoomCentered(zoom * (action === "zoomIn" ? 1.5 : 1 / 1.5));
       return;
     }
     // Taille du pinceau : le réglage le plus repris, et il fallait redéplier son
@@ -185,26 +186,6 @@ addEventListener("keydown", (e) => {
     case "gallery": document.querySelector<HTMLButtonElement>("#gallery-open")!.click(); return;
   }
 });
-
-/* -------------------------------------------------------------- raccourcis */
-
-// Le pense-bête vit dans l'onglet Raccourcis des paramètres : le clavier se
-// remplit depuis `bindings` (`listBindings()`) — une touche changée ne laisse
-// pas une aide qui ment.
-const settingsEl = document.querySelector<HTMLDialogElement>("#settings")!;
-const settingsTabs = settingsEl.querySelectorAll<HTMLButtonElement>("[data-tab]");
-
-/** Ouvre les paramètres (si fermés) sur la section `tab`, id d'une <section>. */
-function openSettings(tab: string): void {
-  for (const button of settingsTabs) {
-    button.setAttribute("aria-pressed", String(button.dataset.tab === tab));
-    document.getElementById(button.dataset.tab!)!.hidden = button.dataset.tab !== tab;
-  }
-  if (!settingsEl.open) settingsEl.showModal();
-}
-
-for (const button of settingsTabs) button.addEventListener("click", () => openSettings(button.dataset.tab!));
-document.querySelector<HTMLButtonElement>("#settings-open")!.addEventListener("click", () => openSettings("settings-general"));
 
 /* ------------------------------------------------------------------ souris */
 
@@ -267,55 +248,10 @@ function showMarquee(a: { x: number; y: number }, b: { x: number; y: number }): 
 
 /* ------------------------------------------------------------- vue (zoom) */
 
-// Le canvas est transformé en CSS : `toCell()` passe par `getBoundingClientRect()`,
-// qui tient déjà compte du zoom et du décalage — rien à corriger ailleurs.
-let zoom = 1;
-let panX = 0;
-let panY = 0;
 let panning = false;
 /** Pixels parcourus depuis l'appui du milieu : sous `CLICK`, c'est un clic, pas un glisser. */
 let panned = 0;
 const CLICK = 4;
-
-/**
- * Pose la transformation du canvas, décalage ramené dans ses bornes
- * (`clampPan`) : quel que soit le geste — molette, glisser, pincement,
- * clavier — le bac agrandi recouvre son cadre. `offsetWidth` est la taille
- * du canvas avant transformation, le cadre lui-même.
- */
-function applyView(): void {
-  panX = clampPan(panX, canvas.offsetWidth, zoom);
-  panY = clampPan(panY, canvas.offsetHeight, zoom);
-  canvas.style.transformOrigin = "0 0";
-  canvas.style.transform = zoom === 1 ? "" : `translate(${panX}px, ${panY}px) scale(${zoom})`;
-}
-
-/** Touches choisies par le joueur (fenêtre des raccourcis), gardées d'une visite à l'autre. */
-const KEYS = "sandbox-rabbit:touches";
-let bindings = parseBindings(read(KEYS));
-/** De la touche à l'action, refait à chaque changement de `bindings`. */
-let bound = keymap(bindings);
-
-/** Actions de caméra, en sens de déplacement de la vue. */
-const MOVES: Partial<Record<Action, [number, number]>> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
-/**
- * Touches de direction, de creusage ou de pose tenues, avec l'action qu'elles
- * portaient à l'appui : relâchée avec ou sans Ctrl, la touche se retrouve.
- */
-const held = new Map<string, Action>();
-
-/**
- * Fait glisser la vue selon les touches tenues : un quatre-vingt-dixième du
- * cadre par image, soit un cadre et demi par seconde, quel que soit le zoom.
- */
-function scroll(): void {
-  let dx = 0, dy = 0;
-  for (const action of held.values()) { const m = MOVES[action] ?? [0, 0]; dx += m[0]; dy += m[1]; }
-  const step = canvas.offsetWidth / 90;
-  panX -= Math.sign(dx) * step;
-  panY -= Math.sign(dy) * step;
-  applyView();
-}
 
 /**
  * Action de caméra — ou de héros — de l'événement, ou null. Une lettre compte
@@ -370,26 +306,10 @@ function steer(): void {
   gesture({ t: "pilot", keys });
 }
 
-/**
- * Rapproche la vue du héros d'un cinquième du chemin par image : elle le suit
- * sans sauter d'une cellule à chaque pas, et `applyView` la garde dans ses
- * bornes près des bords du monde.
- */
-function follow(): void {
-  if (!hero || zoom === 1) return;
-  const w = canvas.offsetWidth, h = canvas.offsetHeight;
-  panX += (w / 2 - ((hero[0] + 0.5) / WIDTH) * w * zoom - panX) * 0.2;
-  panY += (h / 2 - ((hero[1] + 0.5) / HEIGHT) * h * zoom - panY) * 0.2;
-  applyView();
-}
-
 /** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large) et la barre de statut donne les touches. */
 function meet(): void {
   loose = false;
-  if (zoomInput.checked && zoom < WIDTH / 160) {
-    const r = canvas.getBoundingClientRect();
-    zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(WIDTH / 160));
-  }
+  if (zoomInput.checked && zoom < WIDTH / 160) zoomCentered(WIDTH / 160);
   const k = (a: Action) => keyLabel(bindings[a]);
   statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
 }
@@ -424,144 +344,6 @@ function gaze(): void {
   sightCtx.putImageData(sightImg, 0, 0);
 }
 
-/** Ce que fait chaque action, pour la liste des touches de la fenêtre des raccourcis. Les matières se nomment depuis `SHORTCUTS`. */
-const ACTION_NAMES: Record<Action, string> = {
-  pause: "Mettre en pause ou reprendre",
-  mat1: "", mat2: "", mat3: "", mat4: "", mat5: "", mat6: "", mat7: "", mat8: "", mat9: "",
-  eraser: "Gomme",
-  brushDown: "Pinceau plus fin",
-  brushUp: "Pinceau plus large",
-  gravity: "Inverser la gravité",
-  freeze: "Passer de Peindre à Figer",
-  heat: "Vue thermique",
-  undo: "Annuler",
-  redo: "Rétablir (aussi Ctrl+Maj+Z)",
-  paste: "Reposer le morceau copié, centré sur le curseur",
-  zoomIn: "Zoomer (au centre), si le zoom est actif",
-  zoomOut: "Dézoomer (au centre), si le zoom est actif",
-  help: "Cet onglet des paramètres",
-  step: "Avancer d'un pas (bac en pause)",
-  terrain: "Nouveau monde généré",
-  surprise: "Un décor tiré au sort",
-  full: "Plein écran",
-  clear: "Vider le bac",
-  retry: "Recommencer le dernier défi lancé",
-  save: "Sauvegarder le monde dans la galerie",
-  gallery: "Ouvrir la galerie",
-  left: "Vue ou héros vers la gauche",
-  right: "Vue ou héros vers la droite",
-  up: "Vue vers le haut · le héros saute (et nage)",
-  down: "Vue vers le bas · le héros creuse dessous",
-  dig: "Le héros creuse devant lui",
-  place: "Le héros pose la matière choisie devant ses pieds — saut tenu, sous lui. Solides seulement, ni nanites, étincelle, braise ni source",
-  view: "Vue du héros : de côté, avec l'encadré de ce qu'il voit, ou à la première personne",
-};
-const bindingsEl = document.querySelector<HTMLDivElement>("#bindings")!;
-const keysMenuEl = document.querySelector<HTMLElement>("#keys-menu")!;
-/** L'action qui attend sa nouvelle touche, ou null. */
-let waiting: Action | null = null;
-/** L'encadré ouvert dans la fenêtre des raccourcis (index dans `KEY_GROUPS`). */
-let shownGroup = 0;
-
-/**
- * Remplit la fenêtre des raccourcis : un menu d'onglets, un par encadré de
- * `KEY_GROUPS`, et les encadrés — tous posés, un seul visible, pour qu'ils
- * aient la taille du plus grand et que la fenêtre ne saute pas d'un onglet à
- * l'autre. Un bouton par action, qu'on clique puis
- * qui prend la combinaison suivante (Ctrl, Alt, Maj n'attendent que leur
- * touche), puis les gestes de souris. Échap annule ; une touche déjà prise par
- * une autre action s'échange avec elle, une touche réservée (Tab, Entrée, Maj
- * seule…) est refusée.
- */
-function listBindings(): void {
-  keysMenuEl.replaceChildren(...KEY_GROUPS.map((group, n) => {
-    const tab = document.createElement("button");
-    tab.type = "button";
-    tab.textContent = group.name;
-    tab.setAttribute("aria-pressed", String(n === shownGroup));
-    tab.addEventListener("click", () => { shownGroup = n; waiting = null; listBindings(); });
-    return tab;
-  }));
-  bindingsEl.replaceChildren(...KEY_GROUPS.map((group, n) => {
-    const section = document.createElement("section");
-    section.classList.toggle("shown", n === shownGroup);
-    const title = document.createElement("h3");
-    title.textContent = group.name;
-    const list = document.createElement("dl");
-    list.className = "keys";
-    for (const action of group.actions) {
-      const dt = document.createElement("dt");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.dataset.action = action;
-      button.textContent = waiting === action ? "Touche ?" : keyLabel(bindings[action]);
-      button.addEventListener("click", () => { waiting = action; listBindings(); });
-      dt.append(button);
-      const dd = document.createElement("dd");
-      dd.textContent = action.startsWith("mat") ? `Matière : ${MATERIALS[SHORTCUTS[Number(action.slice(3)) - 1]].name}` : ACTION_NAMES[action];
-      list.append(dt, dd);
-    }
-    for (const [gesture, effect] of group.mouse) {
-      const dt = document.createElement("dt");
-      dt.textContent = gesture;
-      const dd = document.createElement("dd");
-      dd.textContent = effect;
-      list.append(dt, dd);
-    }
-    section.append(title, list);
-    return section;
-  }));
-}
-
-/** Retient de nouvelles touches (null : celles d'origine) et les applique tout de suite. */
-function setBindings(next: typeof bindings | null): void {
-  bindings = next ?? parseBindings(null);
-  bound = keymap(bindings);
-  held.clear();
-  if (next) write(KEYS, JSON.stringify(next)); else forget(KEYS);
-  waiting = null;
-  listBindings();
-}
-
-addEventListener("keydown", (e) => {
-  if (!waiting || ["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
-  if (e.key === "Escape") { waiting = null; listBindings(); return; }
-  const next = rebind(bindings, waiting, combo(e));
-  if (next) setBindings(next);
-  else bindingsEl.querySelector<HTMLButtonElement>(`[data-action="${waiting}"]`)!.textContent = "Pas celle-ci — une autre ?";
-}, true);
-
-document.querySelector<HTMLButtonElement>("#bindings-reset")!.addEventListener("click", () => setBindings(null));
-settingsEl.addEventListener("close", () => { waiting = null; listBindings(); });
-listBindings();
-
-/** Zoome autour d'un point de l'écran, qui ne bouge pas (math dans ui.ts). */
-function zoomAt(clientX: number, clientY: number, next: number): void {
-  const r = canvas.getBoundingClientRect();
-  panX = panAfterZoom(clientX, r.left, r.width, panX, zoom, next);
-  panY = panAfterZoom(clientY, r.top, r.height, panY, zoom, next);
-  zoom = next;
-  if (zoom === 1) { panX = 0; panY = 0; }
-  applyView();
-}
-
-const clampZoom = (z: number): number => Math.min(12, Math.max(1, z));
-
-// Le zoom se coupe : sans lui la molette rend la main à la page, et un bac
-// laissé agrandi ne piège personne — on le remet d'aplomb en décochant.
-const zoomInput = document.querySelector<HTMLInputElement>("#zoom")!;
-zoomInput.addEventListener("change", () => {
-  if (!zoomInput.checked) zoomAt(0, 0, 1);
-});
-
-canvas.addEventListener("wheel", (e) => {
-  if (!zoomInput.checked) return; // pas de preventDefault : la page défile
-  e.preventDefault();
-  zoomAt(e.clientX, e.clientY, clampZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
-}, { passive: false });
-
 // Pincement : la molette n'existe pas sur mobile, tout le reste y marche déjà.
 // Deux doigts posés = on ne peint plus, on manipule la vue (zoom + déplacement).
 const touches = new Map<number, { x: number; y: number }>();
@@ -572,10 +354,6 @@ function span(): { gap: number; x: number; y: number } {
   const [a, b] = [...touches.values()];
   return { gap: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
-
-// Clic du milieu : déplacer la vue. `translate` précède `scale`, donc un pixel
-// de souris vaut un pixel d'écran, quel que soit le zoom.
-canvas.addEventListener("auxclick", (e) => e.preventDefault());
 
 import { type Gesture } from "./gestures.ts";
 
@@ -700,24 +478,20 @@ canvas.addEventListener("pointermove", (e) => {
       const now = span();
       // Le milieu des doigts déplace la vue, leur écartement la zoome autour de
       // ce même milieu : un seul geste pour les deux.
-      panX += now.x - pinch.x;
-      panY += now.y - pinch.y;
       loose ||= hero !== null; // au doigt aussi, déplacer la vue la décroche du héros
-      applyView();
-      zoomAt(now.x, now.y, clampZoom(zoom * (now.gap / pinch.gap)));
+      panBy(now.x - pinch.x, now.y - pinch.y);
+      zoomAt(now.x, now.y, zoom * (now.gap / pinch.gap));
       pinch = now;
       return;
     }
   }
   if (panning) {
-    panX += e.movementX;
-    panY += e.movementY;
     panned += Math.abs(e.movementX) + Math.abs(e.movementY);
     if (hero && !loose && panned >= CLICK) {
       loose = true;
       statusEl.textContent = "Caméra décrochée du héros — clic du milieu sans bouger pour la raccrocher.";
     }
-    applyView();
+    panBy(e.movementX, e.movementY);
     return;
   }
   const at = toCell(e);
@@ -815,17 +589,6 @@ const ambientValue = document.querySelector<HTMLOutputElement>("#ambient-value")
 ambientInput.addEventListener("input", () => {
   set({ ambient: Number(ambientInput.value) });
   ambientValue.value = `${ambientInput.value} °C`;
-});
-
-// Redimensionner invalide les piles d'annulation (leurs tableaux n'ont plus la
-// bonne longueur) et remet la vue d'aplomb.
-// Redimensionner remet la vue d'aplomb. Les crans d'annulation et
-// l'enregistrement en cours, eux, sont vidés par le bac lui-même.
-onResize.push(() => {
-  zoom = 1;
-  panX = 0;
-  panY = 0;
-  applyView();
 });
 
 const sizeInput = document.querySelector<HTMLSelectElement>("#size")!;
@@ -1237,7 +1000,7 @@ function frame(now: number): void {
   // affichait 60 fps même quand le Worker n'en livrait que 30.
   // Avec un héros, les touches le pilotent : même décrochée, la vue ne glisse
   // qu'à la souris.
-  if (hero) { if (!loose) follow(); }
+  if (hero) { if (!loose) follow(hero); }
   else if (held.size > 0) scroll();
   if (present()) frames++;
   gaze();

@@ -145,7 +145,7 @@ Tout raccourci clavier est une **action réassignable** :
 1. Son nom dans `ACTIONS` et sa touche dans `DEFAULT_BINDINGS`
    ([ui.ts](../../src/client/ui.ts)). Une combinaison s'écrit `Ctrl+z`
    (`combo()` : Cmd vaut Ctrl, Maj ne compte qu'avec Ctrl ou Alt).
-2. Son libellé dans `ACTION_NAMES` (main.ts), et l'action dans l'encadré qui
+2. Son libellé dans `ACTION_NAMES` (ui.ts), et l'action dans l'encadré qui
    lui correspond de `KEY_GROUPS` (ui.ts) : la ligne de la fenêtre des
    raccourcis se fait seule, avec le bouton pour la changer. test/ui.ts
    vérifie qu'elle n'est oubliée dans aucun encadré et que sa touche
@@ -153,7 +153,7 @@ Tout raccourci clavier est une **action réassignable** :
 3. Son `case` dans le `switch` du gestionnaire `keydown` de main.ts, qui lit
    `bound[combo(e)]` — jamais `e.key` directement, sinon la touche ne se
    réassigne pas. Une action tenue (qui agit tant que la touche l'est) va
-   plutôt dans `MOVES` ou `STEER`.
+   plutôt dans `MOVES` (view.ts) ou `STEER` (main.ts).
 4. Un assert dans [test/ui.ts](../../test/ui.ts) si la touche d'origine a une
    subtilité (combinaison, conflit).
 
