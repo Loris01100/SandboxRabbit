@@ -44,7 +44,7 @@ mondes partagés, bac multijoueur.
 | Vue thermique | Case à cocher ou touche `h` : affiche `temp` au lieu de la matière, bleu pour le froid, corps noir jusqu'au blanc à 1200 °C. |
 | Éclairage | Case à cocher, active par défaut : le feu, la lave, les braises, l'uranium et tout ce qui dépasse 450 °C éclairent le bac ; la pierre fait de l'ombre, l'eau atténue, le verre laisse passer. Éclairage global en *radiance cascades*, calculé par la carte graphique à chaque frame (WebGL2 seulement). |
 | Lumière | Ce qui est chaud éclaire ce qui l'entoure. Aucun flou à calculer : `temp` est déjà diffusé par le moteur, donc l'air autour d'une flamme est chaud — le halo est un sous-produit de la thermique. |
-| Vitesse | Curseur ×0,25 à ×4 : nombre de ticks de simulation par frame, avec reliquat pour le ralenti et plafond à 8 ticks pour ne pas s'enliser. Quand le bac est trop chargé pour tenir la vitesse demandée, celle qu'il atteint s'affiche à côté (« ×4 → ×1,3 »). |
+| Vitesse | Curseur ×0,25 à ×4 : nombre de ticks de simulation par frame, avec reliquat pour le ralenti et plafond à 8 ticks pour ne pas s'enliser. |
 | Vent & gravité | Un curseur biaise la dérive horizontale, la touche `g` retourne la gravité. |
 | Température ambiante | Un curseur de -40 à 90 °C : c'est la température vers laquelle tout le bac retourne (`COOLING`). À -5 °C un lac gèle tout seul, à 90 °C plus rien ne prend. Le climat de la scène, en un réglage. |
 | Ciment | Liquide qui prend en pierre à 60 °C : on le coule dans un moule et on le chauffe. Bâtir devient un geste de simulation, pas un coup de pinceau. Zéro ligne dans le moteur, juste un `boil`. |

@@ -91,7 +91,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
 | `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,noise?}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y]` ou `null` (la caméra le suit) |
-| `stats` | 2 × / s | nombre de cellules pleines ; `pace`, la vitesse atteinte (ticks joués par 60e de seconde, bac en marche) ou `null` en pause et chez un invité — main.ts l'affiche à côté du curseur quand elle reste sous 90 % de la vitesse demandée |
+| `stats` | 2 × / s | nombre de cellules pleines |
 | `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`, `latestGrid()`), pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askGrid()` / `askClip()` / `askFilm()` |
 | `say` | à la demande | message pour la barre de statut |

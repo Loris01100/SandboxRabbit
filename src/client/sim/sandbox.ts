@@ -63,7 +63,7 @@ export type Order =
 
 export type News =
   | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number] | null }
-  | { t: "stats"; filled: number; pace: number | null }
+  | { t: "stats"; filled: number }
   | { t: "grid"; full: string }
   | { t: "start"; rec: Recording }
   | ({ t: "turn" } & Turn)
@@ -132,9 +132,6 @@ export class Sandbox {
   /** Reliquat de tick quand la vitesse n'est pas entière (ralenti). */
   private pending = 0;
   private sinceStats = 0;
-  /** Ticks joués et temps écoulé (ms) depuis les dernières stats, bac en marche : d'où la vitesse atteinte. */
-  private ran = 0;
-  private span = 0;
   private sinceGrid = 0;
   /** Le bac a changé depuis la dernière copie de secours (`grid`) : un ordre, ou un tick où quelque chose était éveillé. */
   private touched = true;
@@ -267,18 +264,15 @@ export class Sandbox {
       if (this.knobs.running) {
         for (let n = budget.ticks; n > 0; n--) {
           if (!this.player.step()) { this.play(false); break; }
-          this.ran++;
           if (this.late(start)) break;
         }
       }
     } else if (this.knobs.running) {
       for (let n = budget.ticks; n > 0; n--) {
         this.tick();
-        this.ran++;
         if (this.late(start)) break;
       }
     }
-    if (this.knobs.running && !this.follower) this.span += Math.min(Math.max(ms, 0), 100);
 
     const patches = this.tracker.take();
     const { width: w, height: h } = this.engine;
@@ -296,9 +290,7 @@ export class Sandbox {
       const { cells } = this.engine;
       let filled = 0;
       for (let i = 0; i < cells.length; i++) if (cells[i] !== 0) filled++;
-      const pace = this.span > 0 ? this.ran / (this.span / (1000 / 60)) : null;
-      this.ran = this.span = 0;
-      this.send({ t: "stats", filled, pace });
+      this.send({ t: "stats", filled });
       if (this.won?.(this.engine)) { this.won = null; this.send({ t: "won" }); }
     }
 
