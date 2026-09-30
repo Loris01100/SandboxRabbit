@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/client/sim/codec.ts";
-import { DAY, HOURS, Renderer, hourTint, lighting, thumbnail } from "../src/client/sim/render.ts";
+import { CLOCK, DAY, HOURS, clockAt, Renderer, hourTint, lighting, thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, weather, type Gesture } from "../src/client/gestures.ts";
 import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
@@ -1508,6 +1508,9 @@ for (let id = 0; id < 256; id++) {
 assert.deepEqual(hourTint(0), HOURS.matin);
 assert.deepEqual(hourTint(DAY * 0.75), HOURS.nuit);
 assert.deepEqual(hourTint(DAY * 3), HOURS.matin);
+assert.equal(clockAt(0), CLOCK.matin);
+assert.equal(clockAt(DAY * 0.625), 23, "le soir passe minuit en allant vers la nuit");
+assert.equal(clockAt(DAY * 0.75), CLOCK.nuit);
 for (let s = 0; s < DAY; s += 7) assert.ok(hourTint(s).every((v) => v >= 0 && v <= 1), `teinte hors bornes à ${s} s`);
 
 /** La nuit assombrit la pierre, pas la lave : c'est elle qui éclaire. */

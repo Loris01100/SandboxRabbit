@@ -9,7 +9,7 @@ import { initRoom, relay } from "./room.ts";
 import { HEIGHT, WIDTH, askClip, askLoad, canvas, hour, latestGrid, light, listen, onResize, order, present, resize, screen, seen, type ClipData } from "./world.ts";
 import { look } from "./sight.ts";
 import type { Knobs } from "./sim/sandbox.ts";
-import { HOURS, hourTint } from "./sim/render.ts";
+import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
 /**
@@ -862,7 +862,14 @@ heatmapInput.addEventListener("change", () => set({ heatmap: heatmapInput.checke
 // avance d'un cran par seconde : un fondu plus fin recolorierait tout le bac
 // à chaque frame pour un écart invisible.
 const hourInput = document.querySelector<HTMLSelectElement>("#hour")!;
-const tickHour = () => hour(hourInput.value === "cycle" ? hourTint(performance.now() / 1000) : HOURS[hourInput.value] ?? HOURS["apres-midi"]);
+const clockEl = document.querySelector<HTMLSpanElement>("#clock")!;
+function tickHour(): void {
+  const cycle = hourInput.value === "cycle", now = performance.now() / 1000;
+  const key = hourInput.value in HOURS ? hourInput.value : "apres-midi";
+  hour(cycle ? hourTint(now) : HOURS[key]);
+  const minutes = Math.floor((cycle ? clockAt(now) : CLOCK[key]) * 60);
+  clockEl.textContent = `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
+}
 hourInput.addEventListener("input", tickHour);
 setInterval(() => { if (hourInput.value === "cycle") tickHour(); }, 1000);
 

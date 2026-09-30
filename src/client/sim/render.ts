@@ -172,6 +172,20 @@ export function hourTint(seconds: number): Tint {
   return [0, 1, 2].map((k) => from[k] + (to[k] - from[k]) * u) as unknown as Tint;
 }
 
+/** L'heure affichée pour chaque moment de `HOURS`, mêmes clés, même ordre. */
+export const CLOCK: Record<string, number> = { matin: 6, "apres-midi": 15, soir: 20, nuit: 2 };
+
+/**
+ * L'heure du cycle au temps `seconds`, en heures dans [0, 24[ : elle suit
+ * `hourTint()`, d'un moment de `CLOCK` au suivant, à travers minuit.
+ */
+export function clockAt(seconds: number): number {
+  const hours = Object.values(CLOCK);
+  const phase = ((seconds / DAY) % 1 + 1) % 1 * hours.length;
+  const from = hours[Math.floor(phase)], to = hours[(Math.floor(phase) + 1) % hours.length];
+  return (from + ((to - from + 24) % 24) * (phase % 1)) % 24;
+}
+
 /**
  * Rendu 1 cellule = 1 pixel dans un tableau de pixels, puis mise à l'échelle
  * par le CSS (`image-rendering: pixelated`). Aucun appel de dessin par cellule.

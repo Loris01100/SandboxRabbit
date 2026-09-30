@@ -45,7 +45,8 @@ flowchart LR
    dans screen.ts) ; au repos, rien n'arrive et rien n'est recalculé.
    L'heure (menu « Heure », `hour()` de world.ts, teintes `HOURS` de
    render.ts) aussi : un `vec3 tint` du shader, tout recolorié quand elle
-   change — une fois par seconde en mode « Cycle » (`setInterval` de main.ts).
+   change — une fois par seconde en mode « Cycle » (`setInterval` de main.ts),
+   qui avance aussi l'horloge `#clock` de la barre du haut (`CLOCK`, `clockAt()`).
 2. **Le Web Worker de simulation** ([sim/worker.ts](../../src/client/sim/worker.ts))
    héberge `Sandbox`, qui possède l'`Engine` et le `Tracker`. Quand la page
    est isolée (`crossOriginIsolated`, en-têtes COOP/COEP posés par app.ts et
