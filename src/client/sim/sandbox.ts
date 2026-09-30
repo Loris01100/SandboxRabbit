@@ -16,7 +16,7 @@ import type { Pool } from "./pool.ts";
 import { encode } from "./codec.ts";
 import { HERO, HERO_SLOTS, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../gestures.ts";
-import { Player, Recorder, put, type Beat, type Recording } from "../replay.ts";
+import { Player, Recorder, isGesture, put, vet, vetBeats, type Beat, type Recording } from "../replay.ts";
 import { CHALLENGES, SCENES, count } from "../challenges.ts";
 import { SEEDS, terrain } from "../terrain.ts";
 import { parseGoal, ticksFor } from "../ui.ts";
@@ -176,6 +176,10 @@ export class Sandbox {
         // Pendant un rejeu, le bac appartient à l'enregistrement : un geste de
         // plus ferait diverger la suite de ce qu'on est en train de regarder.
         if (this.player) return;
+        // Un geste d'invité arrive tel quel : un clip au base64 abîmé faisait
+        // jeter l'hôte, et relayé, il aurait fait rejeter la suite de partie
+        // par tous les invités. Écarté avant d'être enregistré.
+        if (!isGesture(o.g, this.engine.cells.length)) return;
         applyGesture(this.engine, o.g);
         this.rec?.gesture(o.g);
         this.stream?.gesture(o.g);
@@ -189,7 +193,10 @@ export class Sandbox {
       case "host": return this.host(o.on);
       case "follow": return this.follow(o.rec);
       case "turn": {
-        if (!this.follower) return;
+        // Vient de l'hôte, un pair comme un autre : un beat mal formé jetait
+        // au tick où le lecteur l'atteignait, des `sums` non itérables ici même.
+        if (!this.follower || !Number.isSafeInteger(o.ticks) || !vetBeats(o.beats, this.engine.cells.length, o.ticks)
+          || !Array.isArray(o.sums) || !o.sums.every((s) => Array.isArray(s) && s.length === 2)) return;
         this.follower.feed(o.beats, o.ticks);
         for (const [at, sum] of o.sums) this.checks.set(at, sum);
         return;
@@ -373,8 +380,11 @@ export class Sandbox {
     this.play(false);
     this.record(false);
     this.won = null;
+    // La partie de départ de l'hôte passe au même crible qu'un rejeu importé.
+    const ok = vet(rec);
     try {
-      this.follower = new Player({ ...rec, beats: [...rec.beats] }, this.engine);
+      if (!ok) throw new Error();
+      this.follower = new Player({ ...ok, beats: [...ok.beats] }, this.engine);
     } catch {
       this.send({ t: "say", text: "Partie de l'hôte illisible." });
     }

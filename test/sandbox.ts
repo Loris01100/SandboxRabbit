@@ -347,6 +347,39 @@ function jouer(s: ReturnType<typeof salon>, frames: number): void {
   assert.equal(s.invité.engine.gravity, -1, "rendus au panneau quand il quitte le salon");
 }
 
+// Un pair envoie ce qu'il veut : un geste d'invité illisible est écarté par
+// l'hôte avant d'être relayé, et une suite de partie mal formée par l'invité.
+{
+  const s = salon();
+  jouer(s, 10);
+  const bruts: unknown[] = [
+    { t: "clip", x: 1, y: 1, w: 2, h: 2, cells: "!!", life: "AAA" },
+    { t: "clip", x: 1, y: 1, w: 2, h: 2, cells: null, life: 5 },
+    { t: "paint", x: "3", y: 4, r: 2, id: SAND, d: 1, over: true },
+    { t: "inconnu" },
+    null,
+  ];
+  for (const g of bruts) assert.doesNotThrow(() => s.hôte.order({ t: "do", g: g as never }), `l'hôte encaisse ${JSON.stringify(g)}`);
+  const junk = [
+    { ticks: 5, beats: [{ at: 0, grid: 5, clock: null }], sums: [] },
+    { ticks: 5, beats: [], sums: 7 },
+    { ticks: 5, beats: [], sums: [3] },
+    { ticks: 5, beats: [{ at: 0, g: { t: "clip", x: 0, y: 0, w: 1, h: 1, cells: "!!", life: "" } }], sums: [] },
+    { ticks: NaN, beats: "x", sums: [] },
+  ];
+  for (const t of junk) assert.doesNotThrow(() => { s.invité.order({ t: "turn", ...t } as never); s.invité.frame(16); }, `l'invité encaisse ${JSON.stringify(t)}`);
+  assert.doesNotThrow(() => s.invité.order({ t: "follow", rec: { v: 1, w: W, h: H, grid: 5 } as never }), "un départ illisible aussi");
+  const s2 = salon();
+  jouer(s2, 10);
+  for (const g of bruts) s2.hôte.order({ t: "do", g: g as never });
+  s2.hôte.order({ t: "do", g: { t: "rect", x: 10, y: 10, x2: 30, y2: 14, id: WATER, over: true } });
+  jouer(s2, 60);
+  s2.hôte.order({ t: "set", k: { running: false } });
+  jouer(s2, 40);
+  assert.deepEqual(s2.invité.engine.cells, s2.hôte.engine.cells, "les gestes écartés ne font pas diverger le salon");
+  assert.equal(s2.desyncs(), 0, "ni rejeter la suite de partie");
+}
+
 // Un invité qui a divergé le voit à l'empreinte suivante, et le dit une fois.
 {
   const s = salon();

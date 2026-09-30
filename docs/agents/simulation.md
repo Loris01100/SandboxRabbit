@@ -276,7 +276,11 @@ gestures.ts).
   avant d'atteindre le bac : ses grilles et ses gestes sont rejoués plus tard,
   en plein tick, là où une levée (`atob` sur un caractère hors base64, par
   exemple) couperait le rejeu. Un nouveau champ de `Recording`, de `Scene` ou
-  de geste s'ajoute aussi à ce crible (`FIELDS` pour un geste).
+  de geste s'ajoute aussi à ce crible (`FIELDS` pour un geste). Le salon
+  s'y soumet aussi : l'hôte passe chaque geste d'invité par `isGesture()`
+  avant de l'appliquer et de le relayer, l'invité passe le départ de l'hôte
+  par `vet()` et chaque `turn` par `vetBeats()` (sans redécoder la grille de
+  départ). Un `clip` au base64 abîmé faisait sinon jeter l'hôte.
 - Si le moteur jette malgré tout, la boucle de sim/worker.ts repose son
   échéance dans un `finally` : l'erreur remonte, le bac ne s'arrête plus.
 

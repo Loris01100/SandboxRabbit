@@ -287,7 +287,7 @@ function isScene(s: unknown): s is Scene {
  * coordonnées non entières et les ids inconnus, et `disc()` borne les rayons :
  * reste à garantir les types, et un morceau collé lisible.
  */
-function isGesture(g: unknown, n: number): g is Gesture {
+export function isGesture(g: unknown, n: number): g is Gesture {
   if (!isObject(g) || typeof g.t !== "string" || !Object.hasOwn(FIELDS, g.t)) return false;
   const fields = FIELDS[g.t as Gesture["t"]];
   for (const k in fields) if (!typed(g[k], fields[k])) return false;
@@ -311,17 +311,28 @@ export function vet(raw: unknown): Recording | null {
   if (!int(w) || !int(h) || w <= 0 || h <= 0 || w * h > CELLS_MAX) return null;
   const n = w * h;
   if (!int(seed) || !int(scan) || !int(ticks) || ticks < 0) return null;
-  if (!readable(grid, n) || !readable(clock, n) || !isScene(scene) || !Array.isArray(beats)) return null;
+  if (!readable(grid, n) || !readable(clock, n) || !isScene(scene) || !vetBeats(beats, n, ticks)) return null;
+  return { v: 1, w, h, seed, scan, grid, clock, scene, beats, ticks };
+}
+
+/**
+ * Des beats que le `Player` jouera sans lever, pour une grille de `n`
+ * cellules. À part de `vet()` pour la suite de partie d'un hôte de salon
+ * (`turn`), qui arrive vingt fois par seconde : revérifier chaque fois la
+ * grille de départ coûterait un décodage entier.
+ */
+export function vetBeats(beats: unknown, n: number, ticks: number): beats is Beat[] {
+  if (!Array.isArray(beats)) return false;
   // Le lecteur avance un curseur : des beats dans le désordre seraient sautés.
   let last = 0;
   for (const b of beats as unknown[]) {
-    if (!isObject(b) || !int(b.at) || b.at < last || b.at > ticks) return null;
+    if (!isObject(b) || !int(b.at) || b.at < last || b.at > ticks) return false;
     last = b.at;
-    if ("g" in b) { if (!isGesture(b.g, n)) return null; }
-    else if ("scene" in b) { if (!isScene(b.scene)) return null; }
-    else if (!readable(b.grid, n) || !readable(b.clock, n)) return null;
+    if ("g" in b) { if (!isGesture(b.g, n)) return false; }
+    else if ("scene" in b) { if (!isScene(b.scene)) return false; }
+    else if (!readable(b.grid, n) || !readable(b.clock, n)) return false;
   }
-  return { v: 1, w, h, seed, scan, grid, clock, scene, beats: beats as Beat[], ticks };
+  return true;
 }
 
 /** Un rejeu en fichier : le JSON tel quel. Null s'il est trop lourd, illisible ou mal formé. */

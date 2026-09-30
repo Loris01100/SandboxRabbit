@@ -77,7 +77,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 
 | Ordre (`order()`) | Effet côté bac |
 | --- | --- |
-| `do` `{g}` | Applique un `Gesture` (ignoré pendant un rejeu). **N'envoyer que via `gesture()` de main.ts.** |
+| `do` `{g}` | Applique un `Gesture` (ignoré pendant un rejeu, écarté s'il ne passe pas `isGesture()` de replay.ts : celui d'un invité arrive brut). **N'envoyer que via `gesture()` de main.ts.** |
 | `set` `{k}` | Met à jour les réglages (`Knobs` : vent, ambiante, gravité, vitesse, pause, vue thermique, salon…). Côté page, `set(k)` de world.ts l'envoie |
 | `size` `{w,h,keep}` | Recrée moteur et rendu ; vide l'annulation, abandonne l'enregistrement, arrête le rejeu, désarme le défi |
 | `load` `{data,ask?,quiet?}` | Pose une grille encodée ; `quiet` = sans cran d'annulation (salon). Arrête le rejeu et désarme le défi en cours — un monde-défi réarme le sien par `goal` juste après |
