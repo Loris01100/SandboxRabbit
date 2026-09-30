@@ -49,7 +49,6 @@
           <button id="step" type="button">Pas à pas</button>
           <button id="undo" type="button" title="Annuler le dernier geste (Ctrl+Z)">↶</button>
           <button id="redo" type="button" title="Rétablir le geste annulé (Ctrl+Y)">↷</button>
-          <button id="help" type="button" title="Raccourcis clavier et souris (?)" aria-label="Raccourcis">?</button>
           <button id="settings-open" type="button" title="Paramètres" aria-label="Paramètres">⚙</button>
         </div>
 
@@ -96,7 +95,7 @@
           <!-- La liste vit dans le <dialog> des raccourcis, une seule fois. -->
           <p class="hint">
             Les outils <em>Rectangle</em> et <em>Copier</em> se tracent en glissant.
-            Le bouton <kbd>?</kbd>, en haut du panneau, liste tous les raccourcis.
+            La touche <kbd>?</kbd> ou l'onglet <em>Raccourcis</em> des paramètres (⚙) les liste tous.
           </p>
         </details>
 
@@ -215,35 +214,35 @@
       <div id="gallery-grid" class="gallery"></div>
     </dialog>
 
-    <!-- Raccourcis : rien de tout ça n'était écrit dans l'interface. La ligne
-         des matières est remplie par main.ts depuis `SHORTCUTS`, pour qu'elle
-         ne mente pas le jour où l'ordre change. -->
-    <dialog id="shortcuts">
-      <form method="dialog" class="gallery-bar">
-        <h2>Raccourcis</h2>
-        <button type="submit">Fermer</button>
-      </form>
-      <!-- Rempli par main.ts (listBindings) depuis KEY_GROUPS d'ui.ts : un
-           onglet par encadré, un bouton par touche à changer. -->
-      <nav id="keys-menu" class="keys-menu" aria-label="Encadrés des raccourcis"></nav>
-      <div id="bindings"></div>
-      <p class="hint">Cliquer une touche, puis presser la nouvelle (Échap annule). Les flèches marchent toujours.</p>
-      <button id="bindings-reset" type="button">Touches d'origine</button>
-    </dialog>
-
+    <!-- Paramètres : un onglet par section, `data-tab` nomme la section
+         montrée (openSettings() de main.ts). -->
     <dialog id="settings">
       <form method="dialog" class="gallery-bar">
         <h2>Paramètres</h2>
         <button type="submit">Fermer</button>
       </form>
-      <label class="row">
-        <span>Thème</span>
-        <select id="theme">
-          <option value="">Système</option>
-          <option value="light">Jour</option>
-          <option value="dark">Nuit</option>
-        </select>
-      </label>
+      <nav class="keys-menu tabs" aria-label="Onglets des paramètres">
+        <button type="button" data-tab="settings-general">Général</button>
+        <button type="button" data-tab="settings-keys">Raccourcis</button>
+      </nav>
+      <section id="settings-general">
+        <label class="row">
+          <span>Thème</span>
+          <select id="theme">
+            <option value="">Système</option>
+            <option value="light">Jour</option>
+            <option value="dark">Nuit</option>
+          </select>
+        </label>
+      </section>
+      <!-- Rempli par main.ts (listBindings) depuis KEY_GROUPS d'ui.ts : un
+           onglet par encadré, un bouton par touche à changer. -->
+      <section id="settings-keys" hidden>
+        <nav id="keys-menu" class="keys-menu" aria-label="Encadrés des raccourcis"></nav>
+        <div id="bindings"></div>
+        <p class="hint">Cliquer une touche, puis presser la nouvelle (Échap annule). Les flèches marchent toujours.</p>
+        <button id="bindings-reset" type="button">Touches d'origine</button>
+      </section>
     </dialog>
   </body>
 </html>

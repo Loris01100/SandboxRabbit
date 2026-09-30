@@ -8,7 +8,6 @@ import { forget, read, write } from "./ui.ts";
 
 const THEME = "sandbox-rabbit:theme";
 const themeSelect = document.querySelector<HTMLSelectElement>("#theme")!;
-const settingsEl = document.querySelector<HTMLDialogElement>("#settings")!;
 
 function setTheme(mode: string): void {
   document.documentElement.style.colorScheme = mode;
@@ -20,4 +19,3 @@ function setTheme(mode: string): void {
 const storedTheme = read(THEME);
 setTheme(storedTheme === "light" || storedTheme === "dark" ? storedTheme : "");
 themeSelect.addEventListener("change", () => setTheme(themeSelect.value));
-document.querySelector<HTMLButtonElement>("#settings-open")!.addEventListener("click", () => settingsEl.showModal());

@@ -175,7 +175,7 @@ addEventListener("keydown", (e) => {
     case "gravity": flipGravity(); return;
     case "freeze": toolInput.value = toolInput.value === "paint" ? "freeze" : "paint"; return;
     case "heat": heatmapInput.checked = !heatmapInput.checked; set({ heatmap: heatmapInput.checked }); return;
-    case "help": if (!shortcutsEl.open) shortcutsEl.showModal(); return;
+    case "help": openSettings("settings-keys"); return;
     case "view": nextView(); return;
     case "retry": lastChallenge?.click(); return;
     case "step": case "terrain": case "surprise": case "full": case "clear": case "save":
@@ -187,10 +187,23 @@ addEventListener("keydown", (e) => {
 
 /* -------------------------------------------------------------- raccourcis */
 
-// Le pense-bête : la souris vit dans index.html, le clavier se remplit depuis
-// `bindings` (`listBindings()`) — une touche changée ne laisse pas une aide qui ment.
-const shortcutsEl = document.querySelector<HTMLDialogElement>("#shortcuts")!;
-document.querySelector<HTMLButtonElement>("#help")!.addEventListener("click", () => shortcutsEl.showModal());
+// Le pense-bête vit dans l'onglet Raccourcis des paramètres : le clavier se
+// remplit depuis `bindings` (`listBindings()`) — une touche changée ne laisse
+// pas une aide qui ment.
+const settingsEl = document.querySelector<HTMLDialogElement>("#settings")!;
+const settingsTabs = settingsEl.querySelectorAll<HTMLButtonElement>("[data-tab]");
+
+/** Ouvre les paramètres (si fermés) sur la section `tab`, id d'une <section>. */
+function openSettings(tab: string): void {
+  for (const button of settingsTabs) {
+    button.setAttribute("aria-pressed", String(button.dataset.tab === tab));
+    document.getElementById(button.dataset.tab!)!.hidden = button.dataset.tab !== tab;
+  }
+  if (!settingsEl.open) settingsEl.showModal();
+}
+
+for (const button of settingsTabs) button.addEventListener("click", () => openSettings(button.dataset.tab!));
+document.querySelector<HTMLButtonElement>("#settings-open")!.addEventListener("click", () => openSettings("settings-general"));
 
 /* ------------------------------------------------------------------ souris */
 
@@ -425,7 +438,7 @@ const ACTION_NAMES: Record<Action, string> = {
   paste: "Reposer le morceau copié, centré sur le curseur",
   zoomIn: "Zoomer (au centre), si le zoom est actif",
   zoomOut: "Dézoomer (au centre), si le zoom est actif",
-  help: "Cette fenêtre",
+  help: "Cet onglet des paramètres",
   step: "Avancer d'un pas (bac en pause)",
   terrain: "Nouveau monde généré",
   surprise: "Un décor tiré au sort",
@@ -520,7 +533,7 @@ addEventListener("keydown", (e) => {
 }, true);
 
 document.querySelector<HTMLButtonElement>("#bindings-reset")!.addEventListener("click", () => setBindings(null));
-shortcutsEl.addEventListener("close", () => { waiting = null; listBindings(); });
+settingsEl.addEventListener("close", () => { waiting = null; listBindings(); });
 listBindings();
 
 /** Zoome autour d'un point de l'écran, qui ne bouge pas (math dans ui.ts). */

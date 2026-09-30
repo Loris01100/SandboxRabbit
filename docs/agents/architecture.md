@@ -140,7 +140,9 @@ sans bouger (moins de `CLICK` pixels) la raccroche, et `meet()` aussi.
 ### Clavier réassignable
 
 **Tous** les raccourcis clavier sont des actions (`ACTIONS` d'ui.ts),
-réassignables dans la fenêtre des raccourcis. Elle est rangée en encadrés
+réassignables dans l'onglet Raccourcis de la fenêtre Paramètres (`#settings`,
+bouton ⚙ ; la touche `help`, `?` d'origine, l'ouvre sur cet onglet par
+`openSettings()` de main.ts). Il est rangé en encadrés
 calqués sur les sections du panneau (`KEY_GROUPS` d'ui.ts : Matière,
 Pinceau, Simulation, Physique du monde, Défis, Mondes, Héros et vue), chacun
 avec ses gestes de souris, fixes ; un menu d'onglets (`#keys-menu`) en montre
@@ -299,7 +301,7 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
 | [room.ts](../../src/client/room.ts) | salon côté navigateur | non |
 | [share.ts](../../src/client/share.ts) | galerie, PNG, vidéo, lien ; export / import du rejeu | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
-| [theme.ts](../../src/client/theme.ts) | fenêtre Paramètres (`#settings`, bouton ⚙ de la barre du panneau) : thème Système / Jour / Nuit | non |
+| [theme.ts](../../src/client/theme.ts) | thème Système / Jour / Nuit, onglet Général de la fenêtre Paramètres (onglets câblés dans main.ts) | non |
 | [sim/*](../../src/client/sim/) | moteur, rendu, codec, registre, bac | **oui** |
 
 ### Galerie et mondes-défis
