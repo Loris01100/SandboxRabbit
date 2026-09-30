@@ -17,6 +17,7 @@ gardant l'interface (`step`, `paint`, `cells`).
 | `cells` | `Uint8Array` | id de matière (`MATERIALS`) |
 | `life` | `Uint8Array` | compteur multi-usage, voir plus bas |
 | `temp` | `Float32Array` | °C, **réassigné à chaque tick** (double tampon) |
+| `press` | `Float32Array` | pression de l'air (≥ 0, nulle hors de l'air), **réassignée à chaque sous-pas** (double tampon). Voir [Pression et vent](#pression-et-vent) |
 | `clock` | `Uint8Array` | parité du tick où la cellule a déjà bougé |
 | `frozen` | `Uint8Array` | 1 = figée à la main |
 | `noise` | `Int8Array` | grain fixe par cellule (rendu) |
@@ -67,6 +68,8 @@ tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
    (`heatChunk`), puis diffusion (`CONDUCTION`), retour vers `ambient`
    (`COOLING`) et changements d'état `boil` / `freeze` (`diffuseChunk`),
    puis recopie des blocs refroidis (`settleChunk`). Les tampons s'échangent.
+7. `breathe()` : la pression de l'air, sautée tant que rien n'a soufflé.
+   Voir [Pression et vent](#pression-et-vent).
 
 Chaque passe (une phase du damier, une passe de chaleur) est une liste de
 travaux (`jobs`) que `run()` fait seul ou répartit entre les fils du `pool` —
@@ -97,11 +100,13 @@ au bit près. Ce qui le garantit — et ce qu'une nouvelle règle doit respecter
   `settle()` d'une graine à lui ; l'état global avance d'un cran par tick
   (`xorshift`), quoi que les blocs aient tiré. Jamais d'état partagé tiré
   pendant le damier.
-- **Écritures partagées idempotentes** : `stir` (des 1), `awake[c]` du seul
-  bloc de veille traité, `hero` et le compteur d'explosions par `Atomics`.
+- **Écritures partagées idempotentes** : `stir` (des 1), `awake[c]` et
+  `hush[c]` du seul bloc de veille traité, `hero`, le compteur d'explosions
+  et `CTL.gust` (des 1) par `Atomics`.
 - **Réglages publiés** : un fil auxiliaire relit gravité, vent, ambiante,
-  matière des sources, commandes du héros, parité, graine et tampon de
-  température courant dans `params` (`sync()`) avant chaque travail.
+  matière des sources, commandes du héros, parité, graine, tampons de
+  température et de pression courants et présence de pression (`gusty`)
+  dans `params` (`sync()`) avant chaque travail.
 
 Le pool s'attache quand ses fils sont prêts (`bind()`), et se rattache à
 chaque nouveau moteur (changement de taille) ; en attendant, le moteur fait
@@ -129,6 +134,9 @@ milliseconde par tick, au lieu de 30. Un bloc est traité si lui ou un voisin a
   peint dans le vide garde l'horloge quelconque de la cellule vide) ;
 - **un liquide bloqué d'un côté mais libre de l'autre** (`canMove()`) : il ne
   tente qu'un côté par tick, tiré au sort, et resterait suspendu ;
+- **la pression** : un bloc qui garde de la pression au-dessus de `CALM_P`
+  reste éveillé, et ne s'endort qu'une fois remis à zéro (voir
+  [Pression et vent](#pression-et-vent)) ;
 - **la chaleur** : un bloc dont une cellule varie de plus de `STILL`
   (0,001 °C/tick) reste éveillé. Un bloc refroidi recopie sa température dans
   l'autre tampon, pour lire la même chose endormi. Un bloc endormi ne fait
@@ -203,8 +211,9 @@ Invariants :
 
 - Toute règle de déplacement passe par `y + this.gravity` et `drift()` (vent).
   Exceptions : `MAGNET`, qui tire la limaille d'un cran vers lui en ignorant
-  la gravité, et le lapin, dont les neuf cellules bougent d'un bloc par
-  `relocate()` (voir [Créatures](#créatures--le-lapin)).
+  la gravité, le lapin, dont les neuf cellules bougent d'un bloc par
+  `relocate()` (voir [Créatures](#créatures--le-lapin)), et le gaz poussé
+  par la pression (`blown()`, voir [Pression et vent](#pression-et-vent)).
 - Déplacer = `tryMove()` (qui refuse une cible figée et vérifie
   `displaces()`), jamais écrire `cells` à la main.
 - Hors grille, `get()` renvoie `STONE` : les règles ne testent pas les bords.
@@ -337,6 +346,48 @@ explosif = ajouter un déclencheur, sinon c'est du TNT repeint.
 - `URANIUM` doit rester **désamorçable** : casser le tas fait redescendre
   `life`. Sa chaleur est le seul avertissement. Le nucléaire ne se distingue
   du TNT que par les retombées (`FALLOUT`) semées par `nuke()`.
+
+### Pression et vent
+
+Un champ `press` (voir `breathe()` dans engine.ts) : de la pression dans
+l'air, qui pousse les gaz de la haute vers la basse. Seul l'air la porte
+(table `OPEN` : vide et gaz) ; toute autre cellule vaut 0 et l'arrête comme un
+mur, et une voisine qui n'est pas de l'air compte pour la cellule elle-même
+(rien ne passe à travers).
+
+- **Une seule porte d'entrée : `puff(i, montant)`.** Elle n'écrit que dans
+  l'air, plafonne à `MAX_P`, réveille le bloc et lève `CTL.gust`. Une écriture
+  directe dans `press` laisserait un bloc endormi avec de la pression, ou
+  `breathe()` sauté. Sources aujourd'hui : `explode()` (onde jusqu'à `REACH`
+  rayons, pente `BLOW` — posée d'un coup, joué par `settle()` car elle dépasse
+  le damier) et l'eau vaporisée par la lave (`STEAM_PUFF`, à une cellule).
+- **`breathe()`**, après la chaleur : `AIR_STEPS` sous-pas de diffusion
+  amortie (`FLOW`, `DAMP`) sur les blocs éveillés, chacun une passe partagée
+  entre les fils (`JOB.air`, puis `JOB.gust` au dernier). Au dernier, un bloc
+  sous `CALM_P` partout est remis à zéro (`hush`) et `JOB.hush` vide aussi
+  l'autre tampon ; les autres se tiennent éveillés et relèvent `CTL.gust`.
+  `CTL.gust` à 0 : toute la passe est sautée, un bac sans explosion ne paie rien.
+- **Invariant : un bloc endormi a une pression nulle dans les deux
+  tampons.** Il ne s'endort qu'une fois remis à zéro, et `puff()` le réveille.
+  Ses voisins le lisent donc sans équivalent de `pulled()`.
+- `hushed()` saute le calcul d'un bloc sans pression, bordure comprise : le
+  sous-pas y rendrait 0 au bit près, la pression n'étant jamais négative (pas
+  de -0). Sans lui, une salve dans le chantier coûtait 42 ms par tick.
+- **Le vent** : `blown()`, en tête de `moveGas()`, pousse le gaz d'une cellule
+  dans le sens du gradient, avec une chance `GUST` × gradient. Sous
+  `GUST_MIN`, ou si le tick a commencé sans pression (`gusty`), il ne lit ni
+  ne tire rien : sans souffle, les gaz montent aux mêmes tirages qu'avant.
+- **La pression ne voyage pas** : ni codec, ni rejeu, ni salon. `wakeAll()`
+  la remet à zéro, donc tout départ (`put()` → `adopt()`), annulation,
+  gravité ou ambiante changée repart sans pression, chez l'hôte comme chez
+  l'invité. Elle ne vit qu'une seconde : personne ne le voit.
+- Calcul en f64 rangé en f32, même ordre d'additions que la chaleur : le port
+  Rust (`air()` de rust/src/lib.rs) le reproduit au bit près, voir
+  [docs/rust.md](../rust.md). Un changement de `airChunk()` ou `hushed()` se
+  reporte dans lib.rs.
+- `ponytail:` de `breathe()` : une diffusion, pas un fluide (ni vitesse ni
+  inertie), et ce qui fuit vers un bloc endormi est perdu pour le tick ;
+  `ponytail:` d'`explode()` : l'onde n'a pas de ligne de vue.
 
 ### Électricité
 

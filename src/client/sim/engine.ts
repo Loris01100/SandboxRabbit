@@ -18,6 +18,36 @@ export const AMBIENT = 20;
 const CONDUCTION = 0.16;
 /** Retour vers l'ambiante par tick (le bac à sable perd sa chaleur). */
 const COOLING = 0.02;
+/**
+ * Pression de l'air (voir `breathe()`). Elle se diffuse d'une cellule d'air à
+ * l'autre en `AIR_STEPS` sous-pas par tick : en un seul, un souffle ne
+ * poussait la fumée qu'à quatre cellules de son bord, trop lent pour se voir.
+ */
+const AIR_STEPS = 3;
+/** Part de l'écart avec les voisines échangée par sous-pas (au-delà de 0,25 le calcul s'emballe). */
+const FLOW = 0.2;
+/** Ce qui reste de la pression après un sous-pas : elle retombe en une seconde environ. */
+const DAMP = 0.98;
+/** Sous ce seuil, partout dans un bloc, sa pression est remise à zéro et il peut s'endormir. */
+const CALM_P = 0.02;
+/**
+ * Portée de l'onde d'un souffle, en rayons, et sa pente : la pression vaut
+ * `BLOW` par cellule qui reste jusqu'au bord de l'onde, donc un gradient
+ * constant qui pousse les gaz presque à chaque tick. Posée d'un coup : à 60
+ * ticks par seconde, une onde de choc traverse le bac en moins d'un tick, et
+ * la seule diffusion la laissait collée au cratère (quatre cellules en une
+ * demi-seconde).
+ */
+const REACH = 3;
+const BLOW = 1;
+/** Pression d'une bouffée de vapeur (eau sur la lave). */
+const STEAM_PUFF = 6;
+/** Pression plafond d'une cellule : des souffles en chaîne ne la font pas grimper sans fin. */
+const MAX_P = 200;
+/** Chance, par tick et par unité de gradient, qu'un gaz soit poussé par le vent. */
+const GUST = 1.5;
+/** Gradient sous lequel un gaz ne sent pas le vent (et ne tire rien au sort). */
+const GUST_MIN = 0.03;
 /** Ticks pendant lesquels un métal qui vient de conduire refuse l'étincelle. */
 const RECOVERY = 8;
 /** Ticks entre deux étincelles d'une pile (plus long que `RECOVERY`, sinon le fil sature). */
@@ -185,6 +215,9 @@ for (const key of Object.keys(MATERIALS)) {
   if (m.boil) { BOIL_AT[m.id] = m.boil.at; BOIL_INTO[m.id] = m.boil.into; }
   if (m.freeze) { FREEZE_AT[m.id] = m.freeze.at; FREEZE_INTO[m.id] = m.freeze.into; }
 }
+/** 1 = cellule d'air, vide ou gaz : la seule qui porte une pression. Le reste l'arrête comme un mur. */
+export const OPEN = new Uint8Array(256);
+for (let id = 0; id < 256; id++) if (KNOWN[id] && (KIND[id] === KINDS.empty || KIND[id] === KINDS.gas)) OPEN[id] = 1;
 /** 1 = matière de créature (le pinceau en pose une entière) ou cellule de son corps. */
 const CREATURE = new Uint8Array(256);
 for (const key of Object.keys(MATERIALS)) {
@@ -245,11 +278,11 @@ const EXPLOSIVE = new Uint8Array(256);
 for (const id of [TNT, NITRO, C4, MINE, URANIUM]) EXPLOSIVE[id] = 1;
 
 /** Les travaux que `run()` répartit entre les fils, exécutés par `job()`. */
-export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, stop: 9 } as const;
-/** Cases de `control` (Int32 partagé) : génération, travail, prochain, finis, nombre, différés, héros. */
-export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6, held: 7 } as const;
+export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, air: 5, gust: 6, hush: 7, stop: 9 } as const;
+/** Cases de `control` (Int32 partagé) : génération, travail, prochain, finis, nombre, différés, héros, de la pression quelque part. */
+export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6, held: 7, gust: 8 } as const;
 /** Cases de `params` (Float64 partagé) : ce qu'un fil auxiliaire recopie avant chaque travail (`sync`). */
-const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pilot: 6, flip: 7, chosen: 8 } as const;
+const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pilot: 6, flip: 7, chosen: 8, airFlip: 9, gusty: 10 } as const;
 
 /**
  * La mémoire d'un bac, partageable entre fils : tout ce qu'un travail lit ou
@@ -260,7 +293,7 @@ const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pi
 export interface Memory {
   width: number;
   height: number;
-  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "held" | "waiting" | "jobs" | "control" | "params", ArrayBufferLike>;
+  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "pressA" | "pressB" | "hush" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "held" | "waiting" | "jobs" | "control" | "params", ArrayBufferLike>;
 }
 
 /** Le constructeur de tampon à employer : partagé si la plateforme le permet (Node, page isolée). */
@@ -366,6 +399,19 @@ export class Engine {
   private tempNext: Float32Array;
   private readonly tempA: Float32Array;
   private readonly tempB: Float32Array;
+  /**
+   * Pression de l'air par cellule (voir `breathe()`), réassignée à chaque sous-pas
+   * comme `temp`. Nulle hors de l'air et dans tout bloc endormi, dans les deux
+   * tampons : un bloc voisin peut la lire sans savoir s'il dort.
+   */
+  press: Float32Array;
+  private pressNext: Float32Array;
+  private readonly pressA: Float32Array;
+  private readonly pressB: Float32Array;
+  /** 1 = bloc de veille dont la pression vient d'être remise à zéro (`airChunk`) : `hushChunk` vide aussi l'autre tampon. */
+  private readonly hush: Uint8Array;
+  /** Y avait-il de la pression quelque part au début du tick ? Sinon les gaz ne la lisent pas. */
+  private gusty = false;
   /** Tout ce que les fils partagent (voir `Memory`) : à passer à `Pool.bind()`. */
   readonly memory: Memory;
   /** Coordination des fils (`CTL`), lue et écrite par `Atomics`. */
@@ -470,12 +516,13 @@ export class Engine {
     const chunks = this.cols * this.rows;
     const b = memory?.buffers ?? {
       cells: new Shareable(n), life: new Shareable(n), tempA: new Shareable(n * 4), tempB: new Shareable(n * 4),
+      pressA: new Shareable(n * 4), pressB: new Shareable(n * 4), hush: new Shareable(chunks),
       clock: new Shareable(n), frozen: new Shareable(n), noise: new Shareable(n),
       awake: new Shareable(chunks), stir: new Shareable(chunks),
       later: new Shareable(Math.max(64, n >> 2) * 8), jobs: new Shareable(chunks * 4),
       // Au pire, toutes les cellules des rangées paires de blocs : la moitié du bac, plus une rangée de blocs.
       held: new Shareable(n), waiting: new Shareable(((n >> 1) + PART * width) * 4),
-      control: new Shareable(8 * 4), params: new Shareable(9 * 8),
+      control: new Shareable(9 * 4), params: new Shareable(11 * 8),
     };
     this.memory = { width, height, buffers: b };
     this.cells = new Uint8Array(b.cells);
@@ -484,6 +531,11 @@ export class Engine {
     this.tempB = new Float32Array(b.tempB);
     this.temp = this.tempA;
     this.tempNext = this.tempB;
+    this.pressA = new Float32Array(b.pressA);
+    this.pressB = new Float32Array(b.pressB);
+    this.press = this.pressA;
+    this.pressNext = this.pressB;
+    this.hush = new Uint8Array(b.hush);
     this.clock = new Uint8Array(b.clock);
     this.frozen = new Uint8Array(b.frozen);
     this.noise = new Int8Array(b.noise);
@@ -550,6 +602,11 @@ export class Engine {
   wakeAll(): void {
     this.stir.fill(1);
     this.awake.fill(0);
+    // La pression ne voyage ni avec un monde, ni avec un rejeu, ni avec un
+    // salon : elle repart de zéro des deux côtés. Elle ne vit qu'une seconde.
+    this.pressA.fill(0);
+    this.pressB.fill(0);
+    Atomics.store(this.control, CTL.gust, 0);
   }
 
   /**
@@ -916,6 +973,7 @@ export class Engine {
     this.tickSeed = mix(tick);
     Atomics.store(this.control, CTL.later, 0);
     Atomics.store(this.control, CTL.held, 0);
+    this.gusty = Atomics.load(this.control, CTL.gust) === 1;
     this.publish();
     for (let p = 0; p < 4; p++) {
       const count = this.phase(p & 1, p >> 1);
@@ -927,6 +985,7 @@ export class Engine {
     this.settle();
     this.state = xorshift(tick);
     this.thermal();
+    this.breathe();
     const { awake, shown } = this;
     for (let c = 0; c < awake.length; c++) if (awake[c]) shown[c] = 1;
   }
@@ -947,6 +1006,8 @@ export class Engine {
     p[PARAM.pilot] = this.pilot;
     p[PARAM.chosen] = this.chosen;
     p[PARAM.flip] = this.temp === this.tempA ? 0 : 1;
+    p[PARAM.airFlip] = this.press === this.pressA ? 0 : 1;
+    p[PARAM.gusty] = this.gusty ? 1 : 0;
   }
 
   /**
@@ -967,6 +1028,10 @@ export class Engine {
     const flip = p[PARAM.flip] === 1;
     this.temp = flip ? this.tempB : this.tempA;
     this.tempNext = flip ? this.tempA : this.tempB;
+    const airFlip = p[PARAM.airFlip] === 1;
+    this.press = airFlip ? this.pressB : this.pressA;
+    this.pressNext = airFlip ? this.pressA : this.pressB;
+    this.gusty = p[PARAM.gusty] === 1;
   }
 
   /**
@@ -986,6 +1051,9 @@ export class Engine {
       case JOB.heat: this.heatChunk(item); return;
       case JOB.diffuse: this.diffuseChunk(item); return;
       case JOB.settle: this.settleChunk(item); return;
+      case JOB.air: this.airChunk(item, false); return;
+      case JOB.gust: this.airChunk(item, true); return;
+      case JOB.hush: this.hushChunk(item); return;
     }
   }
 
@@ -1246,11 +1314,50 @@ export class Engine {
 
   /** Montée d'un gaz, sans le vieillissement (le feu gère sa propre fin de vie). */
   private moveGas(i: number, x: number, y: number, id: MaterialId): void {
+    if (this.gusty && this.blown(i, x, y, id)) return;
     const up = y - this.gravity;
     const dir = this.drift();
     if (this.rand() < 0.7 && this.tryMove(i, x, up, id)) return;
     if (this.tryMove(i, x + dir, up, id)) return;
     this.tryMove(i, x + dir, y, id);
+  }
+
+  /**
+   * Le vent : un gaz est poussé de la haute pression vers la basse, d'une
+   * cellule, avec une chance qui croît avec le gradient. Une voisine qui
+   * n'est pas de l'air (ou le bord) compte pour la pression de la cellule
+   * elle-même : on ne pousse pas contre un mur. Sans pression autour, rien
+   * n'est lu ni tiré : les gaz montent comme avant, aux mêmes tirages.
+   */
+  private blown(i: number, x: number, y: number, id: MaterialId): boolean {
+    const { press: p, cells, width: w } = this;
+    const v = p[i];
+    const up = y > 0 && OPEN[cells[i - w]] ? p[i - w] : v;
+    const down = y < this.height - 1 && OPEN[cells[i + w]] ? p[i + w] : v;
+    const left = x > 0 && OPEN[cells[i - 1]] ? p[i - 1] : v;
+    const right = x < w - 1 && OPEN[cells[i + 1]] ? p[i + 1] : v;
+    const gx = left - right, gy = up - down;
+    const g2 = gx * gx + gy * gy;
+    if (g2 < GUST_MIN * GUST_MIN) return false;
+    if (this.rand() >= Math.sqrt(g2) * GUST) return false;
+    // En biais si les deux composantes se valent, sinon droit dans le sens de la plus forte.
+    const ax = Math.abs(gx), ay = Math.abs(gy);
+    const dx = 2 * ax >= ay ? Math.sign(gx) : 0;
+    const dy = 2 * ay >= ax ? Math.sign(gy) : 0;
+    return this.tryMove(i, x + dx, y + dy, id);
+  }
+
+  /**
+   * Ajoute de la pression dans la cellule `i`, si c'est de l'air. Seule porte
+   * d'entrée de la pression : elle réveille le bloc (sinon il dort avec une
+   * pression que ses voisins lisent) et signale qu'il y en a (`CTL.gust`),
+   * sans quoi `breathe()` saute tout le calcul.
+   */
+  private puff(i: number, amount: number): void {
+    if (!OPEN[this.cells[i]]) return;
+    this.press[i] = Math.min(MAX_P, this.press[i] + amount);
+    this.wake(i);
+    Atomics.store(this.control, CTL.gust, 1);
   }
 
   /** Décrémente la vie ; à zéro remplace par `into`. */
@@ -1299,6 +1406,8 @@ export class Engine {
       if (n === WATER || n === SALTWATER) {
         this.become(nx, ny, STEAM);
         this.become(x, y, STONE);
+        // L'eau qui se vaporise d'un coup : une bouffée qui chasse la vapeur.
+        if (this.inBounds(nx, ny)) this.puff(this.index(nx, ny), STEAM_PUFF);
         return;
       }
       if (n === SAND || FLAMMABLE[n] > 0) busy = true;
@@ -1502,6 +1611,18 @@ export class Engine {
           || this.hurl(i, x, y, (ox / d) * 0.6, -this.gravity, range));
       if (!thrown) this.become(x, y, this.rand() < 0.5 ? FIRE : EMPTY);
       else if (this.rand() < 0.25) this.become(x, y, FIRE); // le cratère continue de brûler
+    }
+    // Puis l'onde : de la pression dans l'air jusqu'à `REACH` rayons, plus
+    // forte au centre, qui chasse fumée et flammes vers l'extérieur
+    // (`blown`). Après le disque, pas pendant : l'air n'y est connu qu'une
+    // fois tout projeté. Joué par `settle()`, seul : la portée dépasse le damier.
+    // ponytail: l'onde passe à travers les murs (seul l'air la reçoit, mais
+    // sans ligne de vue) — une charge derrière une cloison souffle la fumée de
+    // l'autre côté. Tracer des rayons le jour où ça se remarque.
+    const reach = radius * REACH;
+    for (const [ox, oy, d] of disc(reach)) {
+      const x = cx + ox, y = cy + oy;
+      if (this.inBounds(x, y)) this.puff(this.index(x, y), BLOW * (reach - d));
     }
   }
 
@@ -1809,6 +1930,109 @@ export class Engine {
     for (let y = y0; y < y1; y++) {
       for (let i = y * w + x0, end = y * w + x1; i < end; i++) temp[i] = tempNext[i];
     }
+  }
+
+  /**
+   * La pression de l'air, après la chaleur : `AIR_STEPS` sous-pas de
+   * diffusion entre cellules d'air sur les blocs éveillés, chacun une passe
+   * répartie entre les fils (lecture de `press`, écriture de `pressNext`,
+   * échange). Au dernier, un bloc dont toute la pression est sous `CALM_P`
+   * la remet à zéro (`hush`) et peut s'endormir ; les autres se tiennent
+   * éveillés. Le gradient qui en sort pousse les gaz (`blown`).
+   *
+   * Tant que rien n'a soufflé (`CTL.gust` à 0), la passe est sautée : un bac
+   * sans explosion ne paie rien. Un bloc endormi a une pression nulle dans
+   * les deux tampons — il ne s'endort qu'une fois remis à zéro, et `puff()`
+   * le réveille —, ses voisins peuvent donc le lire sans `pulled()`.
+   *
+   * ponytail: une diffusion amortie, pas un vrai fluide (ni vitesse ni
+   * inertie) : l'onde s'étale au lieu de voyager, et ce qui sort d'un bloc
+   * éveillé vers un bloc endormi est perdu pour le tick. À revoir si l'on veut
+   * des ventilateurs ou des courants d'air qui durent.
+   */
+  private breathe(): void {
+    if (Atomics.load(this.control, CTL.gust) === 0) return;
+    Atomics.store(this.control, CTL.gust, 0);
+    const { awake, jobs } = this;
+    let count = 0;
+    for (let c = 0; c < awake.length; c++) if (awake[c]) jobs[count++] = c;
+    for (let s = 0; s < AIR_STEPS; s++) {
+      this.publish();
+      this.run(s === AIR_STEPS - 1 ? JOB.gust : JOB.air, count);
+      const press = this.press;
+      this.press = this.pressNext;
+      this.pressNext = press;
+    }
+    this.publish();
+    this.run(JOB.hush, count);
+  }
+
+  /**
+   * Un sous-pas de pression sur le bloc `c`. Une cellule qui n'est pas de
+   * l'air vaut 0 ; une voisine qui n'en est pas (ou le bord) compte pour la
+   * cellule elle-même : rien ne passe à travers un mur. `last` : le bloc
+   * décide s'il se calme. Calcul en 64 bits rangé en 32, comme la chaleur :
+   * le même au bit près partout, et dans le port Rust (rust/src/lib.rs).
+   */
+  private airChunk(c: number, last: boolean): void {
+    const { width: w, height: h, cells, press: p, pressNext: q } = this;
+    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
+    if (this.hushed(x0, y0, x1, y1)) {
+      if (last) this.hush[c] = 1;
+      for (let y = y0; y < y1; y++) q.fill(0, y * w + x0, y * w + x1);
+      return;
+    }
+    let loud = false;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = y * w + x;
+        if (!OPEN[cells[i]]) { q[i] = 0; continue; }
+        const v = p[i];
+        const up = y > 0 && OPEN[cells[i - w]] ? p[i - w] : v;
+        const down = y < h - 1 && OPEN[cells[i + w]] ? p[i + w] : v;
+        const left = x > 0 && OPEN[cells[i - 1]] ? p[i - 1] : v;
+        const right = x < w - 1 && OPEN[cells[i + 1]] ? p[i + 1] : v;
+        const next = (v + FLOW * (up + down + left + right - 4 * v)) * DAMP;
+        q[i] = next;
+        if (next >= CALM_P) loud = true;
+      }
+    }
+    if (!last) return;
+    if (loud) {
+      this.hush[c] = 0;
+      this.stir[c] = 1;
+      Atomics.store(this.control, CTL.gust, 1);
+      return;
+    }
+    this.hush[c] = 1;
+    for (let y = y0; y < y1; y++) q.fill(0, y * w + x0, y * w + x1);
+  }
+
+  /**
+   * Le bloc et sa bordure sont-ils sans pression ? Le sous-pas y rendrait 0
+   * partout, au bit près (la pression n'est jamais négative, pas de -0) : on
+   * saute le calcul. C'est presque tout bloc éveillé par du sable ou de l'eau
+   * qui bouge loin d'un souffle ; sans ce raccourci, une salve dans le
+   * chantier en 1920×1080 coûtait 42 ms de pression par tick.
+   */
+  private hushed(x0: number, y0: number, x1: number, y1: number): boolean {
+    const { width: w, height: h, press: p } = this;
+    const ya = Math.max(0, y0 - 1), yb = Math.min(h, y1 + 1);
+    const xa = Math.max(0, x0 - 1), xb = Math.min(w, x1 + 1);
+    for (let y = ya; y < yb; y++) {
+      for (let i = y * w + xa, end = y * w + xb; i < end; i++) if (p[i] !== 0) return false;
+    }
+    return true;
+  }
+
+  /** Dernière passe : un bloc calmé vide aussi l'autre tampon, pour dormir à zéro dans les deux. */
+  private hushChunk(c: number): void {
+    if (!this.hush[c]) return;
+    const { width: w, pressNext: q } = this;
+    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(this.height, y0 + CHUNK);
+    for (let y = y0; y < y1; y++) q.fill(0, y * w + x0, y * w + x1);
   }
 
   /** Retourne le pôle de l'aimant sous le curseur : attirer ↔ repousser. */

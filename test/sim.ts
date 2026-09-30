@@ -14,7 +14,7 @@ import { terrain } from "../src/client/terrain.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
-  MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
+  MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE,
   CEMENT, FILINGS, HERO, HERO_HARM, HERO_SLOTS, MAGNET, PILOT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
@@ -1105,6 +1105,54 @@ function top(e: Engine, id: MaterialId): number {
 }
 
 /**
+ * Pression et vent : un souffle laisse de la pression dans l'air, qui chasse
+ * les gaz vers l'extérieur, puis retombe à zéro — et le bac se rendort.
+ */
+{
+  /** Distance moyenne des cellules de fumée au point (80, 45). */
+  const spread = (e: Engine): number => {
+    let n = 0, sum = 0;
+    for (let i = 0; i < e.cells.length; i++) {
+      if (e.cells[i] !== SMOKE) continue;
+      const x = (i % e.width) - 80, y = ((i / e.width) | 0) - 45;
+      n++;
+      sum += Math.sqrt(x * x + y * y);
+    }
+    return sum / n;
+  };
+  const cloud = (boom: boolean): Engine => {
+    const e = new Engine(160, 90, 3);
+    e.paint(80, 45, 25, SMOKE, 0.3);
+    if (boom) e.explode(80, 45, 7);
+    for (let t = 0; t < 8; t++) e.step();
+    return e;
+  };
+  const calm = cloud(false), blown = cloud(true);
+  assert.ok(!calm.press.some((p) => p !== 0), "sans souffle, pas un souffle d'air");
+  assert.ok(blown.press.some((p) => p > 1), "un souffle laisse de la pression autour de lui");
+  assert.ok(spread(blown) > spread(calm) + 2, `et chasse la fumée : ${spread(blown).toFixed(1)} contre ${spread(calm).toFixed(1)} cellules du centre`);
+
+  // La pression n'entre pas dans la pierre, et retombe à zéro : le bac se rendort.
+  const e = new Engine(96, 64, 5);
+  e.rect(0, 40, 95, 63, STONE);
+  e.explode(48, 30, 5);
+  e.step();
+  for (let i = 0; i < e.cells.length; i++) {
+    if (e.cells[i] === STONE) assert.equal(e.press[i], 0, "aucune pression dans la pierre");
+  }
+  for (let t = 0; t < 600 && e.busy > 0; t++) e.step();
+  assert.ok(!e.press.some((p) => p !== 0), "la pression retombe à zéro exactement");
+  for (let t = 0; t < 400 && e.busy > 0; t++) e.step();
+  assert.equal(e.busy, 0, "puis le bac se rendort : la pression ne tient rien éveillé pour toujours");
+
+  // Une grille posée (monde, rejeu, salon, annulation) repart sans pression, chez chacun.
+  const f = new Engine(96, 64, 5);
+  f.explode(48, 30, 5);
+  f.wakeAll();
+  assert.ok(!f.press.some((p) => p !== 0), "`wakeAll()` remet la pression à zéro");
+}
+
+/**
  * Contrat d'équivalence du moteur : à graine égale, la même scène donne la même
  * grille au tick près. C'est ce test — et non les règles prises une à une — qui
  * dira qu'un moteur réécrit (Rust/WASM) fait bien la même chose que celui-ci :
@@ -1152,7 +1200,7 @@ function top(e: Engine, id: MaterialId): number {
   };
 
   const empreinte = fingerprint(run(1234));
-  assert.equal(empreinte, "c0b016ea", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
+  assert.equal(empreinte, "2ea7443b", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
   assert.equal(fingerprint(run(1234)), empreinte, "et rejouable : deux fois la même graine, la même grille");
   assert.notEqual(fingerprint(run(9876)), empreinte, "une autre graine donne une autre partie");
 }

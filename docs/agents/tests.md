@@ -11,19 +11,19 @@
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
 | `npm run directions` | mesure de décision, pas un test : voir [Choisir une direction](#choisir-une-direction) |
-| `npm run rust` | compile [rust/](../../rust/) en WASM puis lance [test/rust.ts](../../test/rust.ts) : `thermal()` en JavaScript contre sa version Rust, temps et égalité au bit près. Demande Rust installé ([docs/rust.md](../rust.md)) ; hors CI |
+| `npm run rust` | compile [rust/](../../rust/) en WASM puis lance [test/rust.ts](../../test/rust.ts) : `thermal()` et la pression (`breathe()`) en JavaScript contre leurs versions Rust, temps et égalité au bit près. Demande Rust installé ([docs/rust.md](../rust.md)) ; hors CI |
 
 Il n'y a **pas de framework de test** ni de linter. Node ≥ 24 exécute le
 TypeScript directement.
 
 | Script | Couvre | Charge |
 | --- | --- | --- |
-| [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), blocs de veille (dont la mer de lave qui doit s'endormir), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
+| [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), blocs de veille (dont la mer de lave qui doit s'endormir), pression et vent (un souffle chasse la fumée, la pierre n'en prend pas, elle retombe à zéro exactement et le bac se rendort, `wakeAll()` l'efface), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
 | [test/ui.ts](../../test/ui.ts) | logique pure du panneau, touches réassignables ; ce que voit le héros ; rapports d'erreur (une fois chacun, cinq au plus, plafond) | `ui.ts`, `sight.ts`, `reporter()` d'`errors.ts` |
 | [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, vues sous débit, ménage (récents + plus vus), routage des messages du salon ; `/api/error` (ce qui est journalisé, `console.error` capturé ; vide, trop lourd, débit) | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
 | [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles ; salon en lockstep, dont les messages mal formés d'un pair (geste d'invité, `turn` et départ de l'hôte) | `Sandbox` avec un rappel `send` qui empile |
 | [test/browser.ts](../../test/browser.ts) (hors `check`) | les deux copies du coloriage (shader de screen.ts, `Renderer`) sur la page [test/screen.html](../../test/screen.html) ; la page du jeu : première frame, console sans erreur ; une exception de la page arrive sur `/api/error` (`204`) | un serveur Vite (`createServer`, port libre) et Chromium via `playwright` |
-| [test/pool.ts](../../test/pool.ts) | le moteur sur plusieurs fils : 400 ticks d'une partie chargée (monde généré, feu, explosifs, uranium, héros piloté) sur 1 fil et sur 4, **identiques au bit près** ; rebranchement sur un autre moteur | `Engine`, `Pool`, fils `worker_threads` ([test/helper.ts](../../test/helper.ts)) |
+| [test/pool.ts](../../test/pool.ts) | le moteur sur plusieurs fils : 400 ticks d'une partie chargée (monde généré, feu, explosifs, uranium, héros piloté) sur 1 fil et sur 4, **identiques au bit près**, pression comprise (le test vérifie qu'elle a bien soufflé) ; rebranchement sur un autre moteur | `Engine`, `Pool`, fils `worker_threads` ([test/helper.ts](../../test/helper.ts)) |
 
 ## Choisir une direction
 
@@ -52,8 +52,11 @@ n'est pas dans la CI :
    versions, dont deux exactes au bit près) et le compare au moteur sur trois
    scènes, dix ticks chacune ; la fonderie (1917×1077, ambiante -0) y force
    des changements d'état et des blocs incomplets. Il échoue si une version
-   exacte ne l'est plus, ou si trop peu de changements d'état sont comparés. Résultats
-   et marche à suivre dans [docs/rust.md](../rust.md).
+   exacte ne l'est plus, ou si trop peu de changements d'état sont comparés.
+   Il porte aussi la pression (`breathe()` → `air()`, deux versions exactes),
+   comparée sur une salve d'explosions au-dessus du chantier, en 1920×1080 et
+   1917×1077 ; il échoue si la salve laisse trop peu de pression à comparer.
+   Résultats et marche à suivre dans [docs/rust.md](../rust.md).
 
 Les noyaux sont un **minorant** : le vrai moteur a cinquante matières, des
 créatures et des explosions. La dernière ligne du rapport compare le coût par
@@ -128,6 +131,11 @@ plutôt qu'`engine()` : le TNT, au hasard, échouait une fois sur 4 000.
 Le test de rejeu qui suit vérifie qu'une partie enregistrée retombe sur la
 même grille dans un moteur neuf : il casse si une modification de la grille
 échappe à `Recorder` (voir `stamp()` dans [simulation.md](simulation.md)).
+
+La pression (`press`) n'est pas hachée, mais le TNT de la scène souffle :
+son vent déplace fumée et flammes, donc l'empreinte. Neutraliser le vent
+(`GUST_MIN` démesuré) doit rendre l'ancienne empreinte, `c0b016ea` : c'est
+ainsi qu'on a vérifié que la pression ne change rien d'autre.
 
 La scène de l'empreinte (60×40, soit 4×3 blocs) garde tous ses blocs éveillés
 — lave, pile, thermite : les blocs de veille ne l'ont pas changée. Ce sont les

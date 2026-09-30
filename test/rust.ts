@@ -19,15 +19,18 @@
  * incomplets à droite et en bas ; son ambiante -0 vérifie le +0 qu'écrit
  * `flat()`.
  *
+ * Puis la pression (`breathe()` contre `air()` de lib.rs) sur une salve
+ * d'explosions, voir en fin de fichier.
+ *
  * Rien ici ne garde de budget ni n'échoue sur un temps : c'est un instrument
  * de décision, comme `npm run directions`. Il échoue seulement si le `.wasm`
  * manque, ou si une version annoncée exacte ne l'est pas.
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { Engine } from "../src/client/sim/engine.ts";
+import { Engine, OPEN } from "../src/client/sim/engine.ts";
 import {
-  ALCOHOL, CEMENT, FIRE, ICE, LAVA, MATERIALS, MERCURY, NITROGEN, SALTWATER, SAND, SNOW, STONE, WATER, WAX, WOOD,
+  ALCOHOL, CEMENT, FIRE, ICE, LAVA, MATERIALS, MERCURY, NITROGEN, SALTWATER, SAND, SMOKE, SNOW, STONE, WATER, WAX, WOOD,
 } from "../src/client/sim/materials.ts";
 
 const RUNS = 30;
@@ -258,3 +261,140 @@ ${name} — ${W}×${H}, ${(awake * 100).toFixed(0)} % des blocs éveillés`);
 
 // Sans changement d'état, `convert()` côté Rust ne serait vérifié par rien.
 assert.ok(conversions > 100, `trop peu de changements d'état comparés (${conversions}) : la fonderie ne joue plus son rôle`);
+
+/*
+ * La pression de l'air (`breathe()` d'engine.ts, `air()` de lib.rs), sur une
+ * salve d'explosions au-dessus du chantier : la passe ne tourne que là où un
+ * souffle a laissé de la pression, c'est donc sa pire charge. Deux tailles,
+ * dont une pas multiple de 16 (blocs incomplets à droite et en bas).
+ */
+
+/** Ce que `breathe()` lit et écrit. */
+interface Windy {
+  press: Float32Array;
+  pressNext: Float32Array;
+  hush: Uint8Array;
+  awake: Uint8Array;
+  stir: Uint8Array;
+  control: Int32Array;
+  breathe(): void;
+}
+
+/** Le chantier tassé 50 ticks, une nappe de fumée au-dessus, et une salve de charges qui sautent au même tick. */
+function volley(e: Engine): void {
+  worksite(e);
+  for (let t = 0; t < 50; t++) e.step();
+  const { width: W } = e;
+  e.rect(0, 0, W - 1, 30, SMOKE, false);
+  for (let x = 60; x < W; x += 120) e.explode(x, 60, 7);
+}
+
+const AIR_MODES = [
+  { mode: 0, name: "Rust, f64 (copie)" },
+  { mode: 1, name: "Rust SIMD f64×2" },
+];
+const GUST = 8; // CTL.gust d'engine.ts
+
+for (const [name, W, H] of [["salve", 1920, 1080], ["salve", 1917, 1077]] as const) {
+  const N = W * H, chunks = Math.ceil(W / 16) * Math.ceil(H / 16);
+  const { instance } = await WebAssembly.instantiate(readFileSync(WASM));
+  const x = instance.exports as {
+    memory: WebAssembly.Memory;
+    reserve(bytes: number): number;
+    air(...args: number[]): number;
+  };
+  const at = {
+    cells: x.reserve(N), press: x.reserve(N * 4), next: x.reserve(N * 4), awake: x.reserve(chunks),
+    stir: x.reserve(chunks), hush: x.reserve(chunks), jobs: x.reserve(chunks * 4), open: x.reserve(256),
+  };
+  const b = x.memory.buffer;
+  const v = {
+    cells: new Uint8Array(b, at.cells, N), press: new Float32Array(b, at.press, N), next: new Float32Array(b, at.next, N),
+    awake: new Uint8Array(b, at.awake, chunks), stir: new Uint8Array(b, at.stir, chunks), hush: new Uint8Array(b, at.hush, chunks),
+  };
+  new Uint8Array(b, at.open, 256).set(OPEN);
+
+  const engine = new Engine(W, H, 5);
+  volley(engine);
+  engine.step();
+  const e = engine as unknown as Windy & Inner;
+  const take = () => ({
+    cells: e.cells.slice(), press: e.press.slice(), next: e.pressNext.slice(), hush: e.hush.slice(),
+    awake: e.awake.slice(), stir: e.stir.slice(),
+  });
+  let start = take();
+  const refs = { press: e.press, next: e.pressNext };
+  const restore = () => {
+    e.press = refs.press; e.pressNext = refs.next;
+    e.press.set(start.press); e.pressNext.set(start.next);
+    e.hush.set(start.hush); e.stir.set(start.stir); e.awake.set(start.awake);
+    Atomics.store(e.control, GUST, 1);
+  };
+  const load = () => {
+    v.cells.set(start.cells); v.press.set(start.press); v.next.set(start.next);
+    v.awake.set(start.awake); v.stir.set(start.stir); v.hush.set(start.hush);
+  };
+  const run = (mode: number) => x.air(W, H, at.cells, at.press, at.next, at.awake, at.stir, at.hush, at.jobs, at.open, mode);
+
+  let js = 0;
+  for (let r = 0; r < RUNS; r++) {
+    restore();
+    const t0 = performance.now();
+    e.breathe();
+    js += performance.now() - t0;
+  }
+  js /= RUNS;
+  const time = AIR_MODES.map(({ mode }) => {
+    let sum = 0;
+    for (let r = 0; r < RUNS; r++) {
+      load();
+      const t0 = performance.now();
+      run(mode);
+      sum += performance.now() - t0;
+    }
+    return sum / RUNS;
+  });
+  let tick = 0;
+  restore();
+  for (let t = 0; t < 5; t++) {
+    const t0 = performance.now();
+    engine.step();
+    tick += performance.now() - t0;
+  }
+  tick /= 5;
+
+  const awake = start.awake.reduce((n, a) => n + (a ? 1 : 0), 0) / chunks;
+  console.log(`
+${name} (pression) — ${W}×${H}, ${(awake * 100).toFixed(0)} % des blocs éveillés`);
+  console.log(`  tick complet (JS)        ${ms(tick)}`);
+  console.log(`  breathe() JavaScript     ${ms(js)}   (${((js / tick) * 100).toFixed(0)} % du tick)`);
+
+  const diff = AIR_MODES.map(() => 0);
+  let windy = 0;
+  for (let k = 0; k < CHECKS; k++) {
+    if (k > 0) {
+      engine.step();
+      start = take();
+      refs.press = e.press; refs.next = e.pressNext;
+    }
+    restore();
+    e.breathe();
+    const gust = Atomics.load(e.control, GUST);
+    const expected = { press: e.press.slice(), next: e.pressNext.slice(), stir: e.stir.slice(), hush: e.hush.slice() };
+    for (const p of expected.press) if (p > 0) windy++;
+    AIR_MODES.forEach(({ mode }, m) => {
+      load();
+      const g = run(mode);
+      diff[m] += gap(expected.press, v.next).count + gap(expected.next, v.press).count
+        + gap(expected.stir, v.stir).count + gap(expected.hush, v.hush).count + (g === gust ? 0 : 1);
+    });
+    restore();
+  }
+  assert.ok(windy > 10_000, `la salve doit laisser de la pression à comparer (${windy} cellules)`);
+  console.log(`  ${CHECKS} ticks comparés, ${windy} cellules sous pression`);
+  AIR_MODES.forEach(({ name: label }, m) => {
+    const same = diff[m] === 0;
+    console.log(`  ${label.padEnd(24)} ${ms(time[m])}   ×${(js / time[m]).toFixed(2)}   ${same ? "identique au bit près" : `${diff[m]} cases différentes`}`);
+    assert.ok(same, `${label} doit rendre exactement la pression de JavaScript (${name} ${W}×${H})`);
+  });
+}

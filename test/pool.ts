@@ -42,7 +42,7 @@ function partie(e: Engine): void {
 }
 
 const signature = (e: Engine) => ({
-  cells: e.cells.slice(), life: e.life.slice(), temp: e.temp.slice(), frozen: e.frozen.slice(), seed: e.seed,
+  cells: e.cells.slice(), life: e.life.slice(), temp: e.temp.slice(), press: e.press.slice(), frozen: e.frozen.slice(), seed: e.seed,
 });
 
 const W = 640, H = 360, TICKS = 400;
@@ -55,14 +55,16 @@ assert.ok(multi.pool, "le pool s'attache au moteur une fois ses fils prêts");
 
 partie(seul);
 partie(multi);
-let t0 = performance.now(), ms1 = 0, ms4 = 0;
+let t0 = performance.now(), ms1 = 0, ms4 = 0, venté = 0;
 for (let t = 0; t < TICKS; t++) {
   const keys = t < 100 ? PILOT.right : t < 200 ? PILOT.right | PILOT.dig : t < 300 ? PILOT.left | PILOT.up : 0;
   applyGesture(seul, { t: "pilot", keys });
   applyGesture(multi, { t: "pilot", keys });
   t0 = performance.now(); seul.step(); ms1 += performance.now() - t0;
   t0 = performance.now(); multi.step(); ms4 += performance.now() - t0;
+  if (t % 10 === 0 && seul.press.some((p) => p > 0)) venté++;
 }
+assert.ok(venté > 0, "la partie a soufflé : la pression (`breathe()`) passe aussi par les fils");
 assert.deepEqual(signature(multi), signature(seul), `${TICKS} ticks sur 4 fils = ${TICKS} ticks sur 1, au bit près`);
 console.log(`   640×360, ${TICKS} ticks : 1 fil ${(ms1 / TICKS).toFixed(2)} ms/tick, 4 fils ${(ms4 / TICKS).toFixed(2)} ms/tick`);
 
