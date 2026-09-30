@@ -291,8 +291,10 @@ button:hover { border-color: var(--edge); }
     background: var(--bg);
     border-bottom: 1px solid var(--line);
   }
-  /* Un bac plein écran ne laisserait rien voir du panneau. */
-  .stage canvas { max-height: 40vh; width: auto; }
+  /* Un bac plein écran ne laisserait rien voir du panneau. `max-width` :
+     `width: auto` donne au canvas sa taille intrinsèque, et un 640 × 360
+     dépassait d'un téléphone de 500 px, coupé par la scène. */
+  .stage canvas { max-height: 40vh; max-width: 100%; width: auto; }
   /* Le panneau passe sous le bac : plus de colonne, donc plus de bord gauche. */
   .panel { border-left: none; border-top: none; overflow: visible; }
   /* Le bac est déjà collé en haut : une seconde barre collante passerait

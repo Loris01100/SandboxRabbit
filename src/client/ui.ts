@@ -127,6 +127,24 @@ export function clampPan(pan: number, size: number, zoom: number): number {
 }
 
 /**
+ * Échelle entière du bac : combien de pixels **physiques** (`dpr` compris)
+ * par cellule pour que le bac tienne dans un cadre de `boxW` × `boxH` pixels
+ * CSS. Étiré au plus grand, 320 cellules sur 1500 px en faisaient 4,7 : des
+ * lignes de 4 px à côté de lignes de 5, qu'on voit sur un fil de pierre. En
+ * pixels physiques, parce qu'un écran de portable à 125 % donne 1,25 pixel
+ * par pixel CSS — un ×4 en CSS y redevenait un ×5 inégal. 0 : on étire,
+ * soit que même une cellule par pixel ne tienne pas (1920 × 1080 sur un
+ * petit écran), soit qu'arrondir coûte plus d'un quart de la taille — sur
+ * téléphone, 640 cellules en ×1,49 tombaient à ×1, un bac rétréci d'un tiers,
+ * pire que des cellules inégales.
+ */
+export function wholeScale(boxW: number, boxH: number, w: number, h: number, dpr: number): number {
+  const fit = Math.min((boxW * dpr) / w, (boxH * dpr) / h);
+  const k = Math.floor(fit);
+  return k >= 1 && k >= fit * 0.75 ? k : 0;
+}
+
+/**
  * Décalage à appliquer après un zoom pour que le point sous le curseur ne
  * bouge pas. `edge` et `size` décrivent la boîte **affichée** (déjà
  * transformée) ; la boîte d'origine s'en déduit : `edge - pan`, `size / zoom`.

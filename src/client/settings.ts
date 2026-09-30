@@ -2,7 +2,7 @@ import { MATERIALS, type MaterialId } from "./sim/materials.ts";
 import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
 import { current, paletteEl, select } from "./palette.ts";
 import { stored, write } from "./ui.ts";
-import { zoomInput } from "./view.ts";
+import { wholePixels, zoomInput } from "./view.ts";
 import { WIDTH, airView, hour, light, lightDetail, limitFps, resize, screen, set } from "./world.ts";
 
 /** Rayon du pinceau, en cellules. */
@@ -111,6 +111,8 @@ if (screen.kind === "2d") {
 // simule pareil, le salon n'en sait rien.
 const fpsCapInput = document.querySelector<HTMLSelectElement>("#fps-cap")!;
 fpsCapInput.addEventListener("input", () => limitFps(Number(fpsCapInput.value)));
+const wholeInput = document.querySelector<HTMLInputElement>("#whole")!;
+wholeInput.addEventListener("change", () => wholePixels(wholeInput.checked));
 const lightDetailInput = document.querySelector<HTMLSelectElement>("#light-detail")!;
 lightDetailInput.addEventListener("input", () => lightDetail(Number(lightDetailInput.value)));
 if (screen.kind === "2d") {
@@ -131,7 +133,7 @@ const SETTINGS = "sandbox-rabbit:reglages";
 const SAVED = [
   brushInput, speedInput, windInput, ambientInput, sizeInput,
   toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, airmapInput, lightingInput, hourInput,
-  fpsCapInput, lightDetailInput,
+  fpsCapInput, lightDetailInput, wholeInput,
 ];
 const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";

@@ -3,7 +3,7 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, framePeriod, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor } from "../src/client/ui.ts";
+import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, framePeriod, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor, wholeScale } from "../src/client/ui.ts";
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 import { REPORT, reporter } from "../src/client/errors.ts";
@@ -86,6 +86,17 @@ import { REPORT, reporter } from "../src/client/errors.ts";
   assert.equal(framePeriod(hz144, 0), hz144, "sans limite : l'écran");
   assert.equal(framePeriod(hz144, 30), 1000 / 30, "limité à 30 images par seconde");
   assert.equal(framePeriod(1000 / 60, 144), 1000 / 60, "une limite au-dessus de l'écran ne l'accélère pas");
+}
+
+// Échelle entière : le plus grand multiple qui tient, en pixels physiques.
+{
+  assert.equal(wholeScale(1500, 900, 320, 180, 1), 4, "4,7 → 4 : toutes les cellules font 4 px");
+  assert.equal(wholeScale(1500, 600, 320, 180, 1), 3, "la hauteur borne aussi");
+  assert.equal(wholeScale(1200, 700, 320, 180, 1.25), 4, "écran à 125 % : 1200 px CSS = 1500 pixels physiques");
+  assert.equal(wholeScale(1500, 900, 1920, 1080, 1), 0, "une cellule par pixel ne tient pas : 0, on étire");
+  assert.equal(wholeScale(-10, 0, 320, 180, 1), 0, "un cadre pas encore posé ne donne rien de négatif");
+  assert.equal(wholeScale(478, 358, 640, 360, 2), 0, "×1,49 → ×1 rétrécirait d'un tiers : on étire");
+  assert.equal(wholeScale(1500, 900, 1280, 720, 1), 1, "×1,17 → ×1 ne perd qu'un septième : entière");
 }
 
 /**
