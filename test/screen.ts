@@ -18,7 +18,7 @@
  */
 import { Engine } from "../src/client/sim/engine.ts";
 import { MATERIALS } from "../src/client/sim/materials.ts";
-import { AIR_LEVELS, HOURS, Renderer, airLevel, type Grid, type Tint, type View } from "../src/client/sim/render.ts";
+import { AIR_LEVELS, HOURS, Renderer, type Grid, type Mirror, type Tint, type View } from "../src/client/sim/render.ts";
 import { terrain } from "../src/client/terrain.ts";
 import { createScreen, type Screen } from "../src/client/screen.ts";
 
@@ -45,7 +45,7 @@ declare global {
 const W = 240, H = 135;
 
 /** Le monde du test : généré, quelques ticks, puis la bande de toutes les matières. */
-function scene(): Grid & { temp: Int16Array; press: Float32Array } {
+function scene(): Mirror {
   const e = new Engine(W, H, 1234);
   terrain(e, 7);
   for (let t = 0; t < 20; t++) e.step();
@@ -54,9 +54,8 @@ function scene(): Grid & { temp: Int16Array; press: Float32Array } {
   const grid = {
     width: W, height: H, ambient: e.ambient,
     cells: e.cells.slice(), life: e.life.slice(), frozen: e.frozen.slice(), noise: e.noise.slice(),
-    temp: Int16Array.from(e.temp, (t) => Math.max(-32768, Math.min(32767, Math.round(t)))),
-    // Par palier, comme dans le miroir de la page (world.ts).
-    press: Float32Array.from(e.press, (p) => airLevel(p) / AIR_LEVELS),
+    // Brutes, comme dans le miroir de la page (world.ts).
+    temp: e.temp.slice(), press: e.press.slice(),
   };
   const ids = Object.values(MATERIALS).map((m) => m.id);
   for (let y = 0; y < 30; y++) {

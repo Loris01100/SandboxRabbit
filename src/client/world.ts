@@ -193,7 +193,7 @@ function blit(frame: Extract<News, { t: "frame" }>): void {
     mirror = {
       width: w, height: h, ambient: frame.ambient,
       cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
-      noise: new Int8Array(n), temp: new Int16Array(n), press: new Float32Array(n),
+      noise: new Int8Array(n), temp: new Float32Array(n), press: new Float32Array(n),
     };
   }
   const m = mirror;
@@ -294,6 +294,13 @@ sim.addEventListener("message", (e: MessageEvent<News>) => {
     waiting.delete(news.ask);
   }
   for (const fn of listeners) fn(news);
+  // Les bandes sont posées dans le miroir : leur tampon repart au Worker, qui
+  // le réutilise plutôt que d'en allouer un neuf (`recycle()` de render.ts).
+  // Après les abonnés, qui reçoivent encore la frame intacte.
+  if (news.t === "frame" && news.patches.length > 0) {
+    const buffer = news.patches[0].cells.buffer as ArrayBuffer;
+    sim.postMessage({ t: "spare", buffer }, [buffer]);
+  }
 });
 
 /**

@@ -112,7 +112,7 @@ quelques secondes sur le runner.
 | Fichier | Rôle |
 | --- | --- |
 | [test/browser.ts](../test/browser.ts) | le script : lance Vite et Chromium, lit le rapport, charge la page du jeu. `npm run browser` |
-| [test/screen.html](../test/screen.html), [test/screen.ts](../test/screen.ts) | la page de comparaison : une grille (monde généré + une bande de chaque matière, `life`, température et figé variés) peinte par le shader de screen.ts et par `Renderer`, aux quatre heures, en vue thermique et en vue pression (la pression d'un souffle, plus une rampe de tous les paliers). Ouvrable à la main : http://localhost:5173/test/screen.html sous `npm run dev` |
+| [test/screen.html](../test/screen.html), [test/screen.ts](../test/screen.ts) | la page de comparaison : une grille (monde généré + une bande de chaque matière, `life`, température et figé variés ; température et pression brutes, comme dans le miroir de la page) peinte par le shader de screen.ts et par `Renderer`, aux quatre heures, en vue thermique et en vue pression (la pression d'un souffle, plus une rampe de tous les paliers). Ouvrable à la main : http://localhost:5173/test/screen.html sous `npm run dev` |
 
 Ce qui est vérifié :
 

@@ -19,7 +19,7 @@
  * de `main` demanderait de la stocker quelque part — comme bench.ts.
  */
 import { Engine } from "../src/client/sim/engine.ts";
-import { Tracker, land, type Mirror } from "../src/client/sim/render.ts";
+import { Tracker, land, recycle, type Mirror } from "../src/client/sim/render.ts";
 import { FILINGS, FIRE, LAVA, MAGNET, MATERIALS, NANITE, STONE, TNT, WATER, type MaterialId } from "../src/client/sim/materials.ts";
 
 const SLACK = Number(process.env.STRESS_SLACK ?? 1);
@@ -121,7 +121,7 @@ perCell.forEach(([id, ns], rank) => {
   tracker.take();
   const mirror: Mirror = {
     width: w, height: h, ambient: 20, cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
-    noise: new Int8Array(n), temp: new Int16Array(n), press: new Float32Array(n),
+    noise: new Int8Array(n), temp: new Float32Array(n), press: new Float32Array(n),
   };
   let take = 0, put = 0;
   for (let k = 0; k < 10; k++) {
@@ -131,10 +131,11 @@ perCell.forEach(([id, ns], rank) => {
     const t1 = performance.now();
     for (const p of patches) land(mirror, p);
     const t2 = performance.now();
+    recycle(patches[0].cells.buffer as ArrayBuffer); // comme la page, qui rend le tampon (world.ts)
     if (k >= 2) { take += t1 - t0; put += t2 - t1; }
   }
-  check("bandes 1920×1080 : préparation (fil du bac)", take / 8, 45, "ms");
-  check("bandes 1920×1080 : pose (page)", put / 8, 80, "ms");
+  check("bandes 1920×1080 : préparation (fil du bac)", take / 8, 12, "ms");
+  check("bandes 1920×1080 : pose (page)", put / 8, 12, "ms");
 }
 
 console.log("mesure".padEnd(48) + "valeur".padStart(10) + "plafond".padStart(10));

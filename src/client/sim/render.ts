@@ -7,9 +7,9 @@ import { type Engine } from "./engine.ts";
  * Ce qu'il faut pour colorier un bac : la grille et son état, sans le moteur.
  * Le moteur l'est (le Worker, les tests), le miroir de la page aussi
  * (world.ts) — c'est ce qui laisse colorier aussi bien d'un côté que de
- * l'autre. `temp` : en °C, flottants dans le moteur, arrondis dans le miroir.
- * `press` : la pression de l'air, flottante dans le moteur, ramenée à ses
- * paliers (`AIR_LEVELS`) dans le miroir — la vue pression n'en lit pas plus.
+ * l'autre. `temp` : en °C, flottants. `press` : la pression de l'air,
+ * flottante ; la vue pression la ramène à ses paliers (`airLevel()`, et
+ * `floor(p·8 + 0,5)` dans le shader).
  */
 export interface Grid {
   width: number;
@@ -27,10 +27,10 @@ export interface Grid {
  * Une bande de bac à reposer en (x, y) : les données brutes de ses cellules,
  * rangée par rangée, pas des pixels. C'est la carte graphique de la page qui
  * les colorie (screen.ts). Température et pression voyagent **brutes**, et
- * c'est la page qui les arrondit en posant la bande (`land()`) : arrondir ici
- * coûtait 10 ms par frame au fil du bac en 1920×1080 tout changé (nanites),
- * pendant lesquelles il ne simulait pas ; la page, elle, attend presque
- * toujours. `noise`, fixe pour un moteur, ne voyage qu'avec la première frame.
+ * restent brutes jusqu'au shader : les arrondir coûtait 10 ms par frame en
+ * 1920×1080 tout changé (nanites), au fil du bac d'abord, puis à la page. Le
+ * shader et `Renderer` lisent les flottants tels quels. `noise`, fixe pour un
+ * moteur, ne voyage qu'avec la première frame.
  */
 export interface Patch {
   x: number;
@@ -45,17 +45,14 @@ export interface Patch {
   noise?: Int8Array;
 }
 
-/**
- * Ce que la page garde du bac pour le colorier : la grille, température au
- * degré (`Int16Array`) et pression par palier (÷ `AIR_LEVELS`, exact en
- * flottant, que `airLevel()` rend tel quel).
- */
-export type Mirror = Grid & { temp: Int16Array; press: Float32Array };
+/** Ce que la page garde du bac pour le colorier : la grille, température et pression brutes, comme dans le moteur. */
+export type Mirror = Grid & { temp: Float32Array; press: Float32Array };
 
 /**
  * Pose une bande dans le miroir de la page (world.ts, et les tests qui en
- * refont un), en arrondissant température et pression. Une seule copie de
- * cette conversion : l'écran et les tests lisent les mêmes valeurs.
+ * refont un) : rien que des copies, une par rangée et par couche. Les arrondis
+ * qu'on y faisait prenaient 15 ms en 1920×1080 tout changé ; le shader lit
+ * maintenant les flottants (textures R32F).
  */
 export function land(m: Mirror, p: Patch): void {
   const w = m.width;
@@ -65,14 +62,8 @@ export function land(m: Mirror, p: Patch): void {
     m.life.set(p.life.subarray(from, from + p.w), to);
     m.frozen.set(p.frozen.subarray(from, from + p.w), to);
     if (p.noise) m.noise.set(p.noise.subarray(from, from + p.w), to);
-    for (let k = 0; k < p.w; k++) {
-      const t = p.temp[from + k];
-      m.temp[to + k] = t > 32767 ? 32767 : t < -32768 ? -32768 : Math.round(t);
-      // `airLevel()` en ligne : la pression n'est jamais négative, `| 0` vaut
-      // donc `Math.floor`, et l'appel par cellule coûtait quatre fois plus.
-      const v = (p.press[from + k] * AIR_LEVELS + 0.5) | 0;
-      m.press[to + k] = (v > 255 ? 255 : v) / AIR_LEVELS;
-    }
+    m.temp.set(p.temp.subarray(from, from + p.w), to);
+    m.press.set(p.press.subarray(from, from + p.w), to);
   }
 }
 
@@ -86,6 +77,29 @@ export function land(m: Mirror, p: Patch): void {
  * Colorier ici coûtait 6 ms par tick en 1920×1080 chargé (npm run
  * directions) : c'est le shader de la page qui le fait maintenant.
  */
+/**
+ * Les tampons de bandes que la page a rendus (`recycle()`), prêts à resservir.
+ * Un tampon neuf de 23 Mo, c'est 1,7 ms de mise à zéro par frame en 1920×1080
+ * tout changé ; un tampon rendu, rien. Trois au plus : une frame en route vers
+ * la page, une en retour, une d'avance.
+ */
+const spares: ArrayBuffer[] = [];
+
+/** Rend un tampon de bandes (worker.ts, message `spare` de la page). */
+export function recycle(buffer: ArrayBuffer): void {
+  spares.push(buffer);
+  if (spares.length > 3) spares.shift();
+}
+
+/** Un tampon d'au moins `bytes` octets : le plus petit des rendus qui suffit, sinon un neuf. */
+function claim(bytes: number): ArrayBuffer {
+  let best = -1;
+  for (let k = 0; k < spares.length; k++) {
+    if (spares[k].byteLength >= bytes && (best < 0 || spares[k].byteLength < spares[best].byteLength)) best = k;
+  }
+  return best < 0 ? new ArrayBuffer(bytes) : spares.splice(best, 1)[0];
+}
+
 export class Tracker {
   private readonly engine: Engine;
   private readonly dirty: Uint8Array;
@@ -101,7 +115,9 @@ export class Tracker {
    * seul tampon** par frame, que la page reçoit sans copie (worker.ts le
    * transfère une fois) : un tableau neuf par bande et par couche, c'était
    * 340 allocations par frame en 1920×1080 tout changé, 9 ms sur le fil du
-   * bac pour mettre à zéro de quoi l'écraser aussitôt.
+   * bac pour mettre à zéro de quoi l'écraser aussitôt. Le tampon est pris
+   * parmi ceux que la page a rendus (`claim()`) : chaque octet des vues est
+   * écrit ci-dessous, ce qui traîne d'une frame précédente n'est jamais lu.
    */
   take(): Patch[] {
     const { chunk, cols, rows, width: w, height: h, cells, life, frozen, temp, press, noise } = this.engine;
@@ -125,8 +141,9 @@ export class Tracker {
       rects.push([x, y0, pw, ph]);
       total += pw * ph;
     }
+    if (total === 0) return [];
     // Les flottants en tête : leurs vues exigent un décalage multiple de 4.
-    const buffer = new ArrayBuffer(total * (8 + 3 + (full ? 1 : 0)));
+    const buffer = claim(total * (8 + 3 + (full ? 1 : 0)));
     let floats = 0, bytes = total * 8;
     const patches: Patch[] = [];
     for (const [x, y0, pw, ph] of rects) {

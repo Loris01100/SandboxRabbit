@@ -559,17 +559,19 @@ tick en 1920×1080 chargé (`npm run directions`).
   les [blocs de veille](#blocs-de-veille). À chaque frame il découpe les blocs
   que `engine.changed()` désigne (traités par un tick, ou écrits depuis — un
   geste bac en pause), une bande (`Patch`) par rangée de blocs changés, en
-  données brutes : matière, `life`, figé, température arrondie au degré
-  (`Int16`), pression par palier (`airLevel()`, `Uint8` : 1/8 d'unité,
-  saturé à 255). Un bac au repos n'envoie rien ; la première frame d'un moteur est
+  données brutes : matière, `life`, figé, température et pression en
+  flottants, telles que le moteur les tient. Toutes les bandes d'une frame
+  sont des vues d'un seul tampon, pris parmi ceux que la page a rendus
+  (`claim()`). Un bac au repos n'envoie rien ; la première frame d'un moteur est
   entière et porte le grain (`noise`, fixe pour un moteur).
 - **Page** : le miroir de world.ts est colorié par
   [screen.ts](../../src/client/screen.ts), un shader WebGL2 sur des textures
-  entières, plus une flottante pour la pression (`texSubImage2D` du rectangle
-  changé), ou sans WebGL2 par `Renderer` puis `putImageData`. Le miroir range
-  la pression en `palier / AIR_LEVELS`, exact en flottant : `airLevel()` y
-  retrouve le palier tel quel, et `Renderer` colorie pareil le moteur et le
-  miroir.
+  entières, plus deux flottantes (R32F) pour la température et la pression
+  (`texSubImage2D` du rectangle changé), ou sans WebGL2 par `Renderer` puis
+  `putImageData`. Le miroir est la copie exacte du moteur (température et
+  pression brutes) : `Renderer` colorie pareil le moteur et le miroir, et la
+  vue pression ramène elle-même la pression à son palier (`airLevel()`, et
+  `floor(p·8 + 0,5)` dans le shader).
 - **Trois vues** (`View` de render.ts) : la matière, la vue thermique
   (`shadeHeat`) et la vue pression (`shadeAir` : l'air du bleu profond au
   blanc, le reste assombri aux 77/256). Les deux dernières sans éclairage ni

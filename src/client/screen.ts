@@ -3,7 +3,7 @@
  *
  * Deux façons, une interface :
  * - **WebGL2** : la grille monte en textures (matière, `life`, figé, grain,
- *   température au degré, pression par palier), et un shader colorie chaque pixel. Le Worker
+ *   température et pression en flottants), et un shader colorie chaque pixel. Le Worker
  *   ne colorie plus rien — 6 ms par tick de gagnés en 1920×1080 chargé — et la
  *   page ne fait qu'envoyer à la carte le rectangle changé ;
  * - **2D** : le secours d'un navigateur sans WebGL2, le même `Renderer` qu'en
@@ -66,7 +66,7 @@ uniform highp usampler2D cells;
 uniform highp usampler2D life;
 uniform highp usampler2D frozen;
 uniform highp isampler2D noise;
-uniform highp isampler2D temp;
+uniform highp sampler2D temp;
 uniform highp sampler2D press;
 uniform highp usampler2D palette;
 uniform highp usampler2D table;
@@ -82,7 +82,7 @@ out vec4 color;
 void main() {
   ivec2 size = textureSize(cells, 0);
   ivec2 p = ivec2(int(gl_FragCoord.x), size.y - 1 - int(gl_FragCoord.y));
-  float t = float(texelFetch(temp, p, 0).r);
+  float t = texelFetch(temp, p, 0).r;
   vec3 c;
   if (view == 2) {
     int l = int(min(255.0, floor(texelFetch(press, p, 0).r * ${AIR_LEVELS.toFixed(1)} + 0.5)));
@@ -166,7 +166,7 @@ const SCENE = `#version 300 es
 precision highp float;
 precision highp int;
 uniform highp usampler2D cells;
-uniform highp isampler2D temp;
+uniform highp sampler2D temp;
 uniform highp usampler2D table;
 uniform int scale;
 out vec4 color;
@@ -181,7 +181,7 @@ void main() {
     if (p.x >= size.x || p.y >= size.y) continue;
     int id = int(texelFetch(cells, p, 0).r);
     vec4 m = vec4(texelFetch(table, ivec2(id, 0), 0)) / 255.0;
-    float t = float(texelFetch(temp, p, 0).r);
+    float t = texelFetch(temp, p, 0).r;
     if (id != 0 && t > 450.0) m.rgb = max(m.rgb, vec3(1.0, 0.45, 0.1) * min(1.0, (t - 450.0) / 700.0));
     sum += vec4(m.rgb * m.a, m.a);
     n += 1.0;
@@ -322,7 +322,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
     life: [gl.R8UI, gl.UNSIGNED_BYTE, gl.RED_INTEGER],
     frozen: [gl.R8UI, gl.UNSIGNED_BYTE, gl.RED_INTEGER],
     noise: [gl.R8I, gl.BYTE, gl.RED_INTEGER],
-    temp: [gl.R16I, gl.SHORT, gl.RED_INTEGER],
+    temp: [gl.R32F, gl.FLOAT, gl.RED],
     press: [gl.R32F, gl.FLOAT, gl.RED],
   };
   /** Une texture liée à `unit`, filtrée `filter` (les textures entières exigent `NEAREST`). */

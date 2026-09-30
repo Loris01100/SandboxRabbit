@@ -34,13 +34,17 @@ flowchart LR
    moteur les tient (flottants), et le grain avec la première frame d'un
    moteur —, toutes découpées dans **un seul tampon** par frame, transféré une
    fois. world.ts les recopie **dès l'arrivée** dans un miroir de la grille
-   (`blit()` → `land()` de render.ts, qui arrondit la température au degré et
-   la pression au palier d'`airLevel()`). Arrondir côté Worker, et y allouer un
-   tableau par bande et par couche, coûtait ~11 ms par frame au fil du bac en
-   1920×1080 tout changé ; la page, qui attend presque toujours, le fait
-   pendant que le bac calcule le tick suivant. Puis `present()` fait colorier le
+   (`blit()` → `land()` de render.ts : rien que des copies, le miroir garde
+   température et pression brutes, comme le moteur), puis **rend le tampon**
+   au Worker (`{t: "spare", buffer}`, transféré, traité par worker.ts
+   lui-même), qui le réutilise pour une frame suivante (`recycle()` /
+   `claim()` de render.ts, trois tampons au plus). En 1920×1080 tout changé,
+   arrondir côté Worker et y allouer un tableau par bande et par couche
+   coûtait ~11 ms par frame au fil du bac, arrondir côté page ~15 ms ;
+   préparation et pose tiennent maintenant en ~2 ms chacune
+   (`npm run stress`). Puis `present()` fait colorier le
    rectangle changé par [screen.ts](../../src/client/screen.ts) : un shader
-   WebGL2 sur des textures (entières, sauf la pression, en flottants), ou, sans WebGL2, `Renderer` puis un
+   WebGL2 sur des textures (entières, sauf température et pression, en flottants R32F, que le shader lit brutes comme `Renderer`), ou, sans WebGL2, `Renderer` puis un
    `putImageData`. Un envoi à l'écran par rafraîchissement. Ne jamais sauter
    une frame : elle ne porte que ce qui a changé, et le morceau resterait en
    retard pour de bon. La vue thermique ne regarde que la page : `order()`

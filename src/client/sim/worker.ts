@@ -14,13 +14,14 @@
  * télécharger.
  */
 import { SLICE, Sandbox, type News, type Order } from "./sandbox.ts";
+import { recycle } from "./render.ts";
 import { Pool, serve, type Helper } from "./pool.ts";
 
 // `self` typé à la main : le projet compile avec la lib DOM, pas celle des
 // Workers (les deux se contredisent sur la moitié des noms globaux).
 const worker = self as unknown as {
   postMessage(message: unknown, transfer?: Transferable[]): void;
-  onmessage: ((e: { data: Order | { t: "start"; w: number; h: number } | { t: "pace"; ms: number } | Parameters<typeof serve>[0] }) => void) | null;
+  onmessage: ((e: { data: Order | { t: "start"; w: number; h: number } | { t: "pace"; ms: number } | { t: "spare"; buffer: unknown } | Parameters<typeof serve>[0] }) => void) | null;
 };
 
 let bac: Sandbox | null = null;
@@ -71,6 +72,11 @@ worker.onmessage = (e) => {
   // boucle à vide.
   if (message.t === "pace") {
     if (Number.isFinite(message.ms)) period = Math.min(Math.max(message.ms, 1000 / 240), 1000 / 30);
+    return;
+  }
+  // La page rend le tampon des bandes qu'elle a posées : il resservira.
+  if (message.t === "spare") {
+    if (message.buffer instanceof ArrayBuffer) recycle(message.buffer);
     return;
   }
   bac?.order(message);

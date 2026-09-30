@@ -8,7 +8,7 @@
 | `npm run check` | les cinq scripts d'`assert`, dans l'ordre : sim, ui, api, sandbox, pool |
 | `npm run browser` | dans Chromium sans fenêtre (Playwright) : le shader WebGL2 contre `Renderer` à une unité près, et la page du jeu qui charge sans erreur. Demande `npx playwright install chromium` une fois par machine ; tout est dans [docs/navigateur.md](../navigateur.md) |
 | `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
-| `npm run stress` | les pires cas, chacun sous un plafond, sur un seul fil ([test/stress.ts](../../test/stress.ts)) : un bac 320×180 plein de **chaque** matière (≤ 800 ns par cellule et par tick ; les plus chères font 110 à 160, l'aimant en faisait 4000), TNT en chaîne, souffle en plein air, mer de lave sous la pluie, aimants sur la limaille, et les bandes d'un bac 1920×1080 tout changé (préparation côté bac, pose côté page). Plafonds à ~5 fois la mesure de référence ; `STRESS_SLACK=2` les double. ~10 s |
+| `npm run stress` | les pires cas, chacun sous un plafond, sur un seul fil ([test/stress.ts](../../test/stress.ts)) : un bac 320×180 plein de **chaque** matière (≤ 800 ns par cellule et par tick ; les plus chères font 110 à 160, l'aimant en faisait 4000), TNT en chaîne, souffle en plein air, mer de lave sous la pluie, aimants sur la limaille, et les bandes d'un bac 1920×1080 tout changé (préparation côté bac, tampon rendu comme le fait la page, et pose côté page : ~2 ms chacune, plafond 12 ; 11 et 15 ms avant le tampon unique recyclé et le miroir brut). Plafonds à ~5 fois la mesure de référence ; `STRESS_SLACK=2` les double. ~10 s |
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
 | `npm run directions` | mesure de décision, pas un test : voir [Choisir une direction](#choisir-une-direction) |
@@ -174,10 +174,12 @@ réglage du générateur qui casse ce dernier assert rend les grandes grilles
 lentes dès la naissance du monde.
 
 Côté rendu, test/sandbox.ts recompose l'image comme la page (bandes posées
-dans un miroir par le même `land()` de render.ts que world.ts) et la compare, au pixel près, à un rendu témoin tout
+dans un miroir par le même `land()` de render.ts que world.ts), vérifie que
+le miroir est la grille du moteur au bit près (température et pression
+brutes comprises), et compare l'image, au pixel près, à un rendu témoin tout
 neuf — après un feu, un geste bac en pause, la vue thermique, une autre
-ambiante et un souffle, dont la pression doit arriver au miroir, au palier
-près, puis y retomber à zéro. Le témoin se tire **juste après** une frame, sinon il consomme les
+ambiante et un souffle, dont la pression doit arriver au miroir, puis y
+retomber à zéro. Le témoin se tire **juste après** une frame, sinon il consomme les
 blocs changés (`engine.changed()`) à la place du bac.
 
 ## Budgets surveillés par la CI

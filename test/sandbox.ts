@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
-import { Renderer, airLevel, land } from "../src/client/sim/render.ts";
+import { Renderer, land } from "../src/client/sim/render.ts";
 import { decode } from "../src/client/sim/codec.ts";
 import { count } from "../src/client/challenges.ts";
 import { EMPTY, FIRE, HERO, PILOT, SAND, STONE, TNT, WATER } from "../src/client/sim/materials.ts";
@@ -58,7 +58,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   const miroir = {
     width: W, height: H, ambient: 20,
     cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
-    noise: new Int8Array(n), temp: new Int16Array(n), press: new Float32Array(n),
+    noise: new Int8Array(n), temp: new Float32Array(n), press: new Float32Array(n),
   };
   const reçues = () => {
     for (const f of news.splice(0)) {
@@ -77,7 +77,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   const touchées = area(last(news, "frame")!);
   assert.ok(touchées > 0 && touchées < (W * H) / 2, `un grain de sable ne renvoie que son coin de bac (${touchées} cellules)`);
 
-  /** Le miroir recomposé est-il la grille du moteur ? Températures au degré, comme elles voyagent. */
+  /** Le miroir recomposé est-il la grille du moteur ? Températures et pression brutes, comme elles voyagent. */
   const pareil = (quand: string) => {
     reçues();
     const e = sim.engine;
@@ -85,9 +85,9 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
     assert.deepEqual(miroir.life, e.life, `même état vivant — ${quand}`);
     assert.deepEqual(miroir.frozen, e.frozen, `même figé — ${quand}`);
     assert.deepEqual(miroir.noise, e.noise, `même grain — ${quand}`);
-    assert.deepEqual(miroir.temp, Int16Array.from(e.temp, Math.round), `mêmes températures, au degré — ${quand}`);
+    assert.deepEqual(miroir.temp, e.temp, `mêmes températures — ${quand}`);
     assert.equal(miroir.ambient, e.ambient, `même ambiante — ${quand}`);
-    assert.deepEqual(Uint8Array.from(miroir.press, airLevel), Uint8Array.from(e.press, airLevel), `même pression, au palier — ${quand}`);
+    assert.deepEqual(miroir.press, e.press, `même pression — ${quand}`);
   };
   sim.order({ t: "do", g: { t: "paint", x: 20, y: 10, r: 3, id: FIRE, d: 1, over: true } });
   run(sim, 30);
