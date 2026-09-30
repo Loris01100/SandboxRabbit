@@ -39,12 +39,14 @@ function tell(news: News): void {
 /**
  * Les fils auxiliaires du moteur (pool.ts), si la page est isolée — sinon pas
  * de mémoire partagée, et le moteur fait tout sur ce fil, au même résultat.
- * Autant que de cœurs, moins deux (la page et ce fil-ci), sept au plus : au-delà
- * la mémoire sature et le gain s'arrête (`npm run directions`).
+ * Autant que de cœurs, moins deux (la page et ce fil-ci), quatorze au plus.
+ * Le plafond était de sept, mesuré sur une scène où la mémoire sature ; mais un
+ * bac 1920×1080 plein de nanites, où tout calcule, passe encore de 28 ms le
+ * tick à 7 fils à 19 ms à 15 (16 cœurs). Au-delà de 16 cœurs, pas mesuré.
  */
 function helpers(): Pool | null {
   const scope = self as unknown as { crossOriginIsolated?: boolean; navigator: { hardwareConcurrency?: number } };
-  const count = Math.min(7, (scope.navigator.hardwareConcurrency ?? 1) - 2);
+  const count = Math.min(14, (scope.navigator.hardwareConcurrency ?? 1) - 2);
   if (!scope.crossOriginIsolated || count < 1) return null;
   const list = Array.from({ length: count }, (): Helper => {
     const w = new Worker(import.meta.url, { type: "module" });

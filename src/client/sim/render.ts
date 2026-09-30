@@ -94,7 +94,13 @@ export class Tracker {
         p.frozen.set(frozen.subarray(from, from + pw), to);
         p.noise?.set(noise.subarray(from, from + pw), to);
         for (let k = 0; k < pw; k++) p.temp[to + k] = Math.max(-32768, Math.min(32767, Math.round(temp[from + k])));
-        for (let k = 0; k < pw; k++) p.press[to + k] = airLevel(press[from + k]);
+        // `airLevel()` en ligne : la pression n'est jamais négative, `| 0` vaut
+        // donc `Math.floor`. Appelée cellule par cellule, elle coûtait 8 ms par
+        // frame sur le fil du bac en 1920×1080 tout changé (nanites) ; 2 ms ainsi.
+        for (let k = 0; k < pw; k++) {
+          const v = (press[from + k] * AIR_LEVELS + 0.5) | 0;
+          p.press[to + k] = v > 255 ? 255 : v;
+        }
       }
       patches.push(p);
     }

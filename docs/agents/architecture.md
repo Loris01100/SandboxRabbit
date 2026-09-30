@@ -60,7 +60,7 @@ flowchart LR
    par vite.config.ts), il lance aussi des **fils auxiliaires** — lui-même,
    relancé par `import.meta.url` (le premier message dit le rôle : `start`
    pour le bac, une mémoire de moteur pour un auxiliaire ; un fichier à part
-   embarquait une seconde copie du moteur), jusqu'à sept — que
+   embarquait une seconde copie du moteur), jusqu'à quatorze — que
    [sim/pool.ts](../../src/client/sim/pool.ts) fait travailler sur la
    mémoire partagée du moteur — voir « Plusieurs fils » dans
    [simulation.md](simulation.md). Sans isolation, le moteur tourne seul, au
