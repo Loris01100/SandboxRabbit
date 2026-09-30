@@ -22,6 +22,7 @@ npm install
 npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, D1 local (migrations : --local)
 npm run typecheck  # QUATRE projets tsc : client (DOM), Worker, tests (Node + DOM), test/api.ts (Node + Worker)
 npm run check      # asserts : test/sim.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts (Node exécute le TS)
+npm run browser    # Chromium (Playwright) : shader WebGL2 = Renderer, page qui charge sans erreur (docs/navigateur.md)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
 npm run directions # mesure de décision : 1 cœur, N cœurs, projection (GPU : test/gpu.html sous npm run dev)
 npm run rust       # prototype Rust/WASM de thermal() contre le moteur JS (demande Rust : docs/rust.md)
@@ -43,6 +44,7 @@ pas de linter.
 | [docs/agents/simulation.md](docs/agents/simulation.md) | modifier `engine.ts`, `materials.ts` ou `render.ts`. Tous les invariants du moteur, les usages de `life`. |
 | [docs/agents/recettes.md](docs/agents/recettes.md) | ajouter une matière, une règle, un défi, un geste, un ordre, un contrôle, un raccourci, une route, une migration. |
 | [docs/agents/tests.md](docs/agents/tests.md) | écrire ou corriger un test, mettre à jour l'empreinte du moteur, comprendre la CI et ses budgets. |
+| [docs/navigateur.md](docs/navigateur.md) | écrire ou lancer un test dans un vrai navigateur (Playwright), installer Chromium sur une machine neuve, le reprendre dans un autre projet. |
 | [docs/rust.md](docs/rust.md) | toucher à `rust/` : installer Rust, le prototype WASM de `thermal()`, ses mesures, le déterminisme f64, ce qu'il faudrait pour brancher Rust sur le moteur. |
 
 Le [README](README.md) décrit le jeu du point de vue du joueur (une ligne par
@@ -84,7 +86,7 @@ src/worker/
   relay.ts               qui a le droit de dire quoi dans un salon      (pur)
 migrations/              schéma D1, un fichier numéroté par changement
 rust/                    prototype : thermal() en Rust → WASM, mesuré par test/rust.ts (pas branché sur le bac)
-test/                    scripts d'assert (+ bench.ts, loc.ts)
+test/                    scripts d'assert (+ bench.ts, loc.ts) ; browser.ts + screen.html : tests dans Chromium
 ```
 
 ## Règles à ne pas enfreindre
@@ -148,7 +150,7 @@ aucun test précis.
   pas de dessin par cellule.
 - Le coloriage existe en deux copies : le shader de screen.ts et `Renderer`
   de render.ts (secours sans WebGL2, tests). Un aspect se change des deux
-  côtés.
+  côtés ; `npm run browser` compare les deux.
 - Pas de `style=` ni de `<script>` en ligne : la CSP les bloque.
 - Données externes (galerie, lien, pair de salon) : `engine.adopt()` et
   `known()` écartent les ids inconnus, `disc()` borne les rayons,
@@ -218,7 +220,7 @@ local, faute de frappe, refactor interne). Le dire explicitement.
 | `challenges.ts`, `terrain.ts` | README (défis, décors, mondes générés) ; `terrain.ts` → [architecture.md](docs/agents/architecture.md) (modules) |
 | `main.ts`, `index.html`, `style.css`, `ui.ts`, `share.ts`, `room.ts`, `theme.ts` | [architecture.md](docs/agents/architecture.md) (modules, galerie, salon, clés `localStorage`) ; README si une fonctionnalité visible change |
 | `src/worker/*`, `migrations/`, `wrangler.jsonc` | [architecture.md](docs/agents/architecture.md) (API, stockage) ; README (tableau de l'API) |
-| `test/*`, scripts de `package.json`, `.github/` | [tests.md](docs/agents/tests.md) ; section Commandes de ce fichier |
+| `test/*`, scripts de `package.json`, `.github/` | [tests.md](docs/agents/tests.md) ; section Commandes de ce fichier ; `test/browser.ts`, `test/screen.*` → [docs/navigateur.md](docs/navigateur.md) |
 | `rust/` | [docs/rust.md](docs/rust.md) (et ses résultats, s'ils changent) |
 | une skill (`.claude/skills/` ou `.agents/skills/`) | l'autre copie, identique : les deux dossiers portent les mêmes skills |
 | une nouvelle marche à suivre récurrente | [recettes.md](docs/agents/recettes.md) |
@@ -232,7 +234,8 @@ agents appliquent la règle d'eux-mêmes.
 
 1. `npm run typecheck` (les quatre projets, tests compris).
 2. `npm run check`.
-3. `npm run bench` si le moteur ou le rendu a bougé.
+3. `npm run bench` si le moteur ou le rendu a bougé ; `npm run browser` si
+   render.ts, screen.ts, main.ts, world.ts ou index.html a bougé.
 4. `npm run build` si des dépendances, index.html ou le CSS ont changé (budget
    de bundle).
 5. La doc suit le code : voir « Documentation à tenir à jour » ci-dessus.

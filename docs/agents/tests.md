@@ -6,6 +6,7 @@
 | --- | --- |
 | `npm run typecheck` | **quatre** projets tsc : `tsconfig.json` (client, lib DOM), `tsconfig.worker.json` (Worker, types générés, pas de DOM), `tsconfig.test.json` (tout `test/` sauf api.ts : types Node + DOM) et `tsconfig.test-worker.json` (test/api.ts : types Node + Worker). Node exécute les tests **sans** vérifier leurs types : sans ces deux derniers, un champ disparu n'y était vu qu'à l'exécution, et jamais dans test/gpu.ts, qui ne tourne pas en CI |
 | `npm run check` | les cinq scripts d'`assert`, dans l'ordre : sim, ui, api, sandbox, pool |
+| `npm run browser` | dans Chromium sans fenêtre (Playwright) : le shader WebGL2 contre `Renderer` à une unité près, et la page du jeu qui charge sans erreur. Demande `npx playwright install chromium` une fois par machine ; tout est dans [docs/navigateur.md](../navigateur.md) |
 | `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
@@ -21,6 +22,7 @@ TypeScript directement.
 | [test/ui.ts](../../test/ui.ts) | logique pure du panneau, touches réassignables ; ce que voit le héros | `ui.ts`, `sight.ts` |
 | [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, vues sous débit, ménage (récents + plus vus), routage des messages du salon | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
 | [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles ; salon en lockstep, dont les messages mal formés d'un pair (geste d'invité, `turn` et départ de l'hôte) | `Sandbox` avec un rappel `send` qui empile |
+| [test/browser.ts](../../test/browser.ts) (hors `check`) | les deux copies du coloriage (shader de screen.ts, `Renderer`) sur la page [test/screen.html](../../test/screen.html) ; la page du jeu : première frame, console sans erreur | un serveur Vite (`createServer`, port libre) et Chromium via `playwright` |
 | [test/pool.ts](../../test/pool.ts) | le moteur sur plusieurs fils : 400 ticks d'une partie chargée (monde généré, feu, explosifs, uranium, héros piloté) sur 1 fil et sur 4, **identiques au bit près** ; rebranchement sur un autre moteur | `Engine`, `Pool`, fils `worker_threads` ([test/helper.ts](../../test/helper.ts)) |
 
 ## Choisir une direction
@@ -158,12 +160,15 @@ Node 24 :
    au navigateur comptent (aujourd'hui : `hono`).
 3. `npm run build`
 4. `npm run check`
-5. `npm run bench` — **tick ≤ 4 ms en 320×180** (surchargeable par
+5. `npx playwright install --with-deps chromium` puis `npm run browser`
+   ([docs/navigateur.md](../navigateur.md)) — SwiftShader tient lieu de carte
+   graphique sur le runner.
+6. `npm run bench` — **tick ≤ 4 ms en 320×180** (surchargeable par
    `BENCH_BUDGET_MS`). Le budget attrape un effondrement, pas une dérive. La
    mesure dépend beaucoup de la charge de la machine (de 2,8 à 5 ms d'une
    exécution à l'autre sur un poste occupé) : relancer avant de conclure à une
    régression.
-6. **Deux budgets de bundle, 81 920 octets chacun**, non compressés
+7. **Deux budgets de bundle, 81 920 octets chacun**, non compressés
    (`dist/client/assets`) : la **page** (`index-*.js` + `*.css`, ce qui
    s'affiche d'abord) et le **moteur** (`worker-*.js`, le Worker de
    simulation, qui sert aussi de fil auxiliaire). Un seul total ne disait pas
@@ -178,7 +183,9 @@ garder ces deux propriétés en modifiant la CI.
 
 main.ts, view.ts, keys.ts, palette.ts, settings.ts, hero.ts, world.ts, room.ts (client), share.ts, theme.ts et le Durable Object
 tiennent au DOM ou au runtime Cloudflare (le routage du salon, lui, est sorti
-dans relay.ts et testé). Pour eux : `npm run dev`
+dans relay.ts et testé). `npm run browser` ne les couvre qu'en surface : la
+page charge et reçoit sa première frame sans erreur, sans geste ni clic. Pour
+le reste : `npm run dev`
 (http://localhost:5173, Vite + Worker dans workerd, store mémoire) et vérifier
 dans le navigateur. Le salon partagé se teste avec deux onglets sur le même nom
 de salon.
