@@ -29,6 +29,11 @@ export interface Scene {
    * enfoncée repartait sinon à l'arrêt. Absent des enregistrements d'avant.
    */
   pilot?: number;
+  /**
+   * Numéro du héros piloté (`engine.chosen`) : seul lui obéit à `pilot`. Absent
+   * dans un enregistrement d'avant — le moteur prend alors le premier héros.
+   */
+  chosen?: number;
 }
 
 /**
@@ -61,12 +66,12 @@ export interface Recording {
 }
 
 const sceneOf = (e: Engine, rain: number): Scene => ({
-  wind: e.wind, ambient: e.ambient, gravity: e.gravity, emit: e.emit, weather: rain, pilot: e.pilot,
+  wind: e.wind, ambient: e.ambient, gravity: e.gravity, emit: e.emit, weather: rain, pilot: e.pilot, chosen: e.chosen,
 });
 
 const same = (a: Scene, b: Scene): boolean =>
   a.wind === b.wind && a.ambient === b.ambient && a.gravity === b.gravity && a.emit === b.emit && a.weather === b.weather
-  && (a.pilot ?? 0) === (b.pilot ?? 0);
+  && (a.pilot ?? 0) === (b.pilot ?? 0) && (a.chosen ?? 0) === (b.chosen ?? 0);
 
 /**
  * La grille et son état vivant : un incendie enregistré repart chaud.
@@ -105,6 +110,8 @@ function apply(e: Engine, s: Scene): void {
   e.gravity = s.gravity;
   e.emit = s.emit;
   applyGesture(e, { t: "pilot", keys: s.pilot ?? 0 });
+  // Retrouvé par son numéro au tick suivant : `hero`, un index, n'est pas dans la scène.
+  e.chosen = int(s.chosen) && s.chosen > 0 && s.chosen < 256 ? s.chosen : 0;
 }
 
 /**
@@ -246,6 +253,7 @@ const FIELDS: Record<Gesture["t"], Record<string, Field>> = {
   toggle: { x: "n", y: "n" },
   clip: { x: "n", y: "n", w: "n", h: "n", cells: "s", life: "s" },
   pilot: { keys: "n" },
+  hero: {},
   name: { id: "n", name: "s" },
 };
 
@@ -271,7 +279,7 @@ function readable(data: unknown, n: number): data is string {
 function isScene(s: unknown): s is Scene {
   return isObject(s) && finite(s.wind) && finite(s.ambient) && (s.gravity === 1 || s.gravity === -1)
     && int(s.emit) && MATERIALS[s.emit as MaterialId] !== undefined && (typeof s.weather === "boolean" || (int(s.weather) && s.weather >= 0 && s.weather <= 3))
-    && (s.pilot === undefined || int(s.pilot));
+    && (s.pilot === undefined || int(s.pilot)) && (s.chosen === undefined || int(s.chosen));
 }
 
 /**

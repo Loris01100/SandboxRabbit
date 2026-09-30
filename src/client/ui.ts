@@ -117,7 +117,7 @@ export const ACTIONS = [
   "pause", "mat1", "mat2", "mat3", "mat4", "mat5", "mat6", "mat7", "mat8", "mat9", "eraser",
   "brushDown", "brushUp", "gravity", "freeze", "heat", "undo", "redo", "paste", "zoomIn", "zoomOut", "help",
   "step", "terrain", "surprise", "full", "clear", "retry", "save", "gallery",
-  "left", "right", "up", "down", "dig", "place", "view",
+  "left", "right", "up", "down", "dig", "place", "view", "nextHero",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 export type Bindings = Record<Action, string>;
@@ -128,7 +128,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   brushDown: "[", brushUp: "]", gravity: "g", freeze: "f", heat: "h", undo: "Ctrl+z", redo: "Ctrl+y", paste: "Ctrl+v",
   zoomIn: "+", zoomOut: "-", help: "?",
   step: ".", terrain: "n", surprise: "u", full: "p", clear: "Ctrl+Delete", retry: "t", save: "Ctrl+s", gallery: "o",
-  left: "q", right: "d", up: "z", down: "s", dig: "e", place: "r", view: "v",
+  left: "q", right: "d", up: "z", down: "s", dig: "e", place: "r", view: "v", nextHero: "c",
 };
 
 /** Toujours là en plus de la touche choisie, tant qu'aucune action ne les prend : les flèches, le WASD du QWERTY, Ctrl+Maj+Z. */
@@ -226,7 +226,7 @@ export const KEY_GROUPS: { name: string; actions: Action[]; mouse: [string, stri
   { name: "Mondes", actions: ["save", "gallery"], mouse: [] },
   {
     name: "Héros et vue",
-    actions: ["left", "right", "up", "down", "dig", "place", "view", "zoomIn", "zoomOut"],
+    actions: ["left", "right", "up", "down", "dig", "place", "nextHero", "view", "zoomIn", "zoomOut"],
     mouse: [
       ["Molette", "Zoomer autour du curseur, si le zoom est actif"],
       ["Clic du milieu", "Déplacer la vue — sans bouger, la raccrocher au héros"],
@@ -266,4 +266,5 @@ export const ACTION_NAMES: Record<Action, string> = {
   dig: "Le héros creuse devant lui",
   place: "Le héros pose la matière choisie devant ses pieds — saut tenu, sous lui. Solides seulement, ni nanites, étincelle, braise ni source",
   view: "Vue du héros : de côté, avec l'encadré de ce qu'il voit, ou à la première personne",
+  nextHero: "Piloter le héros suivant (la caméra le suit)",
 };

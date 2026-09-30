@@ -1492,6 +1492,32 @@ function top(e: Engine, id: MaterialId): number {
   applyGesture(nommé, { t: "name", id: numéro, name: "" });
   assert.equal(nommé.names.size, 0, "un nom vide rend celui d'origine");
 
+  const duo = plaine();
+  assert.ok(duo.spawnHero(40, SOL - 2) >= 0, "un second héros se pose");
+  const second = duo.chosen;
+  assert.equal(où(duo)[0], 40, "le dernier posé est le piloté");
+  const [x1] = où(duo);
+  tenir(duo, PILOT.right, 40);
+  assert.ok(où(duo)[0] > x1 + 8, "le piloté marche");
+  assert.equal(duo.get(10, SOL - 2), HERO, "l'autre reste où il est");
+  for (let t = 0; t < 20; t++) { duo.step(); assert.equal(duo.cells[duo.hero], HERO); }
+  assert.equal(duo.chosen, second, "la caméra ne saute plus d'un héros à l'autre");
+  applyGesture(duo, { t: "hero" });
+  assert.notEqual(duo.chosen, second, "le geste hero passe à l'autre");
+  assert.equal(où(duo)[0], 10, "la caméra le rejoint");
+  applyGesture(duo, { t: "hero" });
+  assert.equal(duo.chosen, second, "et revient au premier : il n'y en a que deux");
+  put(duo, encode(duo.cells, duo.frozen, duo.life, duo.temp), null, duo.ambient);
+  duo.step();
+  assert.equal(duo.chosen, second, "grille reposée (rejeu, salon) : retrouvé par son numéro");
+  assert.ok(où(duo)[0] > 40, "au bout de sa marche, pas à une ancienne place");
+  duo.rect(où(duo)[0] - 3, 0, où(duo)[0] + 3, SOL - 1, EMPTY);
+  duo.step();
+  assert.equal(où(duo)[0], 10, "le piloté disparu, on passe à l'autre");
+  duo.rect(5, 0, 15, SOL - 1, EMPTY);
+  duo.step();
+  assert.equal(duo.chosen, 0, "plus de héros : plus de piloté");
+
   const pirate = plaine();
   applyGesture(pirate, { t: "pilot", keys: 999 | (NANITE << 8) | (1 << 20) });
   assert.equal(pirate.pilot, 999 & 63, "un pair ne pose que les six bits des commandes, et pas de nanites");

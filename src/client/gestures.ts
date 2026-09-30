@@ -20,13 +20,15 @@ export type Gesture =
   | { t: "toggle"; x: number; y: number }
   | { t: "clip"; x: number; y: number; w: number; h: number; cells: string; life: string }
   | { t: "pilot"; keys: number }
-  | { t: "name"; id: number; name: string };
+  | { t: "name"; id: number; name: string }
+  | { t: "hero" };
 
 /**
- * Les noms d'origine des héros : le numéro que le moteur tire à la naissance
- * (`HERO_SLOTS.name`, 1 à 250) en choisit un. Deux héros peuvent tomber sur
- * le même nom (un sur quarante), et sur le même numéro (un sur 250) : ils
- * partagent alors aussi celui qu'on leur donne.
+ * Les noms d'origine des héros : leur numéro (`HERO_SLOTS.name`, 1 à 250 —
+ * tiré de sa place quand on le pose, au hasard s'il n'en a pas au premier
+ * tick) en choisit un. Deux héros peuvent tomber sur le même nom (un sur
+ * quarante), et sur le même numéro (un sur 250) : ils partagent alors aussi
+ * celui qu'on leur donne, et obéissent ensemble quand l'un est piloté.
  * ponytail: numéro tiré au hasard, sans chercher s'il est pris — à revoir le
  * jour où un monde garde des dizaines de héros.
  */
@@ -59,6 +61,9 @@ const whole = (...v: number[]): boolean => v.every(Number.isSafeInteger);
  * envoie ce qu'il veut.
  */
 export function applyGesture(engine: Engine, g: Gesture): void {
+  // Passer au héros suivant : c'est le moteur qui sait lequel, dans l'ordre
+  // de la grille — un geste, pour que le rejeu et le salon suivent.
+  if (g.t === "hero") { engine.nextHero(); return; }
   if (g.t === "name") {
     // Un nom vide rend celui d'origine.
     const name = cleanName(g.name);

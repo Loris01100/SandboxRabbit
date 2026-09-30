@@ -394,7 +394,8 @@ Sept cellules (`HERO_SHAPE` : tête, buste et bras, hanches = cœur `HERO`,
 jambes), symétriques — son sens se garde dans `life`. **Il n'a pas de volonté**
 : il obéit à `engine.pilot`, six bits (`PILOT` dans materials.ts : gauche,
 droite, saut, creuser dessous, creuser devant, poser) et, bits 8-15, la matière
-qu'il pose. Tous les héros du bac obéissent aux mêmes touches.
+qu'il pose. **Seul le héros piloté obéit** (`engine.chosen`, son numéro) ;
+les autres attendent debout, mais vivent (chute, dégâts, âge).
 
 - `pilot` n'est posé **que** par le geste `pilot` (gestures.ts) : c'est ce qui
   l'enregistre dans le rejeu et le relaie à l'hôte d'un salon. Il figure aussi
@@ -425,10 +426,21 @@ qu'il pose. Tous les héros du bac obéissent aux mêmes touches.
 - Son **nom** n'est pas dans la grille : le numéro en choisit un dans `NAMES`
   (gestures.ts), sauf nom donné par le geste `name`, rangé dans
   `engine.names` (que le moteur ne lit pas) et sauvé en 5ᵉ bloc du codec.
-- `engine.hero` = index du cœur du dernier héros posé (`spawn`) ou mis à jour :
-  Sandbox le joint à chaque frame (`hero`), vérifié (`cells[hero] === HERO`),
-  et la page fait suivre la caméra. Il n'est pas remis à -1 à la mort : c'est
-  la vérification qui le rend `null`.
+- `engine.chosen` ne change **qu'entre deux ticks** — il est publié aux fils
+  (`PARAM.chosen`) : héros posé par `paint` / `rect` / `spawnHero` (`pick()`,
+  qui lui donne un numéro tiré de sa place s'il n'en a pas, sans `rand()` :
+  `terrain()` n'a pas le droit d'en consommer), geste `hero` (`nextHero()`,
+  suivant dans l'ordre de la grille), ou `find()` en tête de `step()`. Celui-ci
+  retrouve le piloté **par son numéro** quand la grille a été remplacée
+  (`seek`, levé par `adopt` et `paste` : `hero`, un index, ne voyage ni avec
+  un rejeu ni avec un salon) ou qu'il a disparu, et passe sinon au premier
+  héros du balayage. Il ne balaye le bac que dans ces cas-là. `chosen` est
+  dans la `Scene` du rejeu, comme `pilot`.
+- `engine.hero` = index du cœur du héros piloté, tenu par son `updateHero()`
+  (avant : le dernier héros mis à jour, et la caméra sautait de l'un à
+  l'autre au gré du balayage et du nombre de fils). Sandbox le joint à
+  chaque frame (`hero`), vérifié (`cells[hero] === HERO`), et la page fait
+  suivre la caméra.
 - `terrain()` (terrain.ts) en pose un au sec, au plus près du centre.
 
 ## Rendu

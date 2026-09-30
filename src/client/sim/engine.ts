@@ -249,7 +249,7 @@ export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, stop: 9 } as cons
 /** Cases de `control` (Int32 partagé) : génération, travail, prochain, finis, nombre, différés, héros. */
 export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6, held: 7 } as const;
 /** Cases de `params` (Float64 partagé) : ce qu'un fil auxiliaire recopie avant chaque travail (`sync`). */
-const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pilot: 6, flip: 7 } as const;
+const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pilot: 6, flip: 7, chosen: 8 } as const;
 
 /**
  * La mémoire d'un bac, partageable entre fils : tout ce qu'un travail lit ou
@@ -432,8 +432,19 @@ export class Engine {
   private readonly moveLife = new Uint8Array(RABBIT_SIZE);
   /** Cellules de la créature en train de bouger (`relocate`), lues par `owns()`. */
   private moving = 0;
-  /** Commandes tenues par le joueur (bits de `PILOT`) : tous les héros du bac y obéissent. */
+  /** Commandes tenues par le joueur (bits de `PILOT`) : seul le héros choisi (`chosen`) y obéit. */
   pilot = 0;
+  /**
+   * Numéro (`HERO_SLOTS.name`) du héros piloté, 0 = aucun. Le seul qui obéit
+   * à `pilot` et que suit la caméra (`hero`). Il ne change qu'entre deux
+   * ticks : héros posé (`paint`, `rect`, `spawnHero`), geste `hero`
+   * (`nextHero()`), ou mort du piloté — `step()` passe alors au premier héros
+   * du balayage. Sans ça, `hero` était le dernier héros mis à jour : la
+   * caméra sautait de l'un à l'autre au gré du balayage, et du nombre de fils.
+   */
+  chosen = 0;
+  /** Chercher un héros à piloter au prochain tick : grille remplacée, ou piloté perdu. Évite de balayer le bac à chaque tick quand il n'y en a pas. */
+  private seek = true;
   /**
    * Noms donnés à la main, par numéro de héros (`HERO_SLOTS.name`) ; sans nom
    * donné, celui de `NAMES` (gestures.ts). Posés par le geste `name`, gardés
@@ -464,7 +475,7 @@ export class Engine {
       later: new Shareable(Math.max(64, n >> 2) * 8), jobs: new Shareable(chunks * 4),
       // Au pire, toutes les cellules des rangées paires de blocs : la moitié du bac, plus une rangée de blocs.
       held: new Shareable(n), waiting: new Shareable(((n >> 1) + PART * width) * 4),
-      control: new Shareable(8 * 4), params: new Shareable(8 * 8),
+      control: new Shareable(8 * 4), params: new Shareable(9 * 8),
     };
     this.memory = { width, height, buffers: b };
     this.cells = new Uint8Array(b.cells);
@@ -493,7 +504,7 @@ export class Engine {
     this.hero = -1;
   }
 
-  /** Index du cœur du dernier héros posé ou mis à jour, -1 s'il n'y en a jamais eu : la caméra le suit. À vérifier (`cells[hero] === HERO`), il a pu mourir depuis. Partagé : un fil auxiliaire peut l'écrire. */
+  /** Index du cœur du héros piloté (`chosen`), -1 s'il n'y en a pas : la caméra le suit. À vérifier (`cells[hero] === HERO`), il a pu mourir depuis. Partagé : un fil auxiliaire peut l'écrire. */
   get hero(): number {
     return Atomics.load(this.control, CTL.hero);
   }
@@ -700,7 +711,7 @@ export class Engine {
    */
   paint(cx: number, cy: number, radius: number, id: MaterialId, density = 1, overwrite = true, only?: MaterialId): void {
     // Une créature a sa taille : un coup de pinceau en pose une, quel que soit le rayon.
-    if (CREATURE[id]) { this.spawn(id === HERO ? HERO_SHAPE : RABBIT_SHAPE, Math.round(cx), Math.round(cy), 1, overwrite); return; }
+    if (CREATURE[id]) { this.pick(this.spawn(id === HERO ? HERO_SHAPE : RABBIT_SHAPE, Math.round(cx), Math.round(cy), 1, overwrite)); return; }
     const r2 = radius * radius;
     const [x0, x1, y0, y1] = this.disc(cx, cy, radius);
     for (let y = y0; y <= y1; y++) {
@@ -723,7 +734,7 @@ export class Engine {
    */
   rect(x0: number, y0: number, x1: number, y1: number, id: MaterialId, overwrite = true): void {
     // Un rectangle de cœurs sans place pour leurs corps mourrait aussitôt : un lapin, au milieu.
-    if (CREATURE[id]) { this.spawn(id === HERO ? HERO_SHAPE : RABBIT_SHAPE, Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2), 1, overwrite); return; }
+    if (CREATURE[id]) { this.pick(this.spawn(id === HERO ? HERO_SHAPE : RABBIT_SHAPE, Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2), 1, overwrite)); return; }
     const left = Math.max(0, Math.min(x0, x1));
     const right = Math.min(this.width - 1, Math.max(x0, x1));
     const top = Math.max(0, Math.min(y0, y1));
@@ -780,6 +791,7 @@ export class Engine {
       this.cells[i] = MATERIALS[cells[i]] ? cells[i] : EMPTY;
     }
     this.wakeAll();
+    this.seek = true;
   }
 
   /** Repose un morceau, coin haut-gauche en (cx, cy). Ce qui dépasse est ignoré. */
@@ -790,6 +802,7 @@ export class Engine {
         const to = this.index(cx + x, cy + y);
         const from = y * clip.width + x;
         this.wake(to);
+        this.seek = true;
         // Un morceau peut venir d'un pair : même filtre que `adopt`.
         this.cells[to] = MATERIALS[clip.cells[from]] ? clip.cells[from] : EMPTY;
         this.life[to] = clip.life[from];
@@ -898,6 +911,7 @@ export class Engine {
   step(): void {
     this.parity ^= 1;
     this.rouse();
+    if (this.seek || (this.chosen !== 0 && !this.piloted())) this.find();
     const tick = this.state;
     this.tickSeed = mix(tick);
     Atomics.store(this.control, CTL.later, 0);
@@ -931,6 +945,7 @@ export class Engine {
     p[PARAM.ambient] = this.air;
     p[PARAM.emit] = this.emit;
     p[PARAM.pilot] = this.pilot;
+    p[PARAM.chosen] = this.chosen;
     p[PARAM.flip] = this.temp === this.tempA ? 0 : 1;
   }
 
@@ -948,6 +963,7 @@ export class Engine {
     this.air = p[PARAM.ambient];
     this.emit = p[PARAM.emit];
     this.pilot = p[PARAM.pilot];
+    this.chosen = p[PARAM.chosen];
     const flip = p[PARAM.flip] === 1;
     this.temp = flip ? this.tempB : this.tempA;
     this.tempNext = flip ? this.tempA : this.tempB;
@@ -1828,9 +1844,70 @@ export class Engine {
     return this.spawn(RABBIT_SHAPE, x, y, f, over);
   }
 
-  /** Pose un héros entier (voir `spawn`). Public : un monde généré en pose un. */
+  /** Pose un héros entier (voir `spawn`), qui devient le piloté. Public : un monde généré en pose un. */
   spawnHero(x: number, y: number): number {
-    return this.spawn(HERO_SHAPE, x, y, 1);
+    const heart = this.spawn(HERO_SHAPE, x, y, 1);
+    this.pick(heart);
+    return heart;
+  }
+
+  /**
+   * Pilote le héros de cœur `heart` (rien si ce n'est pas un héros, ou -1).
+   * Entre deux ticks seulement : `chosen` est lu par tous les fils. Un héros
+   * sans numéro (tout juste posé, grille sans état vivant) en reçoit un tiré
+   * de sa place, pas de `rand()` : bâtir un monde ne doit rien prendre au
+   * tirage du bac.
+   */
+  private pick(heart: number): void {
+    if (heart < 0 || this.cells[heart] !== HERO) return;
+    const x = heart % this.width, y = (heart / this.width) | 0, [dx, dy] = HERO_SLOTS.name;
+    if (!this.inBounds(x + dx, y + dy)) return;
+    const head = this.index(x + dx, y + dy);
+    if (this.life[head] === 0) this.life[head] = 1 + (heart % 250);
+    this.chosen = this.life[head];
+    this.hero = heart;
+  }
+
+  /**
+   * Retrouve le héros piloté par son numéro — `hero`, un index, ne voyage ni
+   * avec un rejeu ni avec un salon —, sinon passe au premier du balayage.
+   * Deux balayages du bac au plus : appelé quand la grille a changé
+   * (`seek`) ou que le piloté a disparu, pas à chaque tick.
+   */
+  private find(): void {
+    this.seek = false;
+    const [dx, dy] = HERO_SLOTS.name, w = this.width;
+    for (let i = 0; i < this.cells.length && this.chosen !== 0; i++) {
+      if (this.cells[i] !== HERO || !this.inBounds(i % w + dx, ((i / w) | 0) + dy)) continue;
+      if (this.life[i + dy * w + dx] === this.chosen) { this.hero = i; return; }
+    }
+    this.chosen = 0;
+    this.hero = -1;
+    this.nextHero();
+  }
+
+  /** Le héros piloté est-il toujours là où on l'a vu (`hero`), avec son numéro ? */
+  private piloted(): boolean {
+    const at = this.hero;
+    if (at < 0 || this.cells[at] !== HERO) return false;
+    const x = at % this.width, y = (at / this.width) | 0, [dx, dy] = HERO_SLOTS.name;
+    return this.inBounds(x + dx, y + dy) && this.life[this.index(x + dx, y + dy)] === this.chosen;
+  }
+
+  /**
+   * Passe au héros suivant dans l'ordre de la grille (rangée par rangée), en
+   * repartant du début après le dernier ; reste sur le même s'il est seul.
+   * Geste `hero` (touche C), et `step()` quand le piloté a disparu. Balaye
+   * le bac : jamais dans un tick.
+   */
+  nextHero(): void {
+    const n = this.cells.length, from = this.hero;
+    for (let k = 1; k <= n; k++) {
+      const i = (from + k + n) % n;
+      if (this.cells[i] !== HERO) continue;
+      this.pick(i);
+      if (this.cells[i] === HERO && this.hero === i) return;
+    }
   }
 
   /**
@@ -1856,9 +1933,7 @@ export class Engine {
       if (k === 0 && this.cells[this.index(px, py)] === id[0]) continue;
       this.become(px, py, id[k]);
     }
-    const heart = this.index(x, y);
-    if (shape === HERO_SHAPE) this.hero = heart;
-    return heart;
+    return this.index(x, y);
   }
 
   /** Nombre de cellules de la créature de cœur (x, y) à leur place pour le sens `f`, cœur compris. */
@@ -2066,8 +2141,8 @@ export class Engine {
    * `HERO_HARM`. Sa fiche (numéro, dégâts, âge, compteurs) vit dans le `life`
    * de son corps (`HERO_SLOTS`), que `relocate()` emporte : le cœur n'a plus
    * de place, et une règle ne garde rien hors des cellules (plusieurs fils).
-   * Tous les héros du bac obéissent aux mêmes touches ; la caméra suit le
-   * dernier mis à jour (`hero`).
+   * Seul le héros piloté (`chosen`) obéit aux touches et tient `hero` (la
+   * caméra) ; les autres attendent, debout, mais vivent : chute, dégâts, âge.
    */
   private updateHero(i: number, x: number, y: number): void {
     const H = HERO_SHAPE;
@@ -2090,7 +2165,7 @@ export class Engine {
     if (age < 250 && this.rand() < YEAR) age++;
     let dug = life[this.slot(x, y, S.dug)], laid = life[this.slot(x, y, S.laid)];
 
-    const p = this.pilot, g = this.gravity;
+    const p = name === this.chosen ? this.pilot : 0, g = this.gravity;
     const dir = (p & PILOT.right ? 1 : 0) - (p & PILOT.left ? 1 : 0);
     let face = this.life[i] & FACING_LEFT ? -1 : 1;
     if (dir !== 0) face = dir;
@@ -2126,7 +2201,7 @@ export class Engine {
     life[this.slot(cx, cy, S.age)] = age;
     life[this.slot(cx, cy, S.dug)] = Math.min(250, dug);
     life[this.slot(cx, cy, S.laid)] = Math.min(250, laid);
-    this.hero = at;
+    if (name === this.chosen) this.hero = at;
   }
 
   /** La cellule du corps du héros de cœur (x, y) qui garde une donnée de `HERO_SLOTS`. Corps entier : dans la grille. */

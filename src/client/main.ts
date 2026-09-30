@@ -82,6 +82,7 @@ addEventListener("keydown", (e) => {
     case "heat": heatmapInput.checked = !heatmapInput.checked; set({ heatmap: heatmapInput.checked }); return;
     case "help": openSettings("settings-keys"); return;
     case "view": nextView(); return;
+    case "nextHero": gesture({ t: "hero" }); return;
     case "retry": lastChallenge?.click(); return;
     case "step": case "terrain": case "surprise": case "full": case "clear": case "save":
       document.querySelector<HTMLButtonElement>(`#${action}`)!.click();
@@ -212,6 +213,7 @@ function gesture(g: Gesture): void {
 nameInput.addEventListener("change", () => {
   if (heroId) gesture({ t: "name", id: heroId, name: nameInput.value });
 });
+document.querySelector<HTMLButtonElement>("#hero-next")!.addEventListener("click", () => gesture({ t: "hero" }));
 nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") nameInput.blur(); });
 
 /** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */

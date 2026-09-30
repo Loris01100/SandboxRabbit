@@ -58,7 +58,7 @@ function meet(): void {
   loose = false;
   if (zoomInput.checked && zoom < WIDTH / 160) zoomCentered(WIDTH / 160);
   const k = (a: Action) => keyLabel(bindings[a]);
-  statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
+  statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("nextHero")} passe au héros suivant, ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
 }
 
 const noneEl = document.querySelector<HTMLParagraphElement>("#hero-none")!;
@@ -129,9 +129,9 @@ export function nextView(): void {
 const haloEl = document.querySelector<HTMLDivElement>("#halo")!;
 
 /**
- * Cerne le héros piloté dans les deux vues de côté : tous les héros du bac
- * obéissent aux touches, mais la caméra et la fiche n'en suivent qu'un, et
- * rien ne disait lequel. Un repère posé sur la scène, pas une couleur du
+ * Cerne le héros piloté (`engine.chosen`) dans les deux vues de côté : seul
+ * lui obéit, et c'est lui que suivent la caméra et la fiche — rien ne disait
+ * lequel. Un repère posé sur la scène, pas une couleur du
  * rendu : sinon il faudrait le peindre dans le shader et dans `Renderer`.
  * Recalculé à chaque image, zoom et caméra compris.
  */

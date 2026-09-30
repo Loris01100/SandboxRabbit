@@ -133,7 +133,9 @@ geste `{t:"pilot", keys}` (bits de `PILOT`, plus la matière choisie en bits
 8-15 quand R est tenu) chaque fois que les touches tenues changent — jamais à
 chaque image. Le rejeu l'enregistre, l'hôte d'un salon le reçoit d'un invité ;
 `applyGesture` le borne à six bits et ne garde la matière que si `placeable()`
-l'accepte. Renommer le héros suivi (encadré Héros) envoie de même le geste
+l'accepte. Passer au héros suivant (C, ou le bouton de l'encadré Héros) est
+le geste `{t:"hero"}` : le moteur choisit lequel (`nextHero()`), et le
+numéro du piloté voyage dans la `Scene` du rejeu (`chosen`). Renommer le héros suivi (encadré Héros) envoie de même le geste
 `{t:"name", id, name}` : `id` est son numéro (`HERO_SLOTS.name`), un nom vide
 rend celui d'origine. Changer de matière R tenu ne renvoie rien : la nouvelle part au
 prochain changement de touches. Quand la frame porte un héros (`hero`), les
