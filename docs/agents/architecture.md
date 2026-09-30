@@ -62,8 +62,13 @@ flowchart LR
    mémoire partagée du moteur — voir « Plusieurs fils » dans
    [simulation.md](simulation.md). Sans isolation, le moteur tourne seul, au
    même résultat. Il avance au
-   temps réellement écoulé (`setTimeout` à ~60 Hz, pas de `requestAnimationFrame`)
-   et renvoie des **nouvelles**. L'échéance suivante est posée dans un
+   temps réellement écoulé (`setTimeout`, pas de `requestAnimationFrame`)
+   et renvoie des **nouvelles**. Sa cadence suit l'écran : la page mesure ses
+   rafraîchissements (`beat()` de world.ts, médiane par `refreshPeriod()` de
+   ui.ts) et envoie `{t: "pace", ms}`, traité par worker.ts lui-même (pas un
+   `Order` du bac), borné entre 60 et 240 Hz. La vitesse de la simulation
+   n'en dépend pas (`ticksFor` compte en 60es de seconde) : un écran plus
+   rapide montre plus d'images, pas plus de ticks. L'échéance suivante est posée dans un
    `finally` : une exception du moteur ne coupe plus la boucle pour de bon.
    Une frame s'accorde au plus `SLICE` (12 ms) de simulation — bac, rejeu ou
    invité qui rattrape — et abandonne le reste de son retard : sinon une frame

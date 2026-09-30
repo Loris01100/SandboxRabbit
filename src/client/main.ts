@@ -10,7 +10,7 @@ import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInp
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
-import { WIDTH, askClip, cellBox, askLoad, canvas, latestGrid, listen, order, present, set, type ClipData } from "./world.ts";
+import { WIDTH, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, set, type ClipData } from "./world.ts";
 import { STEER, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
@@ -707,6 +707,7 @@ function frame(now: number): void {
   if (hero) { if (!loose) follow(hero); }
   else if (held.size > 0) scroll();
   if (present()) frames++;
+  beat(now);
   gaze();
   captureFrame(); // vidéo en cours : la frame y part aussi
 

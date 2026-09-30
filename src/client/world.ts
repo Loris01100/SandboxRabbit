@@ -18,6 +18,7 @@ import { AIR_LEVELS, HOURS, type Grid, type Tint } from "./sim/render.ts";
 import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
 import { watchErrors } from "./errors.ts";
+import { refreshPeriod } from "./ui.ts";
 
 export const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
 /** Ce qui colorie le canvas : WebGL2, sinon 2D (screen.ts). */
@@ -243,6 +244,29 @@ export function present(): boolean {
   repaint = false;
   left = Infinity; top = Infinity; right = 0; bottom = 0;
   return arrived;
+}
+
+/** Les derniers écarts entre deux rafraîchissements, et la période déjà dite au Worker. */
+const gaps: number[] = [];
+let lastBeat = 0;
+let told = 1000 / 60;
+
+/**
+ * À appeler à chaque `requestAnimationFrame` : mesure la fréquence de l'écran
+ * et la dit au Worker (`pace`), qui cadence ses frames dessus. Remesurée en
+ * continu — une fenêtre passée sur un autre écran change de fréquence. On ne
+ * redit la période qu'au-delà de 5 % d'écart : le bruit des mesures ne doit
+ * pas faire un message par seconde.
+ */
+export function beat(now: number): void {
+  if (lastBeat > 0) gaps.push(now - lastBeat);
+  lastBeat = now;
+  if (gaps.length < 60) return;
+  const period = refreshPeriod(gaps);
+  gaps.length = 0;
+  if (Math.abs(period - told) / told < 0.05) return;
+  told = period;
+  sim.postMessage({ t: "pace", ms: period });
 }
 
 sim.addEventListener("message", (e: MessageEvent<News>) => {

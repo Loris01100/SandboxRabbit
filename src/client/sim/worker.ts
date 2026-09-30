@@ -20,7 +20,7 @@ import { Pool, serve, type Helper } from "./pool.ts";
 // Workers (les deux se contredisent sur la moitié des noms globaux).
 const worker = self as unknown as {
   postMessage(message: unknown, transfer?: Transferable[]): void;
-  onmessage: ((e: { data: Order | { t: "start"; w: number; h: number } | Parameters<typeof serve>[0] }) => void) | null;
+  onmessage: ((e: { data: Order | { t: "start"; w: number; h: number } | { t: "pace"; ms: number } | Parameters<typeof serve>[0] }) => void) | null;
 };
 
 let bac: Sandbox | null = null;
@@ -64,15 +64,22 @@ worker.onmessage = (e) => {
     loop();
     return;
   }
+  // La page a mesuré son écran (world.ts) : borné ici aussi, un nombre venu
+  // d'ailleurs ne doit pas faire tourner la boucle à vide.
+  if (message.t === "pace") {
+    if (Number.isFinite(message.ms)) period = Math.min(Math.max(message.ms, 1000 / 240), 1000 / 60);
+    return;
+  }
   bac?.order(message);
 };
 
-const PERIOD = 1000 / 60;
+/** L'écart visé entre deux frames : 60 Hz jusqu'à ce que la page dise la fréquence de son écran (`pace`). */
+let period = 1000 / 60;
 /** L'heure à laquelle la prochaine frame est due. */
 let due = performance.now();
 
 /**
- * ~60 Hz. Le vrai rythme, c'est le temps écoulé : le bac fait ses comptes avec.
+ * Au rythme de l'écran (60 Hz par défaut, 240 au plus). Le vrai rythme, c'est le temps écoulé : le bac fait ses comptes avec.
  * On vise une échéance fixe plutôt qu'un délai après le travail : attendre
  * 16,7 ms *après* une frame qui en coûte 10 ne livrait que ~37 images par
  * seconde. En retard de plus d'une frame (onglet en veille, tick trop lourd), on
@@ -89,9 +96,9 @@ function loop(): void {
   try {
     bac?.frame(elapsed);
   } finally {
-    due += PERIOD;
+    due += period;
     const after = performance.now();
-    if (due < after - PERIOD) due = after;
+    if (due < after - period) due = after;
     setTimeout(loop, Math.max(0, due - after));
   }
 }

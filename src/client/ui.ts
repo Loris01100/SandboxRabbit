@@ -88,6 +88,24 @@ export function ticksFor(speed: number, ms: number, pending: number, max = 8): {
 }
 
 /**
+ * La période de rafraîchissement de l'écran, en ms, tirée des derniers écarts
+ * entre deux `requestAnimationFrame` : c'est la cadence que le Worker de
+ * simulation vise, pour livrer une image par rafraîchissement — à 60 Hz fixes,
+ * un écran 144 Hz n'avait une image neuve qu'un rafraîchissement sur deux ou
+ * trois. La médiane, parce qu'une frame manquée (écart double) ou un onglet
+ * revenu (écart de plusieurs secondes) ne doit pas faire croire à un écran
+ * lent. Jamais plus lent que 60 Hz : une page qui rame mesure des écarts longs,
+ * et ralentir le Worker d'autant n'y changerait rien. Jamais plus vite que
+ * 240 Hz : au-delà, le coût des frames (envoi, stats) ne se voit plus.
+ */
+export function refreshPeriod(gaps: readonly number[]): number {
+  if (gaps.length === 0) return 1000 / 60;
+  const sorted = [...gaps].sort((a, b) => a - b);
+  const median = sorted[sorted.length >> 1];
+  return Math.min(Math.max(median, 1000 / 240), 1000 / 60);
+}
+
+/**
  * Décalage de la vue ramené dans ses bornes : le bac agrandi recouvre
  * toujours son cadre, on ne le pousse plus hors de l'écran. `size` est la
  * taille du cadre (le canvas sans transformation), en pixels d'écran ; le

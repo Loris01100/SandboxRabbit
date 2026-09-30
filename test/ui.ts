@@ -3,7 +3,7 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, ticksFor } from "../src/client/ui.ts";
+import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor } from "../src/client/ui.ts";
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 import { REPORT, reporter } from "../src/client/errors.ts";
@@ -74,6 +74,15 @@ import { REPORT, reporter } from "../src/client/errors.ts";
   // Un onglet revenu au premier plan ne rattrape pas dix secondes d'un coup.
   assert.ok(ticksFor(4, 10_000, 0).ticks <= 8, "le rattrapage est plafonné");
   assert.equal(ticksFor(1, -5, 0).ticks, 0, "une horloge qui recule ne simule rien");
+}
+
+// Cadence du Worker : la fréquence de l'écran, bornée entre 60 et 240 Hz.
+{
+  const hz144 = 1000 / 144;
+  assert.equal(refreshPeriod([hz144, hz144, 2 * hz144, hz144, 5000]), hz144, "une frame manquée ou un onglet revenu ne comptent pas");
+  assert.equal(refreshPeriod([]), 1000 / 60, "rien de mesuré : 60 Hz");
+  assert.equal(refreshPeriod([40, 40, 40]), 1000 / 60, "une page qui rame ne ralentit pas le Worker sous 60 Hz");
+  assert.equal(refreshPeriod([1, 1, 1]), 1000 / 240, "240 Hz au plus");
 }
 
 /**
