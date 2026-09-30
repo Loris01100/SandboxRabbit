@@ -299,7 +299,7 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
 | [room.ts](../../src/client/room.ts) | salon côté navigateur | non |
 | [share.ts](../../src/client/share.ts) | galerie, PNG, vidéo, lien ; export / import du rejeu | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
-| [theme.ts](../../src/client/theme.ts) | jour / nuit | non |
+| [theme.ts](../../src/client/theme.ts) | fenêtre Paramètres (`#settings`, bouton ⚙ de la barre du panneau) : thème Système / Jour / Nuit | non |
 | [sim/*](../../src/client/sim/) | moteur, rendu, codec, registre, bac | **oui** |
 
 ### Galerie et mondes-défis

@@ -22,15 +22,15 @@
     <script type="module" src="/src/client/main.ts"></script>
   </head>
   <body>
-    <header class="bar">
-      <h1>Sandbox<span>Rabbit</span></h1>
-      <div class="stats">
-        <span id="fps">–</span> fps · <span id="filled">0</span> cellules · <span id="probe">–</span>
-        <button id="theme" type="button" aria-label="Basculer jour / nuit">☀</button>
-      </div>
-    </header>
+    <!-- Le nom du site passe à l'arrivée puis s'efface : animation CSS seule,
+         elle finit invisible et ne capte jamais la souris. -->
+    <h1 class="splash">Sandbox<span>Rabbit</span></h1>
 
     <main>
+      <div class="stats">
+        <span id="fps">–</span> fps · <span id="filled">0</span> cellules · <span id="probe">–</span>
+      </div>
+
       <div class="stage">
         <canvas id="world" aria-label="Bac à sable"></canvas>
         <!-- Ce que voit le héros (V) : une colonne d'un pixel, étirée en
@@ -50,6 +50,7 @@
           <button id="undo" type="button" title="Annuler le dernier geste (Ctrl+Z)">↶</button>
           <button id="redo" type="button" title="Rétablir le geste annulé (Ctrl+Y)">↷</button>
           <button id="help" type="button" title="Raccourcis clavier et souris (?)" aria-label="Raccourcis">?</button>
+          <button id="settings-open" type="button" title="Paramètres" aria-label="Paramètres">⚙</button>
         </div>
 
         <details class="group" name="panneau" open>
@@ -228,6 +229,21 @@
       <div id="bindings"></div>
       <p class="hint">Cliquer une touche, puis presser la nouvelle (Échap annule). Les flèches marchent toujours.</p>
       <button id="bindings-reset" type="button">Touches d'origine</button>
+    </dialog>
+
+    <dialog id="settings">
+      <form method="dialog" class="gallery-bar">
+        <h2>Paramètres</h2>
+        <button type="submit">Fermer</button>
+      </form>
+      <label class="row">
+        <span>Thème</span>
+        <select id="theme">
+          <option value="">Système</option>
+          <option value="light">Jour</option>
+          <option value="dark">Nuit</option>
+        </select>
+      </label>
     </dialog>
   </body>
 </html>
