@@ -13,7 +13,7 @@
  * liaisons vivantes (`import { WIDTH }`) : personne n'a à se rebrancher. Ce qui
  * dépend de la taille s'inscrit dans `onResize`.
  */
-import type { News, Order } from "./sim/sandbox.ts";
+import type { Knobs, News, Order } from "./sim/sandbox.ts";
 import { HOURS, type Grid, type Tint } from "./sim/render.ts";
 import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
@@ -43,6 +43,9 @@ export function order(o: Order): void {
   }
   sim.postMessage(o);
 }
+
+/** Change des réglages du bac (ordre `set`). */
+export const set = (k: Partial<Knobs>): void => order({ t: "set", k });
 
 /**
  * Allume ou éteint l'éclairage global (screen.ts). Réglage de la page seule,

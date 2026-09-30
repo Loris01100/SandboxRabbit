@@ -19,6 +19,15 @@ export function read(key: string): string | null {
   }
 }
 
+/** JSON du stockage local, toléré : abîmé, on repart du défaut. */
+export function stored<T>(key: string, fallback: T): T {
+  try {
+    return JSON.parse(read(key) ?? "") as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export function write(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);

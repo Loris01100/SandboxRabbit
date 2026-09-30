@@ -1,17 +1,17 @@
 import "./style.css";
-import { CATEGORIES, EMPTY, MAGNET, MATERIALS, PILOT, SAND, SHORTCUTS, SOURCE, SWITCH, WATER, type MaterialId } from "./sim/materials.ts";
+import { EMPTY, MAGNET, MATERIALS, PILOT, SHORTCUTS, SWITCH, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
-import { combo, keyLabel, keyOf, pushRecent, read, write, type Action } from "./ui.ts";
+import { combo, keyLabel, keyOf, read, stored, write, type Action } from "./ui.ts";
 import { bindings, bound, held, openSettings } from "./keys.ts";
 import { MOVES, follow, panBy, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
+import { current, emit, select } from "./palette.ts";
+import { brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, toolInput } from "./settings.ts";
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
-import { HEIGHT, WIDTH, askClip, askLoad, canvas, hour, latestGrid, light, listen, order, present, resize, screen, seen, type ClipData } from "./world.ts";
+import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, order, present, seen, set, type ClipData } from "./world.ts";
 import { look } from "./sight.ts";
-import type { Knobs } from "./sim/sandbox.ts";
-import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
 /**
@@ -20,13 +20,7 @@ import "./theme.ts"; // jour / nuit : se branche tout seul
  * ci-dessous — ce que le panneau doit savoir tout de suite, sans attendre une
  * frame.
  */
-const set = (k: Partial<Knobs>): void => order({ t: "set", k });
-
-let current: MaterialId = SAND;
-let brush = 5;
 let running = true;
-/** Matière qu'une source crachera : le moteur la garde aussi, le panneau la relit. */
-let emit: MaterialId = WATER;
 let gravity: 1 | -1 = 1;
 /** Dernière matière et température sous le curseur, telles que le bac les a vues. */
 let probed: [MaterialId, number] | null = null;
@@ -38,97 +32,6 @@ let recording = false;
 /** Invité d'un salon : c'est l'hôte qui simule, la pause n'est pas à lui. */
 let guest = false;
 const FOLLOW = "Vous suivez l'hôte : c'est lui qui mène le bac.";
-/**
- * Défi en cours. Déclaré ici, pas avec les défis plus bas : la restauration
- * des réglages rejoue « input » sur la taille, dont le rappel le lit.
- */
-let challenge: Challenge | null = null;
-
-/* ---------------------------------------------------------------- palette */
-
-const paletteEl = document.querySelector<HTMLDivElement>("#palette")!;
-const hintEl = document.querySelector<HTMLParagraphElement>("#hint")!;
-
-// Une famille = un <details> repliable (natif) contenant sa grille de boutons.
-for (const [n, cat] of CATEGORIES.entries()) {
-  const box = document.createElement("details");
-  box.className = "cat";
-  // Même accordéon exclusif que les groupes : une famille ouverte à la fois,
-  // sinon la palette fait à elle seule la hauteur de deux écrans.
-  box.setAttribute("name", "famille");
-  box.open = n === 0; // seule la première famille est déployée au départ
-  const title = document.createElement("summary");
-  title.textContent = cat.name;
-  const grid = document.createElement("div");
-  grid.className = "palette";
-  for (const id of cat.ids) grid.append(swatch(id));
-  box.append(title, grid);
-  paletteEl.append(box);
-}
-
-function swatch(id: MaterialId): HTMLButtonElement {
-  const m = MATERIALS[id];
-  const button = document.createElement("button");
-  button.type = "button";
-  button.dataset.id = String(id);
-  button.setAttribute("aria-pressed", String(id === current));
-  // Pastille montée en CSSOM plutôt qu'en `style="…"` : un attribut de style
-  // inline tomberait sous la CSP servie par le Worker.
-  const dot = document.createElement("span");
-  dot.className = "swatch";
-  dot.style.background = `rgb(${m.color.join(",")})`;
-  button.append(dot, m.name);
-  button.addEventListener("click", () => select(id));
-  button.addEventListener("pointerenter", () => (hintEl.textContent = m.hint));
-  return button;
-}
-paletteEl.addEventListener("pointerleave", () => (hintEl.textContent = MATERIALS[current].hint));
-
-
-// Les six dernières matières choisies, épinglées au-dessus des familles :
-// depuis que la palette est un accordéon exclusif, y revenir coûtait deux clics.
-const recentEl = document.querySelector<HTMLDivElement>("#recent")!;
-let recent: MaterialId[] = [];
-
-function keepRecent(id: MaterialId): void {
-  // La liste est reconstruite : si le focus était dedans, il partait au body à
-  // chaque choix fait au clavier. La matière élue passe en tête, c'est donc le
-  // premier bouton qui le reprend.
-  const focused = recentEl.contains(document.activeElement);
-  recent = pushRecent(recent, id, 6);
-  recentEl.replaceChildren(...recent.map(swatch));
-  if (focused) recentEl.querySelector("button")?.focus();
-}
-
-// Clavier : les flèches parcourent une grille de matières. Sans ça il faut
-// quarante-sept tabulations pour traverser la palette.
-for (const grid of [paletteEl, recentEl]) {
-  grid.addEventListener("keydown", (e) => {
-    const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 2, ArrowUp: -2 }[e.key];
-    if (step === undefined) return;
-    const box = (e.target as HTMLElement).closest(".palette");
-    if (!box) return;
-    const buttons = [...box.querySelectorAll("button")];
-    const next = buttons[buttons.indexOf(e.target as HTMLButtonElement) + step];
-    if (!next) return;
-    next.focus();
-    e.preventDefault();
-  });
-}
-
-function select(id: MaterialId): void {
-  // La pipette sur l'œil d'un lapin choisit le lapin, pas un œil à peindre.
-  id = MATERIALS[id].part ?? id;
-  current = id;
-  keepRecent(id);
-  // Une source crache la dernière matière choisie avant elle.
-  if (id !== SOURCE && id !== EMPTY) { emit = id; set({ emit: id }); }
-  hintEl.textContent = MATERIALS[id].hint;
-  for (const b of paletteEl.querySelectorAll("button")) {
-    b.setAttribute("aria-pressed", String(Number(b.dataset.id) === id));
-  }
-}
-select(current);
 
 // Raccourcis : chaque combinaison devient une action (`bound`, touches
 // réassignables dans la fenêtre des raccourcis).
@@ -552,152 +455,6 @@ const redo = (): void => order({ t: "edit", do: "redo" });
 document.querySelector<HTMLButtonElement>("#undo")!.addEventListener("click", undo);
 document.querySelector<HTMLButtonElement>("#redo")!.addEventListener("click", redo);
 
-/* ----------------------------------------------------------------- réglages */
-
-const brushInput = document.querySelector<HTMLInputElement>("#brush")!;
-const brushValue = document.querySelector<HTMLOutputElement>("#brush-value")!;
-brushInput.addEventListener("input", () => {
-  brush = Number(brushInput.value);
-  brushValue.value = brushInput.value;
-});
-
-const keepInput = document.querySelector<HTMLInputElement>("#keep")!;
-const onlyInput = document.querySelector<HTMLInputElement>("#only")!;
-const mirrorInput = document.querySelector<HTMLInputElement>("#mirror")!;
-const toolInput = document.querySelector<HTMLSelectElement>("#tool")!;
-
-/** Ticks de simulation par 60e de seconde : 0,25 (ralenti) à 4 (accéléré). */
-let speed = 1;
-const speedInput = document.querySelector<HTMLInputElement>("#speed")!;
-const speedValue = document.querySelector<HTMLOutputElement>("#speed-value")!;
-speedInput.addEventListener("input", () => {
-  speed = Number(speedInput.value) / 4;
-  set({ speed });
-  speedValue.value = `×${speed.toLocaleString("fr-FR")}`;
-});
-
-const windInput = document.querySelector<HTMLInputElement>("#wind")!;
-const windValue = document.querySelector<HTMLOutputElement>("#wind-value")!;
-windInput.addEventListener("input", () => {
-  set({ wind: Number(windInput.value) / 10 });
-  windValue.value = windInput.value;
-});
-
-// Climat de la scène : tout retourne à cette température (hiver, four…).
-const ambientInput = document.querySelector<HTMLInputElement>("#ambient")!;
-const ambientValue = document.querySelector<HTMLOutputElement>("#ambient-value")!;
-ambientInput.addEventListener("input", () => {
-  set({ ambient: Number(ambientInput.value) });
-  ambientValue.value = `${ambientInput.value} °C`;
-});
-
-const sizeInput = document.querySelector<HTMLSelectElement>("#size")!;
-sizeInput.addEventListener("input", () => {
-  const w = Number(sizeInput.value);
-  resize(w, (w * 9) / 16);
-  abandon();
-});
-
-/**
- * Impose une taille au bac **sans le regraîner** : ce dont ont besoin les
- * scènes (écrites pour 320×180), un lien partagé et l'hôte d'un salon.
- * Une largeur qui n'est pas au menu est refusée — le lien vient d'ailleurs.
- */
-function fit(w: number): void {
-  if (w === WIDTH) return;
-  if (![...sizeInput.options].some((o) => o.value === String(w))) return;
-  resize(w, (w * 9) / 16, true);
-  sizeInput.value = String(w);
-  // Aucun événement ne part d'une valeur posée en code : sans ce rappel, les
-  // réglages gardaient l'ancienne taille, et la visite suivante rouvrait le bac
-  // dans une grille qui n'était plus la sienne.
-  remember();
-}
-
-// Météo : la pluie elle-même vit dans gestures.ts, avec le tirage du moteur.
-const weatherInput = document.querySelector<HTMLSelectElement>("#weather")!;
-weatherInput.addEventListener("input", () => set({ weather: Number(weatherInput.value) }));
-
-const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
-heatmapInput.addEventListener("change", () => set({ heatmap: heatmapInput.checked }));
-
-// Heure : la teinte du ciel, réglage de la page seule (world.ts). Le cycle
-// avance d'un cran par seconde : un fondu plus fin recolorierait tout le bac
-// à chaque frame pour un écart invisible.
-const hourInput = document.querySelector<HTMLSelectElement>("#hour")!;
-const clockEl = document.querySelector<HTMLSpanElement>("#clock")!;
-function tickHour(): void {
-  const cycle = hourInput.value === "cycle", now = performance.now() / 1000;
-  const key = hourInput.value in HOURS ? hourInput.value : "apres-midi";
-  hour(cycle ? hourTint(now) : HOURS[key]);
-  const minutes = Math.floor((cycle ? clockAt(now) : CLOCK[key]) * 60);
-  clockEl.textContent = `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
-}
-hourInput.addEventListener("input", tickHour);
-setInterval(() => { if (hourInput.value === "cycle") tickHour(); }, 1000);
-
-const lightingInput = document.querySelector<HTMLInputElement>("#lighting")!;
-lightingInput.addEventListener("change", () => light(lightingInput.checked));
-if (screen.kind === "2d") {
-  lightingInput.disabled = true;
-  lightingInput.parentElement!.title = "Demande WebGL2, absent de ce navigateur";
-}
-
-// Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
-// que de dupliquer les handlers ci-dessus.
-// ponytail: un blob JSON sans version — un réglage renommé repart au défaut.
-const SETTINGS = "sandbox-rabbit:reglages";
-
-/** JSON du stockage local, toléré : abîmé, on repart du défaut. */
-function stored<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(read(key) ?? "") as T;
-  } catch {
-    return fallback;
-  }
-}
-
-/**
- * Les réglages retenus, désignés par leur `id` — les clés du blob sont donc
- * celles d'avant (`brush`, `speed`…), les anciennes visites se relisent.
- * Une case à cocher garde son `checked`, tout le reste sa `value`.
- */
-const SAVED = [
-  brushInput, speedInput, windInput, ambientInput, sizeInput,
-  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, lightingInput, hourInput,
-];
-const isCheck = (el: Element): el is HTMLInputElement =>
-  el instanceof HTMLInputElement && el.type === "checkbox";
-
-function remember(): void {
-  const state: Record<string, string | number | boolean> = { current };
-  for (const el of SAVED) state[el.id] = isCheck(el) ? el.checked : el.value;
-  write(SETTINGS, JSON.stringify(state));
-}
-// Les deux événements : une case coche sur « change », un curseur glisse sur « input ».
-for (const el of SAVED) for (const type of ["input", "change"]) el.addEventListener(type, remember);
-paletteEl.addEventListener("click", remember);
-
-// Forme libre : le blob n'est pas versionné, chaque champ est retesté ci-dessous.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const saved = stored<any>(SETTINGS, null);
-if (saved) {
-  if (MATERIALS[saved.current as MaterialId]) select(saved.current as MaterialId);
-  for (const el of SAVED) {
-    const value = typeof saved[el.id] === "boolean" && !isCheck(el) ? Number(saved[el.id]) : saved[el.id];
-    if (value === undefined) continue; // réglage absent d'une version précédente
-    // L'événement est rejoué plutôt que les handlers dupliqués : c'est lui qui
-    // pousse la valeur dans le moteur (vent, ambiante) ou dans le rendu.
-    if (isCheck(el)) {
-      el.checked = Boolean(value);
-      el.dispatchEvent(new Event("change"));
-    } else {
-      el.value = String(value);
-      el.dispatchEvent(new Event("input"));
-    }
-  }
-}
-
 const gravityButton = document.querySelector<HTMLButtonElement>("#gravity")!;
 function flipGravity(): void {
   gravity = gravity === 1 ? -1 : 1;
@@ -815,6 +572,8 @@ initRoom({
 
 /* -------------------------------------------------------------------- défis */
 
+/** Défi en cours. */
+let challenge: Challenge | null = null;
 const goalEl = document.querySelector<HTMLParagraphElement>("#goal")!;
 const challengesEl = document.querySelector<HTMLDivElement>("#challenges")!;
 /** Horloge murale : la pause et le ralenti comptent aussi, c'est un chrono de joueur. */
@@ -875,6 +634,9 @@ initShare({
 });
 
 /* -------------------------------------------------------------------- scène */
+
+sizeInput.addEventListener("input", abandon);
+restore();
 
 
 // Le bac est repris tel quel d'une visite à l'autre : le lien partagé passe

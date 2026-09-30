@@ -176,7 +176,7 @@ garder ces deux propriétés en modifiant la CI.
 
 ## Ce qui n'est pas testé automatiquement
 
-main.ts, view.ts, keys.ts, world.ts, room.ts (client), share.ts, theme.ts et le Durable Object
+main.ts, view.ts, keys.ts, palette.ts, settings.ts, world.ts, room.ts (client), share.ts, theme.ts et le Durable Object
 tiennent au DOM ou au runtime Cloudflare (le routage du salon, lui, est sorti
 dans relay.ts et testé). Pour eux : `npm run dev`
 (http://localhost:5173, Vite + Worker dans workerd, store mémoire) et vérifier

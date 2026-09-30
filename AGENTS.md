@@ -53,7 +53,9 @@ fonctionnalité) : le tenir à jour quand un comportement visible change.
 ```
 index.html               tout le DOM de la page (panneau, dialogues, raccourcis)
 src/client/
-  main.ts                câblage DOM, souris, réglages, défis, boucle rAF ; gesture()
+  main.ts                câblage DOM, souris, héros, défis, rejeu, boucle rAF ; gesture()
+  palette.ts             palette des matières, récentes ; select(), current, emit
+  settings.ts            réglages du panneau, retenus d'une visite à l'autre ; fit(), restore()
   view.ts                zoom et déplacement de la vue (transformation CSS du canvas)
   keys.ts                touches réassignables, touches tenues, fenêtre Paramètres
   world.ts               canvas + porte unique vers le Worker : order(), listen(), askLoad(), askClip() ; miroir de la grille
@@ -136,7 +138,7 @@ aucun test précis.
   sandbox.ts, sinon le rejeu diverge. S'il la remplace, il arrête d'abord le
   rejeu (`this.play(false)`).
 - `localStorage` uniquement via `read` / `write` / `forget` de ui.ts.
-- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts` n'importent pas main.ts (cycle).
+- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts`, `palette.ts`, `settings.ts` n'importent pas main.ts (cycle).
 - Une frame ne porte que les bandes changées : world.ts les recopie toutes
   dans son miroir, n'en saute jamais une. Un réglage qui change l'aspect sans
   écriture (comme `heatmap`) fait tout recolorier.

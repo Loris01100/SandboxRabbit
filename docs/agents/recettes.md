@@ -127,11 +127,11 @@ Rappel : ce qui transite est cloné (clone structuré), pas partagé.
 1. L'élément dans [index.html](../../index.html), dans le bon
    `<details class="group">`. Un réglage = une `.row` (libellé / contrôle /
    valeur) ; une case à cocher = une `.check`.
-2. Son câblage dans [main.ts](../../src/client/main.ts) via
-   `document.querySelector<…>("#id")!`.
-3. S'il change la simulation : `order({t:"set", k:{…}})` et un champ dans
-   `Knobs`. S'il doit être retenu : l'ajouter au blob `sandbox-rabbit:reglages`
-   (via `read` / `write` de ui.ts, jamais `localStorage` en direct).
+2. Son câblage dans [settings.ts](../../src/client/settings.ts) via
+   `document.querySelector<…>("#id")!`, exporté si main.ts le lit.
+3. S'il change la simulation : `set({…})` de world.ts et un champ dans
+   `Knobs`. S'il doit être retenu : l'ajouter à `SAVED` (settings.ts), qui
+   l'écrit dans le blob `sandbox-rabbit:reglages` et le rejoue à `restore()`.
 4. Pas de `style=` ni de `<script>` en ligne (CSP) : passer par
    [style.css](../../src/client/style.css) ou le CSSOM.
 5. Toute logique pure (calcul, parsing) va dans

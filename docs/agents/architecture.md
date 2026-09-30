@@ -9,7 +9,7 @@ la simulation est dans [simulation.md](simulation.md).
 flowchart LR
   subgraph Navigateur
     direction TB
-    page["Fil principal<br/>main.ts, view.ts, keys.ts, room.ts, share.ts, theme.ts<br/>(DOM, souris, panneau)"]
+    page["Fil principal<br/>main.ts, view.ts, keys.ts, palette.ts, settings.ts, room.ts, share.ts, theme.ts<br/>(DOM, souris, panneau)"]
     world["world.ts<br/>order() / listen()"]
     sim["Web Worker : sim/worker.ts<br/>→ Sandbox (sim/sandbox.ts)<br/>→ Engine + Renderer"]
     page --> world
@@ -78,7 +78,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | Ordre (`order()`) | Effet côté bac |
 | --- | --- |
 | `do` `{g}` | Applique un `Gesture` (ignoré pendant un rejeu). **N'envoyer que via `gesture()` de main.ts.** |
-| `set` `{k}` | Met à jour les réglages (`Knobs` : vent, ambiante, gravité, vitesse, pause, vue thermique, salon…) |
+| `set` `{k}` | Met à jour les réglages (`Knobs` : vent, ambiante, gravité, vitesse, pause, vue thermique, salon…). Côté page, `set(k)` de world.ts l'envoie |
 | `size` `{w,h,keep}` | Recrée moteur et rendu ; vide l'annulation, abandonne l'enregistrement, arrête le rejeu, désarme le défi |
 | `load` `{data,ask?,quiet?}` | Pose une grille encodée ; `quiet` = sans cran d'annulation (salon). Arrête le rejeu et désarme le défi en cours — un monde-défi réarme le sien par `goal` juste après |
 | `edit` | `clear` / `undo` / `redo` / `step` / `snapshot`. Pendant un rejeu, `step` l'avance d'un tick, `clear` / `undo` / `redo` l'arrêtent d'abord. `clear` désarme le défi |
@@ -303,7 +303,9 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
-| [main.ts](../../src/client/main.ts) | palette, souris, héros, réglages, défis, boucle rAF, câblage de tout le DOM | non |
+| [main.ts](../../src/client/main.ts) | souris, raccourcis, héros, défis, rejeu, chargement du bac, boucle rAF, câblage de tout le DOM | non |
+| [palette.ts](../../src/client/palette.ts) | palette des matières et six récentes ; `select()`, qui tient `current` et `emit` (matière des sources) | non |
+| [settings.ts](../../src/client/settings.ts) | contrôles du panneau (pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage) et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
 | [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan` | non |
 | [keys.ts](../../src/client/keys.ts) | touches réassignables (`bindings`, `bound`), touches tenues (`held`), fenêtre Paramètres (`openSettings()`, onglet Raccourcis) | non |
 | [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille (lu par `seen()`) | non |
@@ -348,11 +350,12 @@ kilo-octets de lien ne se déplient pas en gigaoctets. Le rejeu validé part au
 bac par `watch()` (rappel passé à `initShare()`) : ordre `reel`, puis lecture
 comme au bouton « Rejouer », taille du bac ajustée (`fit()`).
 
-Les modules périphériques (`room`, `share`, `theme`, `view`, `keys`) ne doivent **pas**
+Les modules périphériques (`room`, `share`, `theme`, `view`, `keys`, `palette`, `settings`) ne doivent **pas**
 importer main.ts (cycle) : main.ts leur passe ce dont ils ont besoin par un
 `init…()` à rappels.
 
-Accès `localStorage` : uniquement via `read` / `write` / `forget` de ui.ts.
+Accès `localStorage` : uniquement via `read` / `write` / `forget` de ui.ts
+(`stored()` y lit un JSON en tolérant qu'il soit abîmé).
 Un `localStorage.getItem` nu jette quand les cookies sont bloqués, et au
 chargement d'un module cela laisse la page blanche. Clés existantes :
 `sandbox-rabbit:mondes`, `:reglages`, `:records`, `:bac`, `:theme`, `:touches`
@@ -361,5 +364,5 @@ chargement d'un module cela laisse la page blanche. Clés existantes :
 `:bac` suit le format d'un lien de partage, `320~<grille>` (`loadWorld()` de
 main.ts lit les deux ; une valeur sans `~`, d'avant, se charge dans le bac tel
 qu'il est). Sans la largeur, un défi rangé en 320 depuis un bac réglé en 480
-revenait cisaillé. Pour la même raison, `fit()` appelle `remember()` : une
+revenait cisaillé. Pour la même raison, `fit()` de settings.ts appelle `remember()` : une
 taille imposée en code (défi, lien, galerie, salon) n'émet aucun événement.
