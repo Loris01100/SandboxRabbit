@@ -27,8 +27,9 @@ body {
   font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
 }
 
-/* Le nom du site à l'arrivée : il monte, reste, s'efface, puis disparaît
-   (`forwards` garde l'état final invisible). */
+/* Le nom du site à l'arrivée, sur la page floutée : la couche porte le flou,
+   le texte bouge seul (un zoom de la couche découvrirait ses bords nets).
+   Les deux finissent invisibles (`forwards`). */
 .splash {
   position: fixed;
   inset: 0;
@@ -36,22 +37,29 @@ body {
   display: grid;
   place-items: center;
   margin: 0;
+  color: var(--accent);
   font-size: clamp(2.5rem, 9vw, 6rem);
   letter-spacing: 0.02em;
+  white-space: nowrap;
   pointer-events: none;
-  animation: splash 2.6s ease-out forwards;
+  animation: splash-blur 2.6s ease-out forwards;
 }
-.splash span { color: var(--accent); }
+.splash span { animation: splash-text 2.6s ease-out forwards; }
 
-@keyframes splash {
+@keyframes splash-blur {
+  0%, 70% { backdrop-filter: blur(10px); }
+  100% { backdrop-filter: blur(0); visibility: hidden; }
+}
+
+@keyframes splash-text {
   0% { opacity: 0; transform: translateY(1.5rem) scale(0.96); }
   25%, 70% { opacity: 1; transform: none; }
-  100% { opacity: 0; transform: scale(1.04); visibility: hidden; }
+  100% { opacity: 0; transform: scale(1.04); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .splash { animation-name: splash-still; }
-  @keyframes splash-still { 0%, 70% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
+  .splash span { animation-name: splash-fade; }
+  @keyframes splash-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 }
 
 /* Les statistiques, dans un encadré au-dessus du bac, à hauteur de la barre
