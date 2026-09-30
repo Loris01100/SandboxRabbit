@@ -122,7 +122,11 @@ Ce qui est vérifié :
    [AGENTS.md](../AGENTS.md)). L'éclairage global (`lit`) n'existe que côté
    shader : il n'est pas comparé ;
 2. **la page du jeu charge** : le bac reçoit sa première frame (le canvas
-   `#world` prend la taille de la grille) sans aucune erreur dans la console.
+   `#world` prend la taille de la grille) sans aucune erreur dans la console ;
+3. **les erreurs remontent** : une exception lancée dans la page part vers
+   `POST /api/error` (src/client/errors.ts) et le Worker répond `204`. Vite
+   affiche alors un `[Unhandled error] Error: essai de remontée` : c'est
+   l'exception du test, pas une panne.
 
 Ce n'est pas dans `npm run check` : il faut Chromium installé. La CI le lance
 après `check`.

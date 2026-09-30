@@ -6,7 +6,9 @@
  * 1. test/screen.html : le shader WebGL2 contre `Renderer`, au pixel près.
  * 2. la page du jeu : elle charge, le bac reçoit sa première frame, et aucune
  *    erreur ne sort dans la console — c'est tout ce qui couvre main.ts, le
- *    câblage DOM et le Worker de simulation dans un vrai navigateur.
+ *    câblage DOM et le Worker de simulation dans un vrai navigateur ;
+ * 3. une exception lancée dans la page part vers `/api/error` (errors.ts) et
+ *    le Worker l'accepte.
  *
  * Le navigateur s'installe une fois par machine : `npx playwright install
  * chromium` (voir docs/navigateur.md).
@@ -57,7 +59,13 @@ try {
   await page.waitForFunction(() => document.querySelector<HTMLCanvasElement>("#world")!.width > 1, null, { timeout: 30_000 });
   assert.deepEqual(errors, [], "la page du jeu charge sans erreur dans la console");
 
-  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée`);
+  const beacon = page.waitForResponse((r) => r.url().endsWith("/api/error"), { timeout: 10_000 });
+  await page.evaluate(() => { window.setTimeout(() => { throw new Error("essai de remontée"); }); });
+  const sent = await beacon;
+  assert.match(sent.request().postData() ?? "", /^page : Error: essai de remontée/, "une exception de la page part vers /api/error");
+  assert.equal(sent.status(), 204, "le Worker l'accepte");
+
+  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, erreur remontée`);
 } finally {
   await browser.close();
   await server.close();

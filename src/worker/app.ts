@@ -3,6 +3,7 @@
  * charger telle quelle dans test/api.ts. L'entrée du Worker est index.ts.
  */
 import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { createStore, type World } from "./store.ts";
 
 export interface Env {
@@ -160,6 +161,28 @@ app.get("/api/room/:id", async (c) => {
   const room = c.env.ROOM.get(c.env.ROOM.idFromName(c.req.param("id").slice(0, 60)));
   return room.fetch(c.req.raw);
 });
+
+/**
+ * Les erreurs des joueurs (src/client/errors.ts), écrites dans les journaux du
+ * Worker : `observability` (wrangler.jsonc) les garde, cherchables dans le
+ * tableau de bord, et `wrangler tail` les montre en direct. Rien en base. Un
+ * objet plutôt qu'une chaîne : ses champs deviennent des filtres. Le débit a
+ * son compteur, sinon une page qui boucle sur une erreur empêchait son joueur
+ * de sauvegarder ; `bodyLimit` coupe un corps trop gros avant de le lire, la
+ * route étant ouverte à tous. 16 Kio : les 4 000 caractères d'un rapport, en
+ * UTF-8, au pire.
+ */
+app.post(
+  "/api/error",
+  bodyLimit({ maxSize: 16 * 1024, onError: (c) => c.json({ error: "rapport trop lourd" }, 413) }),
+  async (c) => {
+    if (await flooding(c, "erreur:")) return c.json({ error: "trop de requêtes" }, 429);
+    const report = await c.req.text();
+    if (!report) return c.json({ error: "rapport vide" }, 400);
+    console.error({ message: "erreur joueur", report, agent: (c.req.header("user-agent") ?? "").slice(0, 200) });
+    return c.body(null, 204);
+  },
+);
 
 app.all("/api/*", (c) => c.json({ error: "route inconnue" }, 404));
 

@@ -17,6 +17,7 @@ import type { Knobs, News, Order } from "./sim/sandbox.ts";
 import { HOURS, type Grid, type Tint } from "./sim/render.ts";
 import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
+import { watchErrors } from "./errors.ts";
 
 export const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
 /** Ce qui colorie le canvas : WebGL2, sinon 2D (screen.ts). */
@@ -46,6 +47,7 @@ export function cellBox(): { left: number; top: number; sx: number; sy: number }
 export const onResize: (() => void)[] = [];
 
 const sim = new Worker(new URL("./sim/worker.ts", import.meta.url), { type: "module" });
+watchErrors(sim);
 sim.postMessage({ t: "start", w: WIDTH, h: HEIGHT });
 
 /**

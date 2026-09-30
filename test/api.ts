@@ -171,6 +171,27 @@ assert.equal((await app.request("/api/room/public", {}, env)).status, 503);
   assert.match(file.headers.get("cache-control") ?? "", /immutable/, "un fichier hashé se garde un an");
 }
 
+// Les erreurs des joueurs vont aux journaux, avec le navigateur ; vide, trop
+// lourd ou au-delà du débit, rien n'est écrit.
+{
+  const logged: unknown[] = [];
+  const log = console.error;
+  console.error = (entry: unknown) => { logged.push(entry); };
+  try {
+    const beacon = (report: string, e: never = env) =>
+      app.request("/api/error", { method: "POST", headers: { "user-agent": "Testeur/1.0" }, body: report }, e);
+    assert.equal((await beacon("page : TypeError: x is undefined")).status, 204);
+    assert.deepEqual(logged, [{ message: "erreur joueur", report: "page : TypeError: x is undefined", agent: "Testeur/1.0" }]);
+    assert.equal((await beacon("")).status, 400, "rapport vide refusé");
+    assert.equal((await beacon("x".repeat(16 * 1024 + 1))).status, 413, "rapport trop lourd refusé");
+    const saturé = { RL: { limit: async () => ({ success: false }) } } as never;
+    assert.equal((await beacon("encore", saturé)).status, 429, "au-delà du débit, refusé");
+    assert.equal(logged.length, 1, "seul le premier rapport est écrit");
+  } finally {
+    console.error = log;
+  }
+}
+
 assert.equal((await app.request("/api/inconnu", {}, env)).status, 404);
 
 console.log("ok — API conforme");

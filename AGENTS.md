@@ -70,6 +70,7 @@ src/client/
   sight.ts               ce que voit le héros : rayons → colonne de pixels  (pur)
   ui.ts                  logique pure du panneau + read/write/forget (localStorage)
   room.ts share.ts theme.ts   salon, galerie/exports, jour-nuit (reçoivent leurs dépendances par init…())
+  errors.ts              exceptions de la page et du Worker de simulation → POST /api/error ; reporter() (pur)
   sim/
     worker.ts            entrée du Web Worker, cadence ~60 Hz ; se relance en fils auxiliaires
     sandbox.ts           Sandbox : moteur, rendu, annulation, défis, rejeu ; Order / News

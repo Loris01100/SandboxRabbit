@@ -257,6 +257,7 @@ le charger dans Node. Ce qui en a besoin (le Durable Object) vit dans
 | `POST /api/worlds` | `{name, width, height, data, goal?}` → `201 {id, token}` | débit, `data` ≤ 200 000, dimensions entières et ≤ 1920×1080 cellules (`CELLS`, la plus grande grille du menu : en ajouter une plus grande = relever ce plafond), `goal` validé par regex |
 | `DELETE /api/worlds/:id` | en-tête `x-world-token` requis | débit, `403` si mauvais jeton |
 | `GET /api/room/:id` | upgrade WebSocket vers le DO | `503` sans binding `ROOM`, débit, `426` sans upgrade |
+| `POST /api/error` | rapport d'erreur d'un joueur (texte brut, par `sendBeacon`) → `console.error({message, report, agent})` → `204` ; rien en base | corps ≤ 16 Kio (`bodyLimit`, `413`), débit (compteur `erreur:` à part : une page qui boucle n'empêche pas de sauvegarder), `400` si vide |
 | `* /api/*` | `404` JSON | — |
 | `GET *` | fichiers statiques (`ASSETS`) | `cache-control` immuable sous `/assets/`, `no-cache` sinon |
 
@@ -267,6 +268,22 @@ d'attribut `style=` ni de `<script>` inline dans index.html, passer par le CSSOM
 Débit : binding `RL` (`unsafe` ratelimit dans wrangler.jsonc), 20 requêtes par
 IP et par minute sur les écritures et l'ouverture de salon. Absent en local →
 tout passe.
+
+### Erreurs des joueurs
+
+[src/client/errors.ts](../../src/client/errors.ts) écoute `error` et
+`unhandledrejection` sur la page, et `error` sur le Worker de simulation
+(`watchErrors(sim)`, appelé par world.ts) : une exception du Worker n'atteint
+jamais le `window` de la page. `reporter()` n'envoie chaque message qu'une fois,
+cinq au plus par visite, coupé à 4 000 caractères. Rien d'autre ne part : ni
+la grille ni rien qui désigne le joueur.
+
+Les rapports se lisent dans les journaux du Worker, gardés par
+`observability` (wrangler.jsonc) : tableau de bord Cloudflare → Workers →
+sandbox-rabbit → Observability, filtre `message = "erreur joueur"`, ou en
+direct avec `npx wrangler tail`. En `npm run dev`, ils s'affichent dans le
+terminal. Les piles de production pointent dans le bundle minifié (voir le
+`ponytail:` d'errors.ts).
 
 ### Stockage
 
@@ -319,6 +336,7 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan` | non |
 | [keys.ts](../../src/client/keys.ts) | touches réassignables (`bindings`, `bound`), touches tenues (`held`), fenêtre Paramètres (`openSettings()`, onglet Raccourcis) | non |
 | [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille (lu par `seen()`), `cellBox()` : où sont les cellules à l'écran, bordure du canvas exclue (le zoom la grossit) — tout passage cellule ↔ pixel (clic, sélection, cadre du héros) passe par lui | non |
+| [errors.ts](../../src/client/errors.ts) | remonte les exceptions de la page et du Worker de simulation vers `POST /api/error` (voir « Erreurs des joueurs ») | `reporter()` : **oui** (test/ui.ts) |
 | [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, secours 2D par `Renderer` (sans éclairage) | non |
 | [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence, touches réassignables), accès `localStorage` tolérant | **oui** (test/ui.ts) |
 | [sight.ts](../../src/client/sight.ts) | ce que voit le héros : `look()` lance un éventail de rayons dans une grille et rend une colonne de pixels | **oui** (test/ui.ts) |

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, ticksFor } from "../src/client/ui.ts";
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
+import { REPORT, reporter } from "../src/client/errors.ts";
 
 // Objectifs : ce qui vient d'un autre visiteur ne passe pas sans contrôle.
 {
@@ -129,6 +130,19 @@ import { look } from "../src/client/sight.ts";
   const rangées = KEY_GROUPS.flatMap((g) => g.actions);
   assert.deepEqual([...rangées].sort(), [...ACTIONS].sort(), "chaque action est dans un encadré, et un seul");
   assert.equal(new Set(Object.values(DEFAULT_BINDINGS)).size, ACTIONS.length, "les touches d'origine sont toutes différentes");
+}
+
+// Rapports d'erreur : chaque message une fois, cinq au plus, coupés au plafond.
+{
+  const sent: string[] = [];
+  const report = reporter((text) => sent.push(text));
+  for (let i = 0; i < 60; i++) report("boucle de rendu");
+  assert.deepEqual(sent, ["boucle de rendu"], "une erreur répétée ne part qu'une fois");
+  for (let i = 0; i < 10; i++) report(`erreur ${i}`);
+  assert.equal(sent.length, 5, "cinq rapports au plus par visite");
+  const long = reporter((text) => sent.push(text));
+  long("x".repeat(REPORT + 100));
+  assert.equal(sent.at(-1)!.length, REPORT, "un rapport est coupé au plafond");
 }
 
 console.log("ok — panneau conforme");

@@ -158,6 +158,7 @@ npm run deploy     # build, check puis wrangler deploy (npx wrangler login la pr
 | `POST /api/worlds` | Sauvegarde `{ name, width, height, data, goal? }`, répond `201 { id, token }` |
 | `DELETE /api/worlds/:id` | Supprime un monde, avec l'en-tête `x-world-token` reçu à la sauvegarde (`403` sinon) |
 | `GET /api/room/:id` | Ouvre une WebSocket vers le salon partagé `:id` |
+| `POST /api/error` | Rapport d'erreur d'un joueur (texte, 16 Kio max), écrit dans les journaux du Worker ; répond `204` |
 
 Le jeton de suppression est tiré par le Worker et rendu **une seule fois**, par le `POST` : aucune route de lecture ne le renvoie. Les mondes d'avant les jetons ne se suppriment plus que par le ménage nocturne.
 
@@ -215,7 +216,8 @@ Deux pistes distinctes, à ne pas confondre :
 
 **Dette connue** : les `ponytail:` du code (perte de contexte WebGL, gravité
 inversée du lapin, éclairage absent du rendu de secours, salon sans identité ni
-prédiction locale, records locaux, héros sans métier ni inventaire…). La skill `ponytail-debt` en fait la liste
+prédiction locale, records locaux, héros sans métier ni inventaire, piles
+d'erreur minifiées…). La skill `ponytail-debt` en fait la liste
 complète ; ailleurs, `grep -rn -A6 --exclude-dir=target "ponytail:" src test rust migrations .github index.html wrangler.jsonc`.
 
 ## Contribuer
