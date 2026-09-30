@@ -232,3 +232,8 @@ famille de `CATEGORIES`. Si son comportement n'est pas couvert par `kind`
 (`powder` / `liquid` / `gas` / `static`), lui ajouter un `case` dans
 `Engine.update`. La marche complète est dans
 [docs/agents/recettes.md](docs/agents/recettes.md).
+
+## Licence
+
+[MIT](LICENSE) : réutilisation, modification et redistribution libres, à
+condition de garder la mention de copyright.
