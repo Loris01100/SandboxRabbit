@@ -333,7 +333,16 @@ kbd {
   font: inherit;
 }
 
-#settings { width: min(560px, 92vw); }
+/* Hauteur fixe : chaque onglet a la même taille, et c'est son contenu qui
+   défile quand il déborde. `[open]` et `:not([hidden])`, sinon le `display`
+   posé ici rouvrirait la fenêtre fermée ou l'onglet caché. */
+#settings { width: min(560px, 92vw); height: min(560px, 86vh); }
+#settings[open] { display: flex; flex-direction: column; }
+#settings > section { flex: 1; min-height: 0; overflow-y: auto; }
+#settings-keys:not([hidden]) { display: flex; flex-direction: column; gap: 0.5rem; overflow: hidden; }
+#settings-keys > * { flex: none; margin: 0; }
+#settings-keys > #bindings { flex: 1; min-height: 0; overflow-y: auto; }
+#settings-keys > button { align-self: start; }
 #settings .row { grid-template-columns: 4.2rem 1fr; }
 /* Les onglets des paramètres, séparés par un filet des onglets de raccourcis. */
 .tabs { padding-bottom: 0.75rem; border-bottom: 1px solid var(--line); }

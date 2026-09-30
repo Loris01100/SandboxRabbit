@@ -148,7 +148,10 @@ Pinceau, Simulation, Physique du monde, Défis, Mondes, Héros et vue), chacun
 avec ses gestes de souris, fixes ; un menu d'onglets (`#keys-menu`) en montre
 un à la fois (`shownGroup`), `listBindings()` remplit le tout. Tous sont posés
 dans la même case de grille, les autres en `visibility: hidden` : chacun a la
-taille du plus grand, la fenêtre ne saute pas d'un onglet à l'autre. Chaque action
+taille du plus grand, la fenêtre ne saute pas d'un onglet à l'autre. La
+fenêtre Paramètres a elle-même une hauteur fixe (style.css) : l'onglet Général
+et l'onglet Raccourcis ont la même taille, et un contenu trop long défile
+(dans Raccourcis, seule la liste `#bindings` défile, menu et bouton restent). Chaque action
 est dans un encadré et un seul (test/ui.ts). Les actions de Simulation et de
 Mondes, et « recommencer le dernier défi » (`lastChallenge`), cliquent
 simplement le bouton du panneau.
