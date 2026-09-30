@@ -230,10 +230,13 @@ canvas {
 .row output { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .row button, .row select, .row input[type="text"] { grid-column: 2 / -1; min-width: 0; }
 .row meter { width: 100%; }
-/* Trois contrôles pour une seule ligne de réglage : l'objectif d'un défi. */
-.row .goal { grid-column: 2 / -1; display: flex; gap: 0.3rem; min-width: 0; }
+/* Trois contrôles pour un seul réglage : l'objectif d'un défi. Sur une ligne,
+   chaque liste n'avait qu'une cinquantaine de pixels et « Au moins » devenait
+   « Au » : la matière passe dessous, sur toute la largeur. */
+.row .goal { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 0.3rem; min-width: 0; }
 .row .goal select { grid-column: auto; min-width: 0; flex: 1; }
 .row .goal input { width: 4.5rem; }
+.row .goal #goal-id { flex-basis: 100%; }
 
 select {
   padding: 0.35rem 0.4rem;
