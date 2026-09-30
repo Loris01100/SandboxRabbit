@@ -120,10 +120,26 @@ function leaveRoom(): void {
   onRole(true);
 }
 
+/** Reconnexion en attente après une coupure, annulée si le joueur reprend la main. */
+let retry = 0;
+/** Le joueur a demandé à partir : la fermeture qui suit n'est pas une coupure. */
+let quitting = false;
+
 roomButton.addEventListener("click", () => {
-  if (socket) { socket.close(); return; }
+  clearTimeout(retry);
+  if (socket) { quitting = true; socket.close(); return; }
   const name = prompt("Nom du salon ?", "public");
-  if (!name) return;
+  if (name) join(name);
+});
+
+/**
+ * Entre dans le salon. Une connexion établie qui tombe (Wi-Fi qui saute,
+ * déploiement du Worker) est retentée une fois après une seconde : sans ça il
+ * fallait retaper le nom du salon. Une tentative qui n'aboutit pas ne relance
+ * rien, donc pas de boucle contre un salon plein ou un Worker à terre.
+ */
+function join(name: string): void {
+  quitting = false;
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/room/${encodeURIComponent(name)}`);
   socket = ws;
   room = name;
@@ -167,9 +183,16 @@ roomButton.addEventListener("click", () => {
   // Une connexion qui échoue déclenche « error » puis « close » : sans ce
   // drapeau, « Salon quitté » effacerait aussitôt « Salon injoignable ».
   let failed = false;
+  let opened = false;
+  ws.addEventListener("open", () => (opened = true));
   ws.addEventListener("error", () => (failed = true));
   ws.addEventListener("close", () => {
     leaveRoom();
+    if (opened && !quitting) {
+      statusEl.textContent = `Salon « ${name} » perdu, reconnexion…`;
+      retry = window.setTimeout(() => join(name), 1000);
+      return;
+    }
     statusEl.textContent = failed ? "Salon injoignable." : "Salon quitté.";
   });
-});
+}

@@ -139,13 +139,23 @@ function card(w: World): HTMLDivElement {
   }
   button.addEventListener("click", async () => {
     // On charge par l'API plutôt que par la copie déjà en main : c'est ce
-    // passage qui compte la vue. Injoignable, on se rabat sur la copie.
-    const fresh = await fetch(`/api/worlds/${w.id}`).then((r) => r.json() as Promise<World>).catch(() => w);
+    // passage qui compte la vue, et la copie n'a que la matière. Supprimé
+    // depuis l'ouverture de la galerie, le monde ne se charge plus ;
+    // injoignable, on se rabat sur la copie et on le dit.
+    const res = await fetch(`/api/worlds/${w.id}`).catch(() => null);
+    if (res?.status === 404) {
+      worlds = worlds.filter((x) => x !== w);
+      slot.replaceChildren(note(`« ${w.name} » a été supprimé.`));
+      return;
+    }
+    const fresh = res?.ok ? ((await res.json().catch(() => null)) as World | null) : null;
     // Le monde emmène sa taille : le bac s'y met, plus de carte morte.
-    const done = deps.load(fresh.data ?? w.data, w.width);
+    const done = deps.load(fresh?.data ?? w.data, w.width);
     galleryEl.close();
     if (!(await done)) return;
-    statusEl.textContent = `« ${w.name} » chargé.`;
+    statusEl.textContent = fresh?.data
+      ? `« ${w.name} » chargé.`
+      : `« ${w.name} » chargé sans son état vivant (serveur injoignable).`;
     // Un monde porteur d'un objectif se joue comme un défi : la scène est déjà
     // en place, il ne reste que la condition à surveiller.
     if (objective) deps.start(challengeOf(w, objective), w.goal ?? undefined);

@@ -214,6 +214,10 @@ de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixel
   la retrouve pas envoie `sync` une fois ; l'hôte renvoie un départ, pas plus
   d'un toutes les 2 s (différé, pas jeté). Changer de taille chez un invité
   fait de même, et le départ reçu le remet à la taille de l'hôte.
+- Coupure : une connexion **établie** qui tombe sans que le joueur ait cliqué
+  « Quitter » est retentée une fois après 1 s (`join()` de room.ts). Une
+  tentative qui n'ouvre pas ne relance rien : pas de boucle contre un salon
+  plein. On revient en invité si l'hôte a été promu entre-temps.
 - Un message qui dépasse le plafond du salon n'est pas envoyé (le DO le
   jetterait sans rien dire) : l'hôte le signale dans la barre de statut. Un
   départ pèse ~2 à 9 Ko, une suite ~50 octets.
