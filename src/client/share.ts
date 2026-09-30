@@ -159,6 +159,17 @@ function card(w: World): HTMLDivElement {
   return slot;
 }
 
+/**
+ * Pourquoi une écriture a échoué. Sans réponse (réseau coupé, déploiement en
+ * cours), la sauvegarde restait sur « Sauvegarde… » sans fin ; et un refus de
+ * débit disait « échec » quand il suffit d'attendre une minute.
+ */
+function failure(res: Response | null, what: string): string {
+  if (!res) return `Échec de ${what} : serveur injoignable.`;
+  if (res.status === 429) return "Trop de requêtes : réessayez dans une minute.";
+  return `Échec de ${what}.`;
+}
+
 function del(w: World, token: string, slot: HTMLDivElement): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -167,8 +178,8 @@ function del(w: World, token: string, slot: HTMLDivElement): HTMLButtonElement {
   button.textContent = "×";
   button.addEventListener("click", async () => {
     if (!confirm(`Supprimer « ${w.name} » ?`)) return;
-    const res = await fetch(`/api/worlds/${w.id}`, { method: "DELETE", headers: { "x-world-token": token } });
-    if (!res.ok) { statusEl.textContent = "Échec de la suppression."; return; }
+    const res = await fetch(`/api/worlds/${w.id}`, { method: "DELETE", headers: { "x-world-token": token } }).catch(() => null);
+    if (!res?.ok) { statusEl.textContent = failure(res, "la suppression"); return; }
     slot.remove();
     const mine = owned();
     delete mine[w.id];
@@ -214,8 +225,8 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
       name, width: WIDTH, height: HEIGHT, data,
       goal: goalOp.value ? `${goalOp.value}:${goalId.value}:${goalN.value}` : null,
     }),
-  });
-  if (!res.ok) { statusEl.textContent = "Échec de la sauvegarde."; return; }
+  }).catch(() => null);
+  if (!res?.ok) { statusEl.textContent = failure(res, "la sauvegarde"); return; }
   // Le jeton n'est rendu que là : gardé maintenant ou perdu pour de bon.
   const { id, token } = (await res.json()) as { id: string; token?: string };
   if (token) write(OWNED, JSON.stringify({ ...owned(), [id]: token }));
