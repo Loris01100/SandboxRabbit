@@ -1,6 +1,6 @@
 import {
   ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FALLOUT, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
-  FILINGS, HERO, HERO_BODY, HERO_HEAD, HERO_LEGS, MAGNET, MINE, MUD, NANITE, NITRO, PILOT, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL,
+  FILINGS, HERO, HERO_BODY, HERO_HARM, HERO_HEAD, HERO_LEGS, HERO_SLOTS, MAGNET, MINE, MUD, NANITE, NITRO, PILOT, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL,
   SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM, STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
@@ -137,8 +137,14 @@ const STRIDE = 0.5;
 const DIG = 0.3;
 /** Chance, par tick dans un liquide, de s'y enfoncer d'une cellule : il coule, lentement. */
 const SINK = 0.3;
-/** Chance, par tick la tête sous un liquide, de se noyer : quelques secondes d'apnée. */
-const BREATH = 0.004;
+/** Dégâts par tick trop chaud ou trop froid (`COOK`, `FROST`) : moins d'une seconde dans les flammes. */
+const SCALD = 4;
+/** Dégâts par tick la tête sous un liquide : trois secondes d'apnée, un peu plus s'il était indemne. */
+const CHOKE = 1;
+/** Chance, par tick sans dégâts, d'en guérir un : une demi-minute pour se remettre de tout. */
+const MEND = 0.1;
+/** Chance, par tick, de prendre un an : une journée du cycle (`DAY` = 240 s de render.ts) à 60 ticks par seconde. */
+const YEAR = 1 / (240 * 60);
 /** `life` du cœur du héros : bit 7 = tourné vers la gauche, bits 0-3 = élan de saut restant. */
 const FACING_LEFT = 128;
 
@@ -423,10 +429,17 @@ export class Engine {
   private readonly moveTo = new Int32Array(RABBIT_SIZE);
   private readonly carryId = new Uint8Array(RABBIT_SIZE);
   private readonly carryLife = new Uint8Array(RABBIT_SIZE);
+  private readonly moveLife = new Uint8Array(RABBIT_SIZE);
   /** Cellules de la créature en train de bouger (`relocate`), lues par `owns()`. */
   private moving = 0;
   /** Commandes tenues par le joueur (bits de `PILOT`) : tous les héros du bac y obéissent. */
   pilot = 0;
+  /**
+   * Noms donnés à la main, par numéro de héros (`HERO_SLOTS.name`) ; sans nom
+   * donné, celui de `NAMES` (gestures.ts). Posés par le geste `name`, gardés
+   * avec le monde (5ᵉ bloc du codec). Le moteur ne les lit pas.
+   */
+  names = new Map<number, string>();
 
   /**
    * Un bac neuf, ou — avec `memory` — une **vue** sur la mémoire d'un autre :
@@ -1968,6 +1981,8 @@ export class Engine {
    * tout. Chaque case d'arrivée doit être la sienne, vide, un gaz, ou — `wet`,
    * en tombant — un liquide plus léger que lui. Ce qu'il déplace reprend les
    * cases qu'il quitte : la matière est conservée, comme dans `hurl()`.
+   * Chaque case emporte son `life` : le héros garde sa fiche dans son corps
+   * (`HERO_SLOTS`), le lapin n'y a que des zéros.
    */
   private relocate(shape: Shape, x: number, y: number, f: number, nx: number, ny: number, nf: number, wet: boolean): boolean {
     const { moveFrom: from, moveTo: to, cells, life, frozen } = this;
@@ -1993,16 +2008,14 @@ export class Engine {
       this.carryLife[carried] = life[j];
       carried++;
     }
-    const fed = life[from[0]];
     for (let k = 0; k < size; k++) { this.wake(from[k]); this.wake(to[k]); }
-    for (let k = 0; k < size; k++) { cells[from[k]] = EMPTY; life[from[k]] = 0; }
+    for (let k = 0; k < size; k++) { this.moveLife[k] = life[from[k]]; cells[from[k]] = EMPTY; life[from[k]] = 0; }
     for (let k = 0; k < size; k++) {
       const j = to[k];
       cells[j] = id[k];
-      life[j] = 0;
+      life[j] = this.moveLife[k];
       this.clock[j] = this.parity; // il a bougé ce tick, ses cellules aussi
     }
-    life[to[0]] = fed;
     for (let k = 0; k < size && carried > 0; k++) {
       const j = from[k];
       if (cells[j] !== EMPTY) continue;
@@ -2048,7 +2061,11 @@ export class Engine {
    * marche plus vite qu'il ne pose et tombe de son propre escalier.
    *
    * Dans un liquide il coule lentement (`SINK`), et saut tenu il remonte : il
-   * nage. La tête dessous, il se noie en quelques secondes (`BREATH`).
+   * nage. Chaleur, froid et apnée ne le tuent pas net : ils lui font des
+   * dégâts (`SCALD`, `CHOKE`), dont il guérit au calme (`MEND`) ; il meurt à
+   * `HERO_HARM`. Sa fiche (numéro, dégâts, âge, compteurs) vit dans le `life`
+   * de son corps (`HERO_SLOTS`), que `relocate()` emporte : le cœur n'a plus
+   * de place, et une règle ne garde rien hors des cellules (plusieurs fils).
    * Tous les héros du bac obéissent aux mêmes touches ; la caméra suit le
    * dernier mis à jour (`hero`).
    */
@@ -2060,23 +2077,30 @@ export class Engine {
       return;
     }
     if (whole < H.id.length) { this.maim(H, x, y, 1); return; }
+    const { life } = this, S = HERO_SLOTS;
     const t = this.temp[i];
-    if (t > COOK) { this.kill(H, x, y, 1, FIRE); return; }
-    if (t < FROST) { this.kill(H, x, y, 1, ICE); return; }
     const head = KIND[this.get(x, y - 3)] === KINDS.liquid;
-    if (head && this.rand() < BREATH) { this.kill(H, x, y, 1, EMPTY); return; }
+    const hurt = (t > COOK || t < FROST ? SCALD : 0) + (head ? CHOKE : 0);
+    let harm = life[this.slot(x, y, S.harm)];
+    if (hurt > 0) harm += hurt;
+    else if (harm > 0 && this.rand() < MEND) harm--;
+    if (harm >= HERO_HARM) { this.kill(H, x, y, 1, t > COOK ? FIRE : t < FROST ? ICE : EMPTY); return; }
+    const name = life[this.slot(x, y, S.name)] || 1 + Math.floor(this.rand() * 250);
+    let age = life[this.slot(x, y, S.age)];
+    if (age < 250 && this.rand() < YEAR) age++;
+    let dug = life[this.slot(x, y, S.dug)], laid = life[this.slot(x, y, S.laid)];
 
     const p = this.pilot, g = this.gravity;
     const dir = (p & PILOT.right ? 1 : 0) - (p & PILOT.left ? 1 : 0);
     let face = this.life[i] & FACING_LEFT ? -1 : 1;
     if (dir !== 0) face = dir;
     let jump = this.life[i] & 15;
-    if (p & PILOT.dig && this.rand() < DIG) this.dig(x + 2 * face, y - 2, y + 1);
-    if (p & PILOT.down && this.rand() < DIG) { this.dig(x - 1, y + 2, y + 2); this.dig(x, y + 2, y + 2); this.dig(x + 1, y + 2, y + 2); }
+    if (p & PILOT.dig && this.rand() < DIG) dug += this.dig(x + 2 * face, y - 2, y + 1);
+    if (p & PILOT.down && this.rand() < DIG) dug += this.dig(x - 1, y + 2, y + 2) + this.dig(x, y + 2, y + 2) + this.dig(x + 1, y + 2, y + 2);
     if (p & PILOT.place) {
       const id = p >> 8;
-      if (p & PILOT.up) { this.lay(x - 1, y + 2, id); this.lay(x, y + 2, id); this.lay(x + 1, y + 2, id); }
-      else this.lay(x + 2 * face, y + 1, id);
+      if (p & PILOT.up) laid += this.lay(x - 1, y + 2, id) + this.lay(x, y + 2, id) + this.lay(x + 1, y + 2, id);
+      else laid += this.lay(x + 2 * face, y + 1, id);
     }
 
     const wet = head || KIND[this.get(x, y + 2)] === KINDS.liquid;
@@ -2096,30 +2120,48 @@ export class Engine {
       else if (grounded && this.relocate(H, cx, cy, 1, cx + dir, cy - g, 1, true)) { cx += dir; cy -= g; }
     }
     const at = this.index(cx, cy);
-    this.life[at] = (face < 0 ? FACING_LEFT : 0) | jump;
+    life[at] = (face < 0 ? FACING_LEFT : 0) | jump;
+    life[this.slot(cx, cy, S.name)] = name;
+    life[this.slot(cx, cy, S.harm)] = harm;
+    life[this.slot(cx, cy, S.age)] = age;
+    life[this.slot(cx, cy, S.dug)] = Math.min(250, dug);
+    life[this.slot(cx, cy, S.laid)] = Math.min(250, laid);
     this.hero = at;
+  }
+
+  /** La cellule du corps du héros de cœur (x, y) qui garde une donnée de `HERO_SLOTS`. Corps entier : dans la grille. */
+  private slot(x: number, y: number, s: readonly [number, number]): number {
+    return this.index(x + s[0], y + s[1]);
   }
 
   /**
    * Le héros creuse la colonne `x`, de `y0` à `y1` : tout ce qui est solide —
    * statique ou poudre — part, sauf le métal et les créatures. `become` : une
-   * cellule figée tient bon.
+   * cellule figée tient bon. Rend le nombre de cellules arrachées (sa fiche).
    */
-  private dig(x: number, y0: number, y1: number): void {
+  private dig(x: number, y0: number, y1: number): number {
+    let n = 0;
     for (let y = y0; y <= y1; y++) {
-      const n = this.get(x, y);
-      const kind = KIND[n];
-      if ((kind === KINDS.static || kind === KINDS.powder) && n !== METAL && !CREATURE[n] && this.inBounds(x, y)) this.become(x, y, EMPTY);
+      const id = this.get(x, y);
+      const kind = KIND[id];
+      if ((kind === KINDS.static || kind === KINDS.powder) && id !== METAL && !CREATURE[id] && this.inBounds(x, y) && !this.frozen[this.index(x, y)]) {
+        this.become(x, y, EMPTY);
+        n++;
+      }
     }
+    return n;
   }
 
   /**
    * Le héros pose `id` en (x, y) si la place est libre (vide ou gaz) : il ne
    * remplace rien, et `id` = 0 (matière refusée par `applyGesture`) ne pose rien.
+   * Rend 1 s'il a posé (sa fiche), 0 sinon.
    */
-  private lay(x: number, y: number, id: MaterialId): void {
+  private lay(x: number, y: number, id: MaterialId): number {
     const kind = KIND[this.get(x, y)];
-    if (id !== EMPTY && (kind === KINDS.empty || kind === KINDS.gas)) this.become(x, y, id);
+    if (id === EMPTY || !(kind === KINDS.empty || kind === KINDS.gas) || this.frozen[this.index(x, y)]) return 0;
+    this.become(x, y, id);
+    return 1;
   }
 
   /**

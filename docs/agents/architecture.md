@@ -94,7 +94,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
-| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,noise?}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y]` ou `null` (la caméra le suit) |
+| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,noise?}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y, nom]` ou `null` (la caméra le suit ; le reste de sa fiche, la page le lit dans son miroir) |
 | `stats` | 2 × / s | nombre de cellules pleines |
 | `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`, `latestGrid()`), pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askGrid()` / `askClip()` / `askFilm()` |
@@ -133,7 +133,9 @@ geste `{t:"pilot", keys}` (bits de `PILOT`, plus la matière choisie en bits
 8-15 quand R est tenu) chaque fois que les touches tenues changent — jamais à
 chaque image. Le rejeu l'enregistre, l'hôte d'un salon le reçoit d'un invité ;
 `applyGesture` le borne à six bits et ne garde la matière que si `placeable()`
-l'accepte. Changer de matière R tenu ne renvoie rien : la nouvelle part au
+l'accepte. Renommer le héros suivi (encadré Héros) envoie de même le geste
+`{t:"name", id, name}` : `id` est son numéro (`HERO_SLOTS.name`), un nom vide
+rend celui d'origine. Changer de matière R tenu ne renvoie rien : la nouvelle part au
 prochain changement de touches. Quand la frame porte un héros (`hero`), les
 touches de direction, de creusage et de pose le pilotent au lieu de déplacer la vue,
 et `follow()` (view.ts) recentre la caméra sur lui à chaque image (un cinquième du
@@ -289,7 +291,11 @@ répond 500.
 ## Format des grilles (codec)
 
 [src/client/sim/codec.ts](../../src/client/sim/codec.ts) — RLE + base64 url,
-jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
+jusqu'à cinq blocs séparés par `.` : `matière[.figé[.life.temp[.noms]]]`.
+Le cinquième n'est pas une grille : les noms donnés aux héros
+(`engine.names`), JSON `[[numéro, nom], …]` en base64 url, absent si personne
+n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de noms),
+`cleanName()` borne un nom à `NAME_MAX` caractères.
 
 - Même format pour la colonne `data` de D1, les liens `#320~…`, le salon,
   `localStorage` et les enregistrements. **Toute modification casse les mondes
@@ -305,7 +311,7 @@ jusqu'à quatre blocs séparés par `.` : `matière[.figé[.life.temp]]`.
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
 | [main.ts](../../src/client/main.ts) | souris, raccourcis, défis, rejeu, chargement du bac, boucle rAF, câblage de tout le DOM | non |
-| [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`hero`, relevée par `track()`), caméra décrochée (`loose`), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
+| [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`hero`, relevée par `track()`), fiche de l'encadré Héros (`card()` : nom, santé, âge, température, compteurs lus dans le miroir ; `nameInput`, `heroId`), caméra décrochée (`loose`), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
 | [palette.ts](../../src/client/palette.ts) | palette des matières et six récentes ; `select()`, qui tient `current` et `emit` (matière des sources) | non |
 | [settings.ts](../../src/client/settings.ts) | contrôles du panneau (pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage) et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
 | [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan` | non |

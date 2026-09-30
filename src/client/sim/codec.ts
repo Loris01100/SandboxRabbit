@@ -15,6 +15,10 @@
  * classique qu'`encodeURIComponent` échappe, à trois caractères pièce. Un lien
  * de partage tenait le tiers de sa longueur en `%2F`.
  *
+ * Cinquième bloc, le seul qui ne soit pas une grille : les noms donnés aux
+ * héros (`engine.names`), en JSON `[[numéro, nom], …]` puis base64 url. Absent
+ * quand personne n'a été renommé.
+ *
  * Une longueur de 0 est une échappe : les deux octets suivants portent un
  * compte sur 16 bits. Sans elle, un ciel vide coûtait une paire tous les 255
  * pixels. L'encodeur d'avant n'écrivait jamais 0, donc les mondes déjà
@@ -26,11 +30,12 @@ const STEP = 8;
 /** Température la plus froide représentable. */
 const FLOOR = -60;
 
-export function encode(cells: Uint8Array, frozen?: Uint8Array, life?: Uint8Array, temp?: Float32Array): string {
+export function encode(cells: Uint8Array, frozen?: Uint8Array, life?: Uint8Array, temp?: Float32Array, names?: Map<number, string>): string {
   const blocks = [rle(cells)];
   // Les blocs sont positionnels : garder `life` impose d'écrire le figé, même vide.
   if (life && temp) {
     blocks.push(rle(frozen ?? new Uint8Array(cells.length)), rle(life), rle(bytes(temp)));
+    if (names?.size) blocks.push(url(String.fromCharCode(...new TextEncoder().encode(JSON.stringify([...names])))));
   } else if (frozen?.some(Boolean)) {
     blocks.push(rle(frozen));
   }
@@ -72,6 +77,35 @@ export function decodeTemp(data: string, size: number): Float32Array | null {
   return temp;
 }
 
+/** Longueur maximale d'un nom de héros. */
+export const NAME_MAX = 20;
+
+/**
+ * Un nom tel qu'on le garde : sans blancs autour, `NAME_MAX` caractères au
+ * plus. Un pair de salon ou un lien envoie ce qu'il veut.
+ */
+export const cleanName = (name: unknown): string => (typeof name === "string" ? name.trim().slice(0, NAME_MAX).trimEnd() : "");
+
+/** Le cinquième bloc (noms des héros) ; vide s'il manque ou ne se lit pas — ils reprennent leur nom d'origine. */
+export function decodeNames(data: string): Map<number, string> {
+  const names = new Map<number, string>();
+  const block = data.split(".")[4];
+  if (!block) return names;
+  try {
+    const raw = atob(block.replaceAll("-", "+").replaceAll("_", "/"));
+    const list: unknown = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, (c) => c.charCodeAt(0))));
+    if (!Array.isArray(list)) return names;
+    for (const pair of list) {
+      if (!Array.isArray(pair)) continue;
+      const [id, name] = pair, clean = cleanName(name);
+      if (Number.isSafeInteger(id) && id > 0 && id < 256 && clean) names.set(id, clean);
+    }
+  } catch {
+    names.clear();
+  }
+  return names;
+}
+
 function rle(cells: Uint8Array): string {
   const out: number[] = [];
   const push = (id: number, run: number) => {
@@ -90,6 +124,11 @@ function rle(cells: Uint8Array): string {
   for (let i = 0; i < out.length; i += 4096) {
     binary += String.fromCharCode(...out.slice(i, i + 4096));
   }
+  return url(binary);
+}
+
+/** Des octets (une chaîne binaire) en base64 url, sans `=`. */
+function url(binary: string): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 

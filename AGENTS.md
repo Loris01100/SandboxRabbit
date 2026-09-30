@@ -111,8 +111,9 @@ aucun test précis.
   réinitialiser à l'aveugle.
 - Changement d'état = `boil` / `freeze` dans `MATERIALS`, pas de règle — sauf
   pour une créature, qui change en entier.
-- Le corps d'une créature ne garde rien dans `life` : le salon ne le transmet
-  pas.
+- Le corps du lapin ne garde rien dans `life`. Celui du héros y garde sa
+  fiche (`HERO_SLOTS`), qu'il faut lire comme valide tout à zéro : une grille
+  sans état vivant la remet à zéro.
 - `engine.temp` est réassigné à chaque tick : ne pas en garder de référence.
 - Ne pas toucher à l'ordre du balayage, à `clock`, ni à l'ordre bord → centre
   d'`explode()`.

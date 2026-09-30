@@ -119,6 +119,25 @@
         </details>
 
         <details class="group" name="panneau">
+          <summary>Héros</summary>
+          <p id="hero-none" class="hint">Aucun héros dans le bac : Vivant → Héros, ou un nouveau monde.</p>
+          <!-- La fiche du héros que suit la caméra, relue à chaque frame dans le
+               miroir (hero.ts). Renommer part en geste : gardé avec le monde. -->
+          <div id="hero-card" hidden>
+            <label class="row">
+              <span>Nom</span>
+              <input id="hero-name" type="text" maxlength="20" autocomplete="off" spellcheck="false" />
+            </label>
+            <label class="row">
+              <span>Santé</span>
+              <meter id="hero-hp" min="0" max="100" low="30" high="60" optimum="100" value="100"></meter>
+              <output id="hero-hp-value">100</output>
+            </label>
+            <p id="hero-facts" class="hint"></p>
+          </div>
+        </details>
+
+        <details class="group" name="panneau">
           <summary>Physique du monde</summary>
           <label class="row">
             <span>Grille</span>

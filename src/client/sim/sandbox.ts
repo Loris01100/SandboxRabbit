@@ -14,8 +14,8 @@ import { Engine } from "./engine.ts";
 import { Tracker, type Patch } from "./render.ts";
 import type { Pool } from "./pool.ts";
 import { encode } from "./codec.ts";
-import { HERO, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
-import { applyGesture, weather, type Gesture } from "../gestures.ts";
+import { HERO, HERO_SLOTS, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
+import { applyGesture, heroName, weather, type Gesture } from "../gestures.ts";
 import { Player, Recorder, put, type Beat, type Recording } from "../replay.ts";
 import { CHALLENGES, SCENES, count } from "../challenges.ts";
 import { SEEDS, terrain } from "../terrain.ts";
@@ -62,7 +62,7 @@ export type Order =
   | ({ t: "turn" } & Turn);
 
 export type News =
-  | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number] | null }
+  | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number, string] | null }
   | { t: "stats"; filled: number }
   | { t: "grid"; full: string }
   | { t: "start"; rec: Recording }
@@ -239,8 +239,8 @@ export class Sandbox {
 
   /** La grille entière encodée, état vivant compris : ce que sauvegarde un monde ou porte un lien. */
   private encoded(): string {
-    const { cells, frozen, life, temp } = this.engine;
-    return encode(cells, frozen, life, temp);
+    const { cells, frozen, life, temp, names } = this.engine;
+    return encode(cells, frozen, life, temp, names);
   }
 
   /**
@@ -281,7 +281,9 @@ export class Sandbox {
     const probe: [MaterialId, number] | null =
       at < 0 ? null : [this.engine.cells[at] as MaterialId, this.engine.temp[at]];
     const heart = this.engine.hero;
-    const hero: [number, number] | null = heart >= 0 && this.engine.cells[heart] === HERO ? [heart % w, (heart / w) | 0] : null;
+    const hero: [number, number, string] | null = heart >= 0 && this.engine.cells[heart] === HERO
+      ? [heart % w, (heart / w) | 0, heroName(this.engine, this.engine.life[heart + HERO_SLOTS.name[1] * w + HERO_SLOTS.name[0]])]
+      : null;
     this.send({ t: "frame", patches, w, h, ambient: this.engine.ambient, probe, hero });
 
     this.sinceStats += ms;

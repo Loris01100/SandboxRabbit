@@ -12,7 +12,7 @@
  */
 import { type Engine } from "./sim/engine.ts";
 import { applyGesture, weather, type Gesture } from "./gestures.ts";
-import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./sim/codec.ts";
+import { decode, decodeFrozen, decodeLife, decodeNames, decodeTemp, encode } from "./sim/codec.ts";
 import { MATERIALS, type MaterialId } from "./sim/materials.ts";
 
 /** Les réglages de scène qui changent la simulation (pas le rendu). */
@@ -78,7 +78,7 @@ const same = (a: Scene, b: Scene): boolean =>
  * changement d'état, si. C'est déjà ce que subit un monde sauvegardé puis relu.
  */
 function snap(e: Engine): { grid: string; clock: string } {
-  const grid = encode(e.cells, e.frozen, e.life, e.temp);
+  const grid = encode(e.cells, e.frozen, e.life, e.temp, e.names);
   const clock = encode(e.clock);
   put(e, grid, clock, e.ambient);
   return { grid, clock };
@@ -96,6 +96,7 @@ export function put(e: Engine, grid: string, clock: string | null, ambient: numb
   e.frozen.set(decodeFrozen(grid, n));
   e.life.set(decodeLife(grid, n) ?? new Uint8Array(n));
   e.temp.set(decodeTemp(grid, n) ?? new Float32Array(n).fill(ambient));
+  e.names = decodeNames(grid);
 }
 
 function apply(e: Engine, s: Scene): void {
@@ -245,6 +246,7 @@ const FIELDS: Record<Gesture["t"], Record<string, Field>> = {
   toggle: { x: "n", y: "n" },
   clip: { x: "n", y: "n", w: "n", h: "n", cells: "s", life: "s" },
   pilot: { keys: "n" },
+  name: { id: "n", name: "s" },
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

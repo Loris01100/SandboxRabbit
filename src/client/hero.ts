@@ -1,4 +1,4 @@
-import { PILOT } from "./sim/materials.ts";
+import { HERO_HARM, HERO_SLOTS, PILOT } from "./sim/materials.ts";
 import { current } from "./palette.ts";
 import { bindings, held } from "./keys.ts";
 import { keyLabel, type Action } from "./ui.ts";
@@ -61,14 +61,50 @@ function meet(): void {
   statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
 }
 
+const noneEl = document.querySelector<HTMLParagraphElement>("#hero-none")!;
+const cardEl = document.querySelector<HTMLDivElement>("#hero-card")!;
+/** Le nom du héros suivi : main.ts envoie le geste `name` quand il change. */
+export const nameInput = document.querySelector<HTMLInputElement>("#hero-name")!;
+const hpEl = document.querySelector<HTMLMeterElement>("#hero-hp")!;
+const hpValueEl = document.querySelector<HTMLOutputElement>("#hero-hp-value")!;
+const factsEl = document.querySelector<HTMLParagraphElement>("#hero-facts")!;
+/** Numéro du héros suivi (`HERO_SLOTS.name`), 0 sans héros : c'est lui que vise le geste `name`. */
+export let heroId = 0;
+
 /**
- * Relève la position du héros apportée par une frame : l'accueille s'il
- * vient d'apparaître, annonce sa mort s'il vient de disparaître. Rend vrai
- * dans ce dernier cas : ses commandes tenues sont à relâcher (`pilot()`).
+ * Remplit la fiche du héros suivi : son nom vient de la frame (les noms
+ * donnés vivent dans le bac), le reste de son corps dans le miroir
+ * (`HERO_SLOTS`). Le champ du nom n'est pas réécrit pendant qu'on y tape.
+ * ponytail: ni métier ni inventaire — il pose la matière de la palette sans
+ * compter ; à ajouter le jour où creuser ramasse.
  */
-export function track(next: [number, number] | null): boolean {
+function card(name: string): void {
+  const grid = seen();
+  noneEl.hidden = !!hero;
+  cardEl.hidden = !hero;
+  if (!hero || !grid) { heroId = 0; return; }
+  const [x, y] = hero, w = grid.width;
+  const at = (s: readonly [number, number]) => grid.life[(y + s[1]) * w + x + s[0]] ?? 0;
+  heroId = at(HERO_SLOTS.name);
+  if (document.activeElement !== nameInput && nameInput.value !== name) nameInput.value = name;
+  const hp = Math.ceil((100 * Math.max(0, HERO_HARM - at(HERO_SLOTS.harm))) / HERO_HARM);
+  hpEl.value = hp;
+  hpValueEl.value = String(hp);
+  const most = (n: number) => (n >= 250 ? "250+" : String(n));
+  const facts = `${18 + at(HERO_SLOTS.age)} ans · ${Math.round(grid.temp[y * w + x])} °C · ${most(at(HERO_SLOTS.dug))} cellules creusées, ${most(at(HERO_SLOTS.laid))} posées`;
+  if (factsEl.textContent !== facts) factsEl.textContent = facts;
+}
+
+/**
+ * Relève le héros apporté par une frame (position, nom) : l'accueille s'il
+ * vient d'apparaître, annonce sa mort s'il vient de disparaître, tient sa
+ * fiche à jour. Rend vrai quand il vient de mourir : ses commandes tenues
+ * sont à relâcher (`pilot()`).
+ */
+export function track(next: [number, number, string] | null): boolean {
   const was = hero;
-  hero = next;
+  hero = next && [next[0], next[1]];
+  card(next?.[2] ?? "");
   if (hero && !was) meet();
   if (hero || !was) return false;
   statusEl.textContent = "Le héros n'a pas survécu. Un autre : Vivant → Héros, ou un nouveau monde.";

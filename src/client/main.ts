@@ -11,7 +11,7 @@ import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
 import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, order, present, set, type ClipData } from "./world.ts";
-import { STEER, gaze, hero, loose, loosen, nextView, pilot, tighten, track } from "./hero.ts";
+import { STEER, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
 /**
@@ -210,6 +210,13 @@ function gesture(g: Gesture): void {
   order({ t: "do", g });
   relay(g);
 }
+
+// Renommer le héros suivi est un geste : le rejeu le rejoue, le salon le
+// relaie, le monde sauvegardé le garde. Entrée valide et rend les touches.
+nameInput.addEventListener("change", () => {
+  if (heroId) gesture({ t: "name", id: heroId, name: nameInput.value });
+});
+nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") nameInput.blur(); });
 
 /** Les liquides et gaz sont déposés en pointillé, sinon on en crée trop d'un coup. */
 function dab(x: number, y: number): void {

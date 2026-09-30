@@ -8,7 +8,7 @@
  * en argument plutôt qu'importé de world.ts : sans ça un rejeu ne pourrait
  * s'appliquer qu'au bac affiché, et Node ne pourrait pas charger ce module.
  */
-import { decode, decodeFrozen } from "./sim/codec.ts";
+import { cleanName, decode, decodeFrozen } from "./sim/codec.ts";
 import { type Engine } from "./sim/engine.ts";
 import { EMPTY, FIRE, MATERIALS, METAL, placeable, SNOW, SPARK, WATER, type MaterialId } from "./sim/materials.ts";
 
@@ -19,7 +19,27 @@ export type Gesture =
   | { t: "frozen"; x: number; y: number; r: number; on: boolean }
   | { t: "toggle"; x: number; y: number }
   | { t: "clip"; x: number; y: number; w: number; h: number; cells: string; life: string }
-  | { t: "pilot"; keys: number };
+  | { t: "pilot"; keys: number }
+  | { t: "name"; id: number; name: string };
+
+/**
+ * Les noms d'origine des héros : le numéro que le moteur tire à la naissance
+ * (`HERO_SLOTS.name`, 1 à 250) en choisit un. Deux héros peuvent tomber sur
+ * le même nom (un sur quarante), et sur le même numéro (un sur 250) : ils
+ * partagent alors aussi celui qu'on leur donne.
+ * ponytail: numéro tiré au hasard, sans chercher s'il est pris — à revoir le
+ * jour où un monde garde des dizaines de héros.
+ */
+export const NAMES = [
+  "Alix", "Basile", "Camille", "Dany", "Élie", "Fanny", "Gaspard", "Hélène", "Inès", "Jules",
+  "Karim", "Léa", "Maël", "Nina", "Oscar", "Paulette", "Quentin", "Rose", "Sacha", "Téo",
+  "Ulysse", "Victor", "Wanda", "Yanis", "Zoé", "Anouk", "Bruno", "Céleste", "Diane", "Émile",
+  "Firmin", "Gisèle", "Hugo", "Iris", "Jeanne", "Louison", "Margot", "Noé", "Odile", "Pablo",
+];
+
+/** Le nom du héros de numéro `id` : celui qu'on lui a donné, sinon celui d'origine. 0 (pas encore tiré) : pas de nom. */
+export const heroName = (engine: Engine, id: number): string =>
+  engine.names.get(id) ?? (id > 0 ? NAMES[id % NAMES.length] : "");
 
 /** Un id de matière inventé ferait jeter `MATERIALS[id].life` chez l'hôte. */
 const known = (id: MaterialId): MaterialId => (MATERIALS[id] ? id : EMPTY);
@@ -39,6 +59,14 @@ const whole = (...v: number[]): boolean => v.every(Number.isSafeInteger);
  * envoie ce qu'il veut.
  */
 export function applyGesture(engine: Engine, g: Gesture): void {
+  if (g.t === "name") {
+    // Un nom vide rend celui d'origine.
+    const name = cleanName(g.name);
+    if (!(Number.isSafeInteger(g.id) && g.id > 0 && g.id < 256)) return;
+    if (name) engine.names.set(g.id, name);
+    else engine.names.delete(g.id);
+    return;
+  }
   if (g.t === "pilot") {
     const id = (g.keys >> 8) & 255;
     engine.pilot = ((g.keys | 0) & 63) | (placeable(id) ? id << 8 : 0);

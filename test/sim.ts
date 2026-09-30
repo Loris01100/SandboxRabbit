@@ -5,17 +5,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
-import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/client/sim/codec.ts";
+import { decode, decodeFrozen, decodeLife, decodeNames, decodeTemp, encode } from "../src/client/sim/codec.ts";
 import { CLOCK, DAY, HOURS, clockAt, Renderer, hourTint, lighting, thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
-import { applyGesture, weather, type Gesture } from "../src/client/gestures.ts";
+import { applyGesture, heroName, weather, type Gesture } from "../src/client/gestures.ts";
 import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
 import { terrain } from "../src/client/terrain.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
-  CEMENT, FILINGS, HERO, MAGNET, PILOT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
+  CEMENT, FILINGS, HERO, HERO_HARM, HERO_SLOTS, MAGNET, PILOT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
 const W = 60, H = 40;
@@ -1442,11 +1442,55 @@ function top(e: Engine, id: MaterialId): number {
   tenir(bassin, PILOT.up, 30);
   assert.ok(où(bassin)[1] < fond - 5, "saut tenu, il nage vers la surface");
 
+  const fiche = (e: Engine, s: readonly [number, number]): number => {
+    const [x, y] = où(e);
+    return e.life[e.index(x + s[0], y + s[1])];
+  };
   const brûlé = plaine();
   tenir(brûlé, 0, 2);
   brûlé.temp[brûlé.hero] = 400;
   brûlé.step();
-  assert.equal(count(brûlé, HERO), 0, "trop chaud, il ne survit pas");
+  assert.equal(count(brûlé, HERO), 1, "un coup de chaud le blesse sans le tuer");
+  assert.ok(fiche(brûlé, HERO_SLOTS.harm) > 0, "ses dégâts sont notés dans son buste");
+  for (let t = 0; t < 400; t++) brûlé.step();
+  assert.equal(fiche(brûlé, HERO_SLOTS.harm), 0, "au calme, il guérit");
+  for (let t = 0; t < HERO_HARM && count(brûlé, HERO) > 0; t++) {
+    brûlé.temp[brûlé.hero] = 400;
+    brûlé.step();
+  }
+  assert.equal(count(brûlé, HERO), 0, "trop longtemps trop chaud, il ne survit pas");
+
+  const noyé = new Engine(W, H, 33);
+  noyé.rect(0, SOL, W - 1, H - 1, STONE);
+  noyé.rect(0, 5, W - 1, SOL - 1, WATER);
+  noyé.paint(10, 20, 1, HERO, 1, true);
+  assert.equal(count(noyé, HERO), 1, "posé en pleine eau");
+  for (let t = 0; t < 120; t++) noyé.step();
+  assert.equal(count(noyé, HERO), 1, "deux secondes d'apnée : il tient");
+  for (let t = 0; t < HERO_HARM; t++) noyé.step();
+  assert.equal(count(noyé, HERO), 0, "mais pas indéfiniment : il se noie");
+
+  const nommé = plaine();
+  tenir(nommé, 0, 1);
+  const numéro = fiche(nommé, HERO_SLOTS.name);
+  assert.ok(numéro > 0, "il tire son numéro au premier tick");
+  assert.equal(fiche(nommé, HERO_SLOTS.age), 0, "et naît à 18 ans (0 an de plus)");
+  nommé.rect(20, 5, 25, SOL - 1, STONE);
+  tenir(nommé, PILOT.right | PILOT.dig, 120);
+  assert.ok(où(nommé)[0] > 20, "il traverse le mur en creusant");
+  assert.equal(fiche(nommé, HERO_SLOTS.name), numéro, "son corps emporte sa fiche quand il marche");
+  assert.ok(fiche(nommé, HERO_SLOTS.dug) > 0, "il compte ce qu'il creuse");
+  assert.ok(heroName(nommé, numéro).length > 0, "son nom d'origine vient de la liste");
+  applyGesture(nommé, { t: "name", id: numéro, name: "  Robert le Lapin des Bois  " });
+  assert.equal(heroName(nommé, numéro), "Robert le Lapin des", "renommé, sans blancs autour, 20 caractères au plus");
+  applyGesture(nommé, { t: "name", id: 999, name: "Pirate" });
+  assert.equal(nommé.names.size, 1, "un numéro hors octet est refusé");
+  const monde = encode(nommé.cells, nommé.frozen, nommé.life, nommé.temp, nommé.names);
+  assert.equal(decodeNames(monde).get(numéro), "Robert le Lapin des", "le nom part avec le monde (5ᵉ bloc)");
+  assert.equal(decodeNames(encode(nommé.cells, nommé.frozen, nommé.life, nommé.temp)).size, 0, "un monde d'avant n'a pas de noms");
+  assert.equal(decodeNames(monde.split(".").slice(0, 4).join(".") + ".@@@").size, 0, "un bloc de noms illisible ne lève pas");
+  applyGesture(nommé, { t: "name", id: numéro, name: "" });
+  assert.equal(nommé.names.size, 0, "un nom vide rend celui d'origine");
 
   const pirate = plaine();
   applyGesture(pirate, { t: "pilot", keys: 999 | (NANITE << 8) | (1 << 20) });

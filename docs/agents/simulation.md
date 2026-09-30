@@ -299,6 +299,7 @@ réinitialiser à l'aveugle**, chaque matière en fait autre chose.
 | `MAGNET` | pôle (1 = repousse) |
 | `RABBIT` | satiété du cœur (0 au chargement d'un monde sans état vivant = repart pleine) ; les cellules du corps n'en ont pas |
 | `HERO` | bit 7 = tourné vers la gauche (où il creuse), bits 0-3 = élan de saut restant ; perdu, il repart debout vers la droite. Le corps n'en a pas |
+| `HERO_HEAD`, `HERO_BODY`, `HERO_LEGS` | la fiche du héros, une donnée par cellule (`HERO_SLOTS` de materials.ts) : tête = numéro (1-250, 0 = pas encore tiré), buste = dégâts (mort à `HERO_HARM`), bras gauche = âge au-delà de 18 ans, jambes = cellules creusées / posées (plafonnées à 250). Tout à zéro = héros neuf en pleine santé |
 
 ## Familles de règles
 
@@ -398,8 +399,11 @@ qu'il pose. Tous les héros du bac obéissent aux mêmes touches.
 - `pilot` n'est posé **que** par le geste `pilot` (gestures.ts) : c'est ce qui
   l'enregistre dans le rejeu et le relaie à l'hôte d'un salon. Il figure aussi
   dans la `Scene` du rejeu, pour un enregistrement lancé touche enfoncée.
-- Ordre d'un tick : corps entier, cuisson, gel, noyade (tête sous un liquide,
-  `BREATH` par tick), creuser, puis un mouvement vertical — saut (`JUMP` ticks
+- Ordre d'un tick : corps entier, dégâts — `SCALD` par tick au-delà de
+  `COOK` ou sous `FROST`, `CHOKE` la tête sous un liquide, sinon un de guéri
+  avec la chance `MEND` ; mort à `HERO_HARM`, en feu, en glace ou noyé —,
+  numéro tiré s'il n'en a pas, un an avec la chance `YEAR` (une journée du
+  cycle, 240 s), creuser, puis un mouvement vertical — saut (`JUMP` ticks
   de montée), nage (saut tenu dans un liquide), chute (lente dans un liquide,
   `SINK`) — et un pas de côté (`STRIDE`), qui grimpe une marche d'une cellule.
 - Contrairement au lapin il **marche dans l'eau** (`relocate(…, wet)` partout)
@@ -412,6 +416,15 @@ qu'il pose. Tous les héros du bac obéissent aux mêmes touches.
   son escalier. La matière est filtrée par `placeable()` (materials.ts) dans
   `applyGesture`, seule porte d'entrée de `pilot` (rejeu compris) : le moteur
   ne la revérifie pas, 0 = rien à poser.
+- **Sa fiche vit dans son corps** (`HERO_SLOTS`) : le `life` du cœur est
+  plein (sens, saut) et rien ne se garde hors des cellules (plusieurs fils,
+  salon). `relocate()` emporte le `life` de chaque case — le lapin n'y a que
+  des zéros, son empreinte n'a pas bougé. Écrite en fin de tick, à la
+  position d'arrivée ; `dig()` et `lay()` rendent ce qu'ils ont fait pour les
+  compteurs.
+- Son **nom** n'est pas dans la grille : le numéro en choisit un dans `NAMES`
+  (gestures.ts), sauf nom donné par le geste `name`, rangé dans
+  `engine.names` (que le moteur ne lit pas) et sauvé en 5ᵉ bloc du codec.
 - `engine.hero` = index du cœur du dernier héros posé (`spawn`) ou mis à jour :
   Sandbox le joint à chaque frame (`hero`), vérifié (`cells[hero] === HERO`),
   et la page fait suivre la caméra. Il n'est pas remis à -1 à la mort : c'est

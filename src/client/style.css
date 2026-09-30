@@ -212,7 +212,8 @@ canvas {
 .row > span { color: var(--muted); font-size: 0.82rem; }
 .row input[type="range"] { width: 100%; accent-color: var(--accent); }
 .row output { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
-.row button, .row select { grid-column: 2 / -1; }
+.row button, .row select, .row input[type="text"] { grid-column: 2 / -1; min-width: 0; }
+.row meter { width: 100%; }
 /* Trois contrôles pour une seule ligne de réglage : l'objectif d'un défi. */
 .row .goal { grid-column: 2 / -1; display: flex; gap: 0.3rem; min-width: 0; }
 .row .goal select { grid-column: auto; min-width: 0; flex: 1; }
