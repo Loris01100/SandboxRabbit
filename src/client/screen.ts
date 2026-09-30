@@ -21,7 +21,7 @@
  * noir jusqu'au rechargement. Écouter `webglcontextlost` / `restored` et tout
  * remonter le jour où ça se voit.
  */
-import { GLOW, GLOWING, Renderer, lighting, palette, type Grid } from "./sim/render.ts";
+import { GLOW, GLOWING, Renderer, lighting, palette, type Grid, type Tint } from "./sim/render.ts";
 
 export interface Screen {
   /** « webgl2 » ou « 2d » : ce qui colorie, pour le dire à qui le demande. */
@@ -30,8 +30,9 @@ export interface Screen {
    * Repose le rectangle (x0, y0)–(x1, y1) exclus de `grid` ; une autre grille
    * (nouvelle taille) repart d'une image entière. `lit` : éclairage global,
    * WebGL2 seulement — il recalcule tout le bac, quel que soit le rectangle.
+   * `tint` : l'heure de la journée (`HOURS` de render.ts).
    */
-  paint(grid: Grid, x0: number, y0: number, x1: number, y1: number, heatmap: boolean, lit: boolean): void;
+  paint(grid: Grid, x0: number, y0: number, x1: number, y1: number, heatmap: boolean, lit: boolean, tint: Tint): void;
 }
 
 /** L'écran du canvas : WebGL2 s'il le peut, sinon 2D. Un canvas n'a qu'un contexte : le choix est définitif. */
@@ -60,6 +61,8 @@ uniform highp usampler2D frozen;
 uniform highp isampler2D noise;
 uniform highp isampler2D temp;
 uniform highp usampler2D palette;
+uniform highp usampler2D table;
+uniform vec3 tint;
 uniform float ambient;
 uniform bool heatmap;
 uniform ivec4 glowing;
@@ -100,6 +103,7 @@ void main() {
     else d = glow != 0 ? glow : (texelFetch(noise, p, 0).r * int(base.a)) >> 7;
     c = floor(clamp(c + float(d), 0.0, 255.0));
   }
+  if (texelFetch(table, ivec2(id, 0), 0).rgb == uvec3(0u)) c = floor(c * tint);
   if (lit > 0.0) c = floor(min(c + vec3(170.0, 95.0, 25.0) * lit, 255.0));
   if (lighting) {
     vec3 l = texture(light, (vec2(p) + 0.5) / vec2(textureSize(light, 0) * scale)).rgb;
@@ -289,7 +293,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   const scene = link(SCENE, { cells: 0, temp: 4, table: TABLE });
   const cascade = link(CASCADE, { scene: SCENE_UNIT, upper: UPPER });
   const fluence = link(FLUENCE, { upper: UPPER, scene: SCENE_UNIT });
-  const program = link(FRAGMENT, { ...Object.fromEntries(LAYERS.map((name, unit) => [name, unit])), palette: PALETTE, light: LIGHT });
+  const program = link(FRAGMENT, { ...Object.fromEntries(LAYERS.map((name, unit) => [name, unit])), palette: PALETTE, light: LIGHT, table: TABLE });
   gl.bindVertexArray(gl.createVertexArray());
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
@@ -322,6 +326,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   const heatmap = gl.getUniformLocation(program, "heatmap");
   const lightingOn = gl.getUniformLocation(program, "lighting");
   const drawScale = gl.getUniformLocation(program, "scale");
+  const tintAt = gl.getUniformLocation(program, "tint");
   const sceneScale = gl.getUniformLocation(scene, "scale");
   const level = gl.getUniformLocation(cascade, "level");
   const top = gl.getUniformLocation(cascade, "top");
@@ -405,7 +410,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   let w = 0, h = 0;
   return {
     kind: "webgl2",
-    paint(grid, x0, y0, x1, y1, heat, lit) {
+    paint(grid, x0, y0, x1, y1, heat, lit, tint) {
       if (grid.width !== w || grid.height !== h) {
         w = grid.width; h = grid.height;
         x0 = 0; y0 = 0; x1 = w; y1 = h;
@@ -437,6 +442,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
       gl.uniform1i(heatmap, heat ? 1 : 0);
       gl.uniform1i(lightingOn, on ? 1 : 0);
       gl.uniform1i(drawScale, lights!.scale);
+      gl.uniform3f(tintAt, ...tint);
       gl.viewport(0, 0, w, h);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
@@ -451,7 +457,7 @@ function flatScreen(canvas: HTMLCanvasElement): Screen {
   let image: ImageData | null = null;
   return {
     kind: "2d",
-    paint(grid, x0, y0, x1, y1, heat) {
+    paint(grid, x0, y0, x1, y1, heat, _lit, tint) {
       if (grid !== of || !renderer || !image) {
         of = grid;
         renderer = new Renderer(grid);
@@ -460,6 +466,7 @@ function flatScreen(canvas: HTMLCanvasElement): Screen {
       }
       if (x1 <= x0 || y1 <= y0) return;
       renderer.heatmap = heat;
+      renderer.tint = tint;
       renderer.paint(x0, y0, x1, y1);
       ctx.putImageData(image, 0, 0, x0, y0, x1 - x0, y1 - y0);
     },

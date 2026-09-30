@@ -6,9 +6,10 @@ import { KEY_GROUPS, clampPan, combo, keyLabel, keymap, keyOf, panAfterZoom, par
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
-import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, light, listen, onResize, order, present, resize, screen, seen, type ClipData } from "./world.ts";
+import { HEIGHT, WIDTH, askClip, askLoad, canvas, hour, latestGrid, light, listen, onResize, order, present, resize, screen, seen, type ClipData } from "./world.ts";
 import { look } from "./sight.ts";
 import type { Knobs } from "./sim/sandbox.ts";
+import { HOURS, hourTint } from "./sim/render.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
 /**
@@ -857,6 +858,14 @@ weatherInput.addEventListener("input", () => set({ weather: Number(weatherInput.
 const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
 heatmapInput.addEventListener("change", () => set({ heatmap: heatmapInput.checked }));
 
+// Heure : la teinte du ciel, réglage de la page seule (world.ts). Le cycle
+// avance d'un cran par seconde : un fondu plus fin recolorierait tout le bac
+// à chaque frame pour un écart invisible.
+const hourInput = document.querySelector<HTMLSelectElement>("#hour")!;
+const tickHour = () => hour(hourInput.value === "cycle" ? hourTint(performance.now() / 1000) : HOURS[hourInput.value] ?? HOURS["apres-midi"]);
+hourInput.addEventListener("input", tickHour);
+setInterval(() => { if (hourInput.value === "cycle") tickHour(); }, 1000);
+
 const lightingInput = document.querySelector<HTMLInputElement>("#lighting")!;
 lightingInput.addEventListener("change", () => light(lightingInput.checked));
 if (screen.kind === "2d") {
@@ -885,7 +894,7 @@ function stored<T>(key: string, fallback: T): T {
  */
 const SAVED = [
   brushInput, speedInput, windInput, ambientInput, sizeInput,
-  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, lightingInput,
+  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, lightingInput, hourInput,
 ];
 const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";

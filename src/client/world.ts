@@ -14,7 +14,7 @@
  * dépend de la taille s'inscrit dans `onResize`.
  */
 import type { News, Order } from "./sim/sandbox.ts";
-import type { Grid } from "./sim/render.ts";
+import { HOURS, type Grid, type Tint } from "./sim/render.ts";
 import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
 
@@ -51,6 +51,16 @@ export function order(o: Order): void {
 export function light(on: boolean): void {
   if (on === lit) return;
   lit = on;
+  repaint = true;
+}
+
+/**
+ * L'heure de la journée (`HOURS` de render.ts). Réglage de la page seule,
+ * comme l'éclairage : le bac et le salon n'en savent rien, on recolorie tout.
+ */
+export function hour(t: Tint): void {
+  if (t.every((v, k) => v === tint[k])) return;
+  tint = t;
   repaint = true;
 }
 
@@ -129,6 +139,7 @@ let fresh = false;
 let repaint = false;
 let heatmap = false;
 let lit = true;
+let tint: Tint = HOURS["apres-midi"];
 /** Le rectangle changé depuis le dernier `present()`, en cellules, bords droit et bas exclus. */
 let left = Infinity, top = Infinity, right = 0, bottom = 0;
 
@@ -190,7 +201,7 @@ export function present(): boolean {
     repaint = true;
   }
   if (repaint) { left = 0; top = 0; right = mirror.width; bottom = mirror.height; }
-  screen.paint(mirror, left, top, right, bottom, heatmap, lit);
+  screen.paint(mirror, left, top, right, bottom, heatmap, lit, tint);
   fresh = false;
   repaint = false;
   left = Infinity; top = Infinity; right = 0; bottom = 0;

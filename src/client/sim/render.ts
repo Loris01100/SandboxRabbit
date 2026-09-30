@@ -145,6 +145,33 @@ export function lighting(): Uint8Array {
   return out;
 }
 
+/** Une teinte d'heure : rouge, vert, bleu, multipliés à la couleur des matières qui n'émettent pas. */
+export type Tint = readonly [number, number, number];
+
+/**
+ * Les heures de la journée : la lumière du ciel sur le bac. Le feu, la lave,
+ * les braises gardent leur couleur (voir `lighting()`) : la nuit, ce sont eux
+ * qui éclairent — avec l'éclairage global, la pierre autour sort de l'ombre.
+ */
+export const HOURS: Record<string, Tint> = {
+  matin: [1, 0.9, 0.8],
+  "apres-midi": [1, 1, 1],
+  soir: [0.95, 0.6, 0.45],
+  nuit: [0.25, 0.3, 0.5],
+};
+
+/** Durée d'une journée entière en mode « Cycle », en secondes. */
+export const DAY = 240;
+
+/** La teinte du cycle au temps `seconds` : matin → après-midi → soir → nuit → matin, en fondu. */
+export function hourTint(seconds: number): Tint {
+  const tints = Object.values(HOURS);
+  const phase = ((seconds / DAY) % 1 + 1) % 1 * tints.length;
+  const from = tints[Math.floor(phase)], to = tints[(Math.floor(phase) + 1) % tints.length];
+  const u = phase % 1;
+  return [0, 1, 2].map((k) => from[k] + (to[k] - from[k]) * u) as unknown as Tint;
+}
+
 /**
  * Rendu 1 cellule = 1 pixel dans un tableau de pixels, puis mise à l'échelle
  * par le CSS (`image-rendering: pixelated`). Aucun appel de dessin par cellule.
@@ -164,8 +191,12 @@ export class Renderer {
   private readonly grain = new Uint8Array(256);
   /** 1 pour les quatre matières dont `life` change l'aspect. Voir `shade()`. */
   private readonly glows = new Uint8Array(256);
+  /** 1 pour les matières qui émettent (`lighting()`) : l'heure ne les assombrit pas. */
+  private readonly emits = new Uint8Array(256);
   /** Affiche `temp` au lieu de la matière. */
   heatmap = false;
+  /** L'heure de la journée, voir `HOURS`. */
+  tint: Tint = HOURS["apres-midi"];
 
   private readonly grid: Grid;
 
@@ -183,6 +214,8 @@ export class Renderer {
       this.grain[id] = table[id * 4 + 3];
     }
     for (const id of GLOWING) this.glows[id] = 1;
+    const light = lighting();
+    for (let id = 0; id < 256; id++) this.emits[id] = light[id * 4] + light[id * 4 + 1] + light[id * 4 + 2] > 0 ? 1 : 0;
   }
 
   /** Tout le bac. */
@@ -203,7 +236,8 @@ export class Renderer {
   /** Les cellules `from` à `to` (exclu) d'une rangée, en couleurs de matière. `warm` : seuil de lumière. */
   private shade(from: number, to: number, warm: number): void {
     const { cells, noise, frozen, life, width, temp } = this.grid;
-    const { buffer, palette, grain, glows } = this;
+    const { buffer, palette, grain, glows, emits } = this;
+    const [tr, tg, tb] = this.tint;
     for (let i = from; i < to; i++) {
       const id = cells[i];
       const base = palette[id];
@@ -212,7 +246,8 @@ export class Renderer {
       const t = temp[i];
       const lit = t > warm ? Math.min(1, (t - warm) / 400) : 0;
       if (id === EMPTY) {
-        buffer[i] = lit === 0 ? base : light(base, lit);
+        const sky = dim(base, tr, tg, tb);
+        buffer[i] = lit === 0 ? sky : light(sky, lit);
         continue;
       }
       // Quatre matières seulement s'éclairent selon leur `life` — l'interrupteur
@@ -233,7 +268,8 @@ export class Renderer {
       const r = clamp((base & 0xff) + d);
       const g = clamp(((base >> 8) & 0xff) + d);
       const b = clamp(((base >> 16) & 0xff) + d);
-      const shade = 0xff000000 | (b << 16) | (g << 8) | r;
+      const raw = 0xff000000 | (b << 16) | (g << 8) | r;
+      const shade = emits[id] ? raw : dim(raw, tr, tg, tb);
       buffer[i] = lit === 0 ? shade : light(shade, lit);
     }
   }
@@ -259,6 +295,11 @@ export class Renderer {
       buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
     }
   }
+}
+
+/** Multiplie chaque canal d'une couleur 0xAABBGGRR par sa part de la teinte ; tronqué, comme `floor()` du shader. */
+function dim(color: number, r: number, g: number, b: number): number {
+  return 0xff000000 | (((color >> 16) & 0xff) * b << 16) | (((color >> 8) & 0xff) * g << 8) | ((color & 0xff) * r);
 }
 
 /** Réchauffe une couleur 0xAABBGGRR vers l'orange d'une flamme. */

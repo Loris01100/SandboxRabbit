@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "../src/client/sim/codec.ts";
-import { lighting, thumbnail } from "../src/client/sim/render.ts";
+import { DAY, HOURS, Renderer, hourTint, lighting, thumbnail } from "../src/client/sim/render.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, weather, type Gesture } from "../src/client/gestures.ts";
 import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
@@ -1502,6 +1502,23 @@ const lumière = lighting();
 for (let id = 0; id < 256; id++) {
   const émet = lumière[id * 4] + lumière[id * 4 + 1] + lumière[id * 4 + 2] > 0;
   if (émet) assert.ok(lumière[id * 4 + 3] > 0, `la matière ${id} émet de la lumière, elle doit en arrêter un peu`);
+}
+
+/** Le cycle des heures passe par chaque heure au quart de journée, en boucle, et ne sort pas de [0, 1]. */
+assert.deepEqual(hourTint(0), HOURS.matin);
+assert.deepEqual(hourTint(DAY * 0.75), HOURS.nuit);
+assert.deepEqual(hourTint(DAY * 3), HOURS.matin);
+for (let s = 0; s < DAY; s += 7) assert.ok(hourTint(s).every((v) => v >= 0 && v <= 1), `teinte hors bornes à ${s} s`);
+
+/** La nuit assombrit la pierre, pas la lave : c'est elle qui éclaire. */
+{
+  const e = new Engine(4, 1);
+  e.set(0, 0, STONE); e.set(1, 0, LAVA);
+  const r = new Renderer(e);
+  r.draw(); const jour = r.pixels.slice();
+  r.tint = HOURS.nuit; r.draw();
+  assert.ok(r.pixels[2] < jour[2], "la nuit doit assombrir la pierre");
+  assert.equal(r.pixels[6], jour[6], "la nuit ne doit pas assombrir la lave");
 }
 
 console.log("ok — simulation conforme");

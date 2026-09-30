@@ -452,9 +452,14 @@ tick en 1920×1080 chargé (`npm run directions`).
   `set(…)` dans `lighting()`. Une matière opaque qui brille n'est pas
   éclairée en plus (passe `FLUENCE`) : sans ça, le bord d'une mer de lave
   reprenait sa propre lumière et virait au jaune saturé.
+- **L'heure** (`HOURS`, `hourTint()` de render.ts) multiplie la couleur, grain
+  compris, avant chaleur et éclairage, et épargne les matières qui émettent
+  dans `lighting()` : une matière lumineuse ajoutée là reste vive la nuit.
+  Deux copies elle aussi : `dim()` de `Renderer` (tronquée) et `floor(c * tint)`
+  du shader.
 - Ce qui change l'aspect **sans écriture ni tick** : la vue thermique ne
   regarde que la page (`order()` de world.ts la relève et fait tout
-  recolorier), l'éclairage aussi (`light()` de world.ts) ; l'ambiante (seuil de lumière, pivot de la vue thermique)
+  recolorier), l'éclairage et l'heure aussi (`light()`, `hour()` de world.ts) ; l'ambiante (seuil de lumière, pivot de la vue thermique)
   passe par `wakeAll()` et voyage avec la frame. Un nouveau réglage d'aspect
   doit faire l'un ou l'autre.
 - `engine.changed()` remet à zéro ce qu'il a rendu : un seul `Tracker` par
