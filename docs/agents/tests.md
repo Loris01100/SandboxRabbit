@@ -143,7 +143,11 @@ son vent déplace fumée et flammes, donc l'empreinte. Neutraliser le vent
 ainsi qu'on a vérifié que la pression ne change rien d'autre.
 
 La scène de l'empreinte (60×40, soit 4×3 blocs) garde tous ses blocs éveillés
-— lave, pile, thermite : les blocs de veille ne l'ont pas changée. Ce sont les
+— lave, pile, thermite : les blocs de veille ne l'ont pas changée. Sortir
+acide, thermite, sel, source, pile et aimant d'`ACTIVE` ne l'a pas changée non
+plus : remis dans `ACTIVE`, la même empreinte sort — c'est ainsi qu'on a
+vérifié que leurs règles tirent la même suite qu'avant. (Un premier essai la
+changeait : la pile arrêtait son compte quand son métal devenait étincelle.) Ce sont les
 tests « Blocs de veille », en fin de fichier, qui les couvrent : un bac au
 repos ne tire plus au sort (`seed` figé), un trou, la gravité retournée et une
 ambiante sous zéro réveillent les blocs endormis, et un rejeu lancé sur un bac
@@ -157,8 +161,8 @@ uranium sans amas, et moins de 1 % des cellules qui bougent en 200 ticks. Un
 réglage du générateur qui casse ce dernier assert rend les grandes grilles
 lentes dès la naissance du monde.
 
-Côté rendu, test/sandbox.ts recompose l'image comme la page (bandes recopiées
-dans un tableau miroir) et la compare, au pixel près, à un rendu témoin tout
+Côté rendu, test/sandbox.ts recompose l'image comme la page (bandes posées
+dans un miroir par le même `land()` de render.ts que world.ts) et la compare, au pixel près, à un rendu témoin tout
 neuf — après un feu, un geste bac en pause, la vue thermique, une autre
 ambiante et un souffle, dont la pression doit arriver au miroir, au palier
 près, puis y retomber à zéro. Le témoin se tire **juste après** une frame, sinon il consomme les

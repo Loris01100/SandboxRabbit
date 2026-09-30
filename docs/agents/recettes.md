@@ -22,9 +22,12 @@ a bougé).
    `paint()` / `rect()`. Le lapin et le héros en sont les deux exemples, décrits
    dans [simulation.md](simulation.md#créatures--le-lapin).
    Si elle agit sans que rien ne bouge autour d'elle (compteur, tirage qui
-   finit par réussir) : son id dans la liste `ACTIVE` d'engine.ts — les gaz et
-   les créatures y sont d'office. Sinon son bloc s'endort et elle se fige (voir
-   [Blocs de veille](simulation.md#blocs-de-veille)).
+   finit par réussir) : `this.wake(i)` dans sa règle quand elle a de quoi agir
+   (l'acide, le sel, la pile, l'aimant), ou, si elle agit à chaque tick quoi
+   qu'il arrive (un compteur de vie), son id dans la liste `ACTIVE` d'engine.ts
+   — les gaz et les créatures y sont d'office. Sinon son bloc s'endort et elle
+   se fige (voir [Blocs de veille](simulation.md#blocs-de-veille)). Mesurer
+   son pire cas : un bac 1920×1080 plein d'elle seule, `node --cpu-prof`.
 5. Un bloc d'`assert` dans [test/sim.ts](../../test/sim.ts) qui prouve son
    comportement. La forme de l'entrée est déjà relue par l'assert du
    registre : clé = `id`, `life` ≤ 250, couleur en trois canaux 0..255,
@@ -58,7 +61,8 @@ ligne dans le moteur. Voir le ciment ou le verre fondu.
   lancer, et y ajouter la nouvelle matière si sa scène ne la réveille pas.
 - Écrire directement dans `cells` / `life` / `temp` (hors `set`, `swap`,
   `convert`…) : `this.wake(i)` à côté, sinon le bloc voisin endormi ne le voit
-  pas. Une règle qui agit sans changement autour : son id dans `ACTIVE`.
+  pas. Une règle qui agit sans changement autour : `this.wake(i)` quand elle a
+  de quoi agir, ou son id dans `ACTIVE` si elle agit à chaque tick.
 - L'empreinte de test/sim.ts va très probablement changer : voir
   [tests.md](tests.md#lempreinte-du-moteur).
 

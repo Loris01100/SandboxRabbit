@@ -14,7 +14,7 @@
  * dépend de la taille s'inscrit dans `onResize`.
  */
 import type { Knobs, News, Order } from "./sim/sandbox.ts";
-import { AIR_LEVELS, HOURS, type Grid, type Tint } from "./sim/render.ts";
+import { HOURS, land, type Grid, type Mirror, type Tint } from "./sim/render.ts";
 import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
 import { watchErrors } from "./errors.ts";
@@ -166,7 +166,7 @@ export function askClip(x: number, y: number, x2: number, y2: number): Promise<C
  * matière, `life`, figé, grain, température au degré et pression par palier
  * — ce que l'écran colorie. Remplacé en entier quand la taille change.
  */
-let mirror: Grid & { temp: Int16Array; press: Float32Array } | null = null;
+let mirror: Mirror | null = null;
 /** Une frame est arrivée depuis le dernier `present()`. */
 let fresh = false;
 /** Tout recolorier au prochain `present()` : vue thermique basculée, ambiante changée. */
@@ -199,16 +199,7 @@ function blit(frame: Extract<News, { t: "frame" }>): void {
   const m = mirror;
   if (m.ambient !== frame.ambient) { m.ambient = frame.ambient; repaint = true; }
   for (const p of frame.patches) {
-    for (let r = 0; r < p.h; r++) {
-      const from = r * p.w, to = (p.y + r) * w + p.x;
-      m.cells.set(p.cells.subarray(from, from + p.w), to);
-      m.life.set(p.life.subarray(from, from + p.w), to);
-      m.frozen.set(p.frozen.subarray(from, from + p.w), to);
-      m.temp.set(p.temp.subarray(from, from + p.w), to);
-      // Palier ÷ 8 : exact en flottant, et `airLevel()` le rend tel quel.
-      for (let k = 0; k < p.w; k++) m.press[to + k] = p.press[from + k] / AIR_LEVELS;
-      if (p.noise) m.noise.set(p.noise.subarray(from, from + p.w), to);
-    }
+    land(m, p);
     left = Math.min(left, p.x);
     top = Math.min(top, p.y);
     right = Math.max(right, p.x + p.w);

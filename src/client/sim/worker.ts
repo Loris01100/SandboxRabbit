@@ -26,13 +26,13 @@ const worker = self as unknown as {
 let bac: Sandbox | null = null;
 let last = performance.now();
 
-/** Les bandes d'une frame sont **transférées** : chacun de leurs tableaux a son tampon, que la page reçoit sans copie. */
+/**
+ * Les bandes d'une frame sont **transférées** : la page reçoit leur tampon sans
+ * copie. Un seul par frame (`Tracker.take()`), et il ne doit figurer qu'une fois
+ * dans la liste — deux fois, `postMessage` jette.
+ */
 function tell(news: News): void {
-  const buffers = news.t !== "frame" ? [] : news.patches.flatMap((p) => {
-    const own = [p.cells.buffer, p.life.buffer, p.frozen.buffer, p.temp.buffer];
-    if (p.noise) own.push(p.noise.buffer);
-    return own as ArrayBuffer[];
-  });
+  const buffers = news.t !== "frame" ? [] : [...new Set(news.patches.map((p) => p.cells.buffer as ArrayBuffer))];
   worker.postMessage(news, buffers);
 }
 

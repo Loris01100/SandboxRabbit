@@ -122,14 +122,23 @@ milliseconde par tick, au lieu de 30. Un bloc est traité si lui ou un voisin a
 - **une écriture** : `set` / `become`, `swap` (donc `tryMove`), `hurl`,
   `relocate`, `convert`, `decay`, `charge`, `paste`, `setFrozen`, les bascules,
   l'amorçage du C4 par `explode`. Chacune appelle `wake(i)` ;
-- **une matière active** (table `ACTIVE`) : elle agit sans que rien ne change
-  autour — gaz, créatures, acide, thermite, uranium, sel, nanites, source,
-  pile, braise, étincelle, aimant — plus le métal en repos (`life` > 0) ;
-- **une matière qui a de quoi agir** : la plante qui touche de l'eau, la lave
-  qui touche du sable ou de l'inflammable appellent `wake(i)` elles-mêmes.
-  Hors de `ACTIVE` exprès : sans eau ni combustible elles ne font rien, et
-  chaque arbre, chaque poche de lave d'un monde généré tenait sinon son coin
-  de bac éveillé pour rien ;
+- **une matière active** (table `ACTIVE`) : elle agit à chaque tick quoi
+  qu'il y ait autour — gaz, créatures, uranium, nanites, braise, étincelle
+  (compteur de vie ou d'emballement) — plus le métal en repos (`life` > 0) ;
+- **une matière qui a de quoi agir** appelle `wake(i)` elle-même, et seulement
+  alors : la plante qui touche de l'eau, la lave qui touche du sable ou de
+  l'inflammable, l'acide qui touche ce qu'il ronge, le sel qui touche de la
+  glace, la thermite allumée ou qui vient de prendre, la source dont la case
+  de sortie est vide, la pile qui touche du métal (ou l'étincelle qu'elle
+  vient d'y mettre), l'aimant qui a de la limaille dans son disque (`near()`,
+  rangée par rangée, avant le parcours ordonné de `disc()`). Hors de `ACTIVE`
+  exprès : sans rien à faire, un bac **plein** de l'une d'elles s'endort. En
+  1920×1080, plein d'aimants il coûtait 2 s par tick, plein de sel, de
+  thermite ou de sources 70 à 150 ms ; 0 depuis. Chaque arbre, chaque poche de
+  lave d'un monde généré tenait de même son coin de bac éveillé pour rien. Le
+  `wake(i)` se pose **avant** le tirage qui peut échouer (acide, sel), et la
+  source tire toujours en premier : éveillées, ces règles tirent la même
+  suite qu'avant, et l'empreinte n'a pas bougé ;
 - **une cellule qui passe son tour** à cause de `clock` (filet : un grain
   peint dans le vide garde l'horloge quelconque de la cellule vide) ;
 - **un liquide bloqué d'un côté mais libre de l'autre** (`canMove()`) : il ne
@@ -167,8 +176,12 @@ Invariants :
   endormi ignore ce qu'on vient d'y poser. Même règle pour une nouvelle
   écriture directe dans le moteur : `this.wake(i)`.
 - **Une matière qui agit d'elle-même** (compteur dans `life`, tirage qui finit
-  par réussir, lecture au-delà des voisines immédiates) va dans `ACTIVE`. Sinon
-  son bloc s'endort et elle se fige.
+  par réussir, lecture au-delà des voisines immédiates) tient son bloc
+  éveillé : par `wake(i)` quand elle a de quoi agir (de préférence — un bac
+  plein d'elle s'endort alors), sinon en entrant dans `ACTIVE`. Sans l'un ni
+  l'autre, son bloc s'endort et elle se fige. Au-delà de 15 cellules, un
+  voisin qui change ne réveille plus le bloc : la portée de l'aimant (5) y
+  tient.
 - **Déterminisme** : quels blocs dorment dépend de toute la partie. `wakeAll()`
   remet tout à plat (tous réveillés, horloges remises), et chaque départ de
   rejeu ou de salon passe par `put()` → `adopt()` → `wakeAll()`, chez l'hôte

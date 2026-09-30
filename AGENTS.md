@@ -134,8 +134,9 @@ aucun test précis.
   4 fils au bit près.
 - Blocs de veille : une écriture directe dans les tableaux appelle
   `this.wake(i)` dans le moteur, `engine.wakeAll()` ailleurs ; une matière qui
-  agit sans que rien ne bouge autour va dans `ACTIVE`. Sinon son bloc s'endort
-  et elle se fige.
+  agit sans que rien ne bouge autour appelle `wake(i)` quand elle a de quoi
+  agir, ou va dans `ACTIVE` si elle agit à chaque tick. Sinon son bloc
+  s'endort et elle se fige.
 - Ne jamais renuméroter les ids de matière.
 
 **Client** ([architecture.md](docs/agents/architecture.md))

@@ -30,10 +30,15 @@ flowchart LR
 1. **Le fil principal** (page) ne simule rien. Il gère le DOM, traduit la souris
    en `Gesture`, envoie des **ordres** au bac et **colorie** la grille.
    Chaque frame n'apporte que les bandes changées (`patches`), en données
-   brutes — matière, `life`, figé, température au degré, pression par palier
-   (`airLevel()` de render.ts, un octet), et le grain avec la première frame
-   d'un moteur. world.ts les recopie **dès l'arrivée** dans un
-   miroir de la grille (`blit()`), puis `present()` fait colorier le
+   brutes — matière, `life`, figé, température et pression telles que le
+   moteur les tient (flottants), et le grain avec la première frame d'un
+   moteur —, toutes découpées dans **un seul tampon** par frame, transféré une
+   fois. world.ts les recopie **dès l'arrivée** dans un miroir de la grille
+   (`blit()` → `land()` de render.ts, qui arrondit la température au degré et
+   la pression au palier d'`airLevel()`). Arrondir côté Worker, et y allouer un
+   tableau par bande et par couche, coûtait ~11 ms par frame au fil du bac en
+   1920×1080 tout changé ; la page, qui attend presque toujours, le fait
+   pendant que le bac calcule le tick suivant. Puis `present()` fait colorier le
    rectangle changé par [screen.ts](../../src/client/screen.ts) : un shader
    WebGL2 sur des textures (entières, sauf la pression, en flottants), ou, sans WebGL2, `Renderer` puis un
    `putImageData`. Un envoi à l'écran par rafraîchissement. Ne jamais sauter
@@ -110,7 +115,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
-| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,press,noise?}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y, nom]` ou `null` (la caméra le suit ; le reste de sa fiche, la page le lit dans son miroir) |
+| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,press,noise?}`, `temp` et `press` en `Float32Array` bruts, toutes vues d'**un seul** tampon **transféré** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y, nom]` ou `null` (la caméra le suit ; le reste de sa fiche, la page le lit dans son miroir) |
 | `stats` | 2 × / s | nombre de cellules pleines |
 | `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`, `latestGrid()`), pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askGrid()` / `askClip()` / `askFilm()` |

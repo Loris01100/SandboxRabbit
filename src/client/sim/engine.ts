@@ -79,6 +79,8 @@ const MELTDOWN = 120;
 const NUKE = 16;
 /** Portée de l'aimant, en cellules. */
 const PULL = 5;
+/** Demi-largeur du disque de l'aimant à chaque rangée, de -`PULL` à `PULL` : le même disque que `disc(PULL)`. */
+const PULL_SPAN = Array.from({ length: 2 * PULL + 1 }, (_, k) => Math.floor(Math.sqrt(PULL * PULL - (k - PULL) ** 2)));
 
 /*
  * Le lapin : neuf cellules de taille fixe, que son cœur (`RABBIT`) déplace d'un
@@ -269,7 +271,11 @@ for (const key of Object.keys(MATERIALS)) {
   const id = Number(key);
   if (KIND[id] === KINDS.gas || CREATURE[id]) ACTIVE[id] = 1;
 }
-for (const id of [ACID, THERMITE, URANIUM, SALT, NANITE, SOURCE, BATTERY, EMBER, SPARK, MAGNET]) ACTIVE[id] = 1;
+// Acide, thermite, sel, source, pile et aimant n'y sont plus : ils ne tiennent
+// leur bloc éveillé (`wake`) que s'ils ont de quoi agir, comme la plante. Un bac
+// plein de l'un d'eux s'endort — plein d'aimants, il coûtait 2 s par tick en
+// 1920×1080 à chercher de la limaille qui n'y était pas.
+for (const id of [URANIUM, NANITE, EMBER, SPARK]) ACTIVE[id] = 1;
 
 /** 1 = poudre ou liquide, hors créatures : ce qui tombe d'une case par tick, et que `hold()` peut différer. */
 const FALLS = new Uint8Array(256);
@@ -1532,7 +1538,10 @@ export class Engine {
       const n = this.get(nx, ny);
       const dissolvable = n === STONE || n === WOOD || n === SAND || n === PLANT
         || n === GLASS || n === ICE || n === SEED || CREATURE[n] === 1;
-      if (dissolvable && this.rand() < 0.06) {
+      if (!dissolvable) continue;
+      // De quoi ronger : le bloc reste éveillé jusqu'à ce que le tirage réussisse.
+      this.wake(i);
+      if (this.rand() < 0.06) {
         this.become(nx, ny, EMPTY);
         if (this.rand() < 0.5) { this.become(x, y, SMOKE); return; } // l'acide s'use
       }
@@ -1617,6 +1626,7 @@ export class Engine {
    */
   private updateThermite(i: number, x: number, y: number): void {
     if (this.life[i] > 0) {
+      this.wake(i); // elle brûle : chaque tick compte, même si rien ne bouge
       this.temp[i] = 2800;
       // `convert` plutôt que `set` : la braise garde la chaleur accumulée.
       if (--this.life[i] === 0) { this.convert(i, EMBER); return; }
@@ -1629,7 +1639,7 @@ export class Engine {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       const lit = n === THERMITE && this.life[this.index(nx, ny)] > 0;
-      if (n === FIRE || n === LAVA || n === SPARK || lit) { this.life[i] = BURN; return; }
+      if (n === FIRE || n === LAVA || n === SPARK || lit) { this.life[i] = BURN; this.wake(i); return; }
     }
     this.updatePowder(i, x, y, THERMITE);
   }
@@ -1802,7 +1812,9 @@ export class Engine {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
       if (n === WATER) { this.become(nx, ny, SALTWATER); this.become(x, y, EMPTY); return; }
-      if (n === ICE && this.rand() < 0.25) { this.become(nx, ny, WATER); this.become(x, y, EMPTY); return; }
+      if (n !== ICE) continue;
+      this.wake(i); // de la glace à fondre : éveillé jusqu'à ce que le tirage réussisse
+      if (this.rand() < 0.25) { this.become(nx, ny, WATER); this.become(x, y, EMPTY); return; }
     }
     this.updatePowder(i, x, y, SALT);
   }
@@ -1829,7 +1841,8 @@ export class Engine {
 
   /** Générateur : crache sa matière (stockée dans `life`) dans la case libre voisine. */
   private updateSource(i: number, x: number, y: number): void {
-    if (this.rand() > 0.5) return;
+    // Tirée d'abord, comme avant : un bloc éveillé tire la même suite.
+    const roll = this.rand();
     // `life` arrive aussi d'ailleurs (lien, galerie, `clip` d'un pair), et
     // `adopt()` ne filtre que `cells` : un id inconnu faisait jeter
     // `MATERIALS[id]` au premier tick, et un lien de cinquante caractères
@@ -1837,7 +1850,10 @@ export class Engine {
     const emitted = this.life[i];
     const id = emitted !== EMPTY && KNOWN[emitted] ? emitted : WATER;
     const dy = KIND[id] === KINDS.gas ? -this.gravity : this.gravity;
-    if (this.get(x, y + dy) === EMPTY) this.become(x, y + dy, id);
+    // Bouchée, elle dort : la case qui se libère est une écriture, qui la réveille.
+    if (this.get(x, y + dy) !== EMPTY) return;
+    this.wake(i);
+    if (roll <= 0.5) this.become(x, y + dy, id);
   }
 
   /** Bougie : `life` sert de mèche allumée. Une fois prise, elle réalimente sa flamme. */
@@ -1871,6 +1887,17 @@ export class Engine {
 
   /** Pile : une étincelle dans le métal voisin toutes les `PULSE` frames. */
   private updateBattery(i: number, x: number, y: number): void {
+    // Sans métal à côté, le compte à rebours ne sert à rien : elle dort, et
+    // reprend son compte là où il en était quand on pose du métal (une écriture).
+    // L'étincelle compte comme du métal : c'est le sien, qu'elle vient de
+    // charger — sans ça, le compte s'arrêtait à chaque impulsion.
+    let metal = false;
+    for (let k = 0; k < 4; k++) {
+      const n = this.get(x + NX[k], y + NY[k]);
+      if (n === METAL || n === SPARK) metal = true;
+    }
+    if (!metal) return;
+    this.wake(i);
     if (this.life[i] > 0) { this.life[i]--; return; }
     this.life[i] = PULSE;
     for (let k = 0; k < 4; k++) {
@@ -2189,6 +2216,8 @@ export class Engine {
    * donc du centre, en repoussant du bord — exactement comme le souffle.
    */
   private updateMagnet(i: number, x: number, y: number): void {
+    if (!this.near(x, y, FILINGS)) return; // rien à attirer : il dort
+    this.wake(i);
     const cells = disc(PULL);
     const push = this.life[i] === 1 ? 1 : -1;
     for (let k = 0; k < cells.length; k++) {
@@ -2199,6 +2228,23 @@ export class Engine {
       if (this.cells[at] !== FILINGS || this.frozen[at]) continue;
       this.tryMove(at, x + dx + push * Math.sign(dx), y + dy + push * Math.sign(dy), FILINGS);
     }
+  }
+
+  /**
+   * Y a-t-il `id` dans le disque de l'aimant autour de (x, y) ? Rangée par
+   * rangée, en lisant `cells` d'affilée : dix fois moins cher que le parcours
+   * ordonné de `disc()`, qu'on ne fait plus que s'il y a de quoi attirer.
+   */
+  private near(x: number, y: number, id: MaterialId): boolean {
+    const { cells, width: w, height: h } = this;
+    for (let dy = -PULL; dy <= PULL; dy++) {
+      const ry = y + dy;
+      if (ry < 0 || ry >= h) continue;
+      const span = PULL_SPAN[dy + PULL];
+      const end = ry * w + Math.min(w - 1, x + span);
+      for (let j = ry * w + Math.max(0, x - span); j <= end; j++) if (cells[j] === id) return true;
+    }
+    return false;
   }
 
   /** Pose un lapin entier (voir `spawn`). Public : les mondes générés en sèment. */

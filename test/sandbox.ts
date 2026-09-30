@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
-import { AIR_LEVELS, Renderer, airLevel } from "../src/client/sim/render.ts";
+import { Renderer, airLevel, land } from "../src/client/sim/render.ts";
 import { decode } from "../src/client/sim/codec.ts";
 import { count } from "../src/client/challenges.ts";
 import { EMPTY, FIRE, HERO, PILOT, SAND, STONE, TNT, WATER } from "../src/client/sim/materials.ts";
@@ -64,17 +64,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
     for (const f of news.splice(0)) {
       if (f.t !== "frame") continue;
       miroir.ambient = f.ambient;
-      for (const p of f.patches) {
-        for (let r = 0; r < p.h; r++) {
-          const from = r * p.w, to = (p.y + r) * W + p.x;
-          miroir.cells.set(p.cells.subarray(from, from + p.w), to);
-          miroir.life.set(p.life.subarray(from, from + p.w), to);
-          miroir.frozen.set(p.frozen.subarray(from, from + p.w), to);
-          miroir.temp.set(p.temp.subarray(from, from + p.w), to);
-          for (let k = 0; k < p.w; k++) miroir.press[to + k] = p.press[from + k] / AIR_LEVELS;
-          if (p.noise) miroir.noise.set(p.noise.subarray(from, from + p.w), to);
-        }
-      }
+      for (const p of f.patches) land(miroir, p);
     }
   };
   run(sim, 400);
