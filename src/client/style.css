@@ -131,6 +131,22 @@ canvas {
 #sight[data-view="eyes"] { inset: 1rem; width: calc(100% - 2rem); height: calc(100% - 2rem); }
 #sight[data-view="inset"] { right: 1.5rem; bottom: 1.5rem; width: 22%; height: 30%; border-color: var(--edge); }
 
+/* Le héros piloté : un cadre lumineux autour de ses 3×4 cellules, en pixels
+   de la scène (hero.ts). Marges négatives : le cadre tient hors de son corps. */
+#halo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: content-box;
+  margin: -4px;
+  padding: 2px;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: 0 0 8px 2px var(--accent);
+  pointer-events: none;
+  z-index: 1;
+}
+
 .overlay {
   position: fixed;
   pointer-events: none;

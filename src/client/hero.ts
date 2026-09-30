@@ -3,7 +3,7 @@ import { current } from "./palette.ts";
 import { bindings, held } from "./keys.ts";
 import { keyLabel, type Action } from "./ui.ts";
 import { zoom, zoomCentered, zoomInput } from "./view.ts";
-import { WIDTH, seen } from "./world.ts";
+import { WIDTH, canvas, seen } from "./world.ts";
 import { look } from "./sight.ts";
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -126,12 +126,32 @@ export function nextView(): void {
   statusEl.textContent = `Vue ${VIEW_NAMES[view]}${hero ? "" : " — elle attend un héros (Vivant → Héros)"}. ${keyLabel(bindings.view)} pour changer.`;
 }
 
+const haloEl = document.querySelector<HTMLDivElement>("#halo")!;
+
+/**
+ * Cerne le héros piloté dans les deux vues de côté : tous les héros du bac
+ * obéissent aux touches, mais la caméra et la fiche n'en suivent qu'un, et
+ * rien ne disait lequel. Un repère posé sur la scène, pas une couleur du
+ * rendu : sinon il faudrait le peindre dans le shader et dans `Renderer`.
+ * Recalculé à chaque image, zoom et caméra compris.
+ */
+function mark(): void {
+  haloEl.hidden = !hero || view === 2;
+  if (haloEl.hidden || !hero) return;
+  const c = canvas.getBoundingClientRect(), stage = haloEl.parentElement!.getBoundingClientRect();
+  const s = c.width / WIDTH, [x, y] = hero;
+  haloEl.style.transform = `translate(${c.left - stage.left + (x - 1) * s}px, ${c.top - stage.top + (y - 2) * s}px)`;
+  haloEl.style.width = `${3 * s}px`;
+  haloEl.style.height = `${4 * s}px`;
+}
+
 /**
  * Redessine ce que voit le héros, s'il y en a un et que la vue le montre. Son
  * sens se lit dans le `life` de son cœur (bit 7 = tourné vers la gauche, voir
  * engine.ts) : le miroir le porte déjà, la frame n'a rien à ajouter.
  */
 export function gaze(): void {
+  mark();
   const grid = seen();
   if (!hero || !grid || view === 0) { sightEl.hidden = true; return; }
   sightEl.hidden = false;
