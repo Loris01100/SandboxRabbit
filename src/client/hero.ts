@@ -3,7 +3,7 @@ import { current } from "./palette.ts";
 import { bindings, held } from "./keys.ts";
 import { keyLabel, type Action } from "./ui.ts";
 import { zoom, zoomCentered, zoomInput } from "./view.ts";
-import { WIDTH, canvas, seen } from "./world.ts";
+import { WIDTH, cellBox, seen } from "./world.ts";
 import { look } from "./sight.ts";
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -138,11 +138,11 @@ const haloEl = document.querySelector<HTMLDivElement>("#halo")!;
 function mark(): void {
   haloEl.hidden = !hero || view === 2;
   if (haloEl.hidden || !hero) return;
-  const c = canvas.getBoundingClientRect(), stage = haloEl.parentElement!.getBoundingClientRect();
-  const s = c.width / WIDTH, [x, y] = hero;
-  haloEl.style.transform = `translate(${c.left - stage.left + (x - 1) * s}px, ${c.top - stage.top + (y - 2) * s}px)`;
-  haloEl.style.width = `${3 * s}px`;
-  haloEl.style.height = `${4 * s}px`;
+  const c = cellBox(), stage = haloEl.parentElement!.getBoundingClientRect();
+  const [x, y] = hero;
+  haloEl.style.transform = `translate(${c.left - stage.left + (x - 1) * c.sx}px, ${c.top - stage.top + (y - 2) * c.sy}px)`;
+  haloEl.style.width = `${3 * c.sx}px`;
+  haloEl.style.height = `${4 * c.sy}px`;
 }
 
 /**

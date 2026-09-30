@@ -10,7 +10,7 @@ import { brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
-import { HEIGHT, WIDTH, askClip, askLoad, canvas, latestGrid, listen, order, present, set, type ClipData } from "./world.ts";
+import { WIDTH, askClip, cellBox, askLoad, canvas, latestGrid, listen, order, present, set, type ClipData } from "./world.ts";
 import { STEER, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
@@ -99,11 +99,8 @@ let clip: ClipData | null = null;
 let selection: { x: number; y: number } | null = null;
 
 function toCell(e: PointerEvent): { x: number; y: number } {
-  const r = canvas.getBoundingClientRect();
-  return {
-    x: Math.floor(((e.clientX - r.left) / r.width) * WIDTH),
-    y: Math.floor(((e.clientY - r.top) / r.height) * HEIGHT),
-  };
+  const b = cellBox();
+  return { x: Math.floor((e.clientX - b.left) / b.sx), y: Math.floor((e.clientY - b.top) / b.sy) };
 }
 
 /** Les outils qui se tracent en glissant : le marquee, pas le pinceau. */
@@ -124,7 +121,7 @@ const ringEl = document.querySelector<HTMLDivElement>("#ring")!;
 const marqueeEl = document.querySelector<HTMLDivElement>("#marquee")!;
 
 /** Côté d'une cellule à l'écran, zoom compris. */
-const cellSize = (): number => canvas.getBoundingClientRect().width / WIDTH;
+const cellSize = (): number => cellBox().sx;
 
 /** Cercle de la taille réelle du pinceau, sous le curseur. */
 function showRing(e: PointerEvent): void {
@@ -140,13 +137,12 @@ function showRing(e: PointerEvent): void {
 
 /** Rectangle de sélection, en cellules, converti en pixels d'écran. */
 function showMarquee(a: { x: number; y: number }, b: { x: number; y: number }): void {
-  const r = canvas.getBoundingClientRect();
-  const s = cellSize();
+  const c = cellBox();
   marqueeEl.hidden = false;
-  marqueeEl.style.left = `${r.left + Math.min(a.x, b.x) * s}px`;
-  marqueeEl.style.top = `${r.top + Math.min(a.y, b.y) * s}px`;
-  marqueeEl.style.width = `${(Math.abs(a.x - b.x) + 1) * s}px`;
-  marqueeEl.style.height = `${(Math.abs(a.y - b.y) + 1) * s}px`;
+  marqueeEl.style.left = `${c.left + Math.min(a.x, b.x) * c.sx}px`;
+  marqueeEl.style.top = `${c.top + Math.min(a.y, b.y) * c.sy}px`;
+  marqueeEl.style.width = `${(Math.abs(a.x - b.x) + 1) * c.sx}px`;
+  marqueeEl.style.height = `${(Math.abs(a.y - b.y) + 1) * c.sy}px`;
 }
 
 /* ------------------------------------------------------------- vue (zoom) */

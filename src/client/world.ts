@@ -25,6 +25,23 @@ export const screen = createScreen(canvas);
 export let WIDTH = 320;
 export let HEIGHT = 180;
 
+/**
+ * Où sont les cellules à l'écran : coin de la première et taille d'une
+ * cellule en x et en y, en pixels. Sans la bordure du canvas, que le zoom
+ * grossit comme le reste : à ×12 elle faisait presque une cellule, et le
+ * cadre du héros, le clic et la sélection tombaient une case trop haut à
+ * gauche.
+ */
+export function cellBox(): { left: number; top: number; sx: number; sy: number } {
+  const r = canvas.getBoundingClientRect(), k = r.width / canvas.offsetWidth;
+  return {
+    left: r.left + canvas.clientLeft * k,
+    top: r.top + canvas.clientTop * k,
+    sx: (canvas.clientWidth * k) / WIDTH,
+    sy: (canvas.clientHeight * k) / HEIGHT,
+  };
+}
+
 /** Rappelés après un redimensionnement : vue, marquee, etc. */
 export const onResize: (() => void)[] = [];
 

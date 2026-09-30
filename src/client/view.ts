@@ -4,8 +4,9 @@ import { HEIGHT, WIDTH, canvas, onResize } from "./world.ts";
 
 /**
  * La vue du bac : zoom et décalage, posés en transformation CSS sur le canvas.
- * `toCell()` de main.ts passe par `getBoundingClientRect()`, qui tient déjà
- * compte du zoom et du décalage — rien à corriger ailleurs.
+ * Ce qui traduit cellules et pixels d'écran (clic, sélection, cadre du héros)
+ * passe par `cellBox()` de world.ts, qui en tient compte — bordure grossie
+ * par le zoom comprise.
  */
 export let zoom = 1;
 let panX = 0;
