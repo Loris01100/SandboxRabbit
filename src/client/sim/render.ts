@@ -8,6 +8,8 @@ import { type Engine } from "./engine.ts";
  * Le moteur l'est (le Worker, les tests), le miroir de la page aussi
  * (world.ts) — c'est ce qui laisse colorier aussi bien d'un côté que de
  * l'autre. `temp` : en °C, flottants dans le moteur, arrondis dans le miroir.
+ * `press` : la pression de l'air, flottante dans le moteur, ramenée à ses
+ * paliers (`AIR_LEVELS`) dans le miroir — la vue pression n'en lit pas plus.
  */
 export interface Grid {
   width: number;
@@ -18,6 +20,7 @@ export interface Grid {
   frozen: Uint8Array;
   noise: Int8Array;
   temp: ArrayLike<number>;
+  press: ArrayLike<number>;
 }
 
 /**
@@ -36,6 +39,8 @@ export interface Patch {
   life: Uint8Array;
   frozen: Uint8Array;
   temp: Int16Array;
+  /** Palier de pression (`airLevel()`), de quoi la vue pression. */
+  press: Uint8Array;
   noise?: Int8Array;
 }
 
@@ -60,7 +65,7 @@ export class Tracker {
   }
 
   take(): Patch[] {
-    const { chunk, cols, rows, width: w, height: h, cells, life, frozen, temp, noise } = this.engine;
+    const { chunk, cols, rows, width: w, height: h, cells, life, frozen, temp, press, noise } = this.engine;
     const { dirty } = this;
     this.engine.changed(dirty);
     const full = this.full;
@@ -79,7 +84,7 @@ export class Tracker {
       const p: Patch = {
         x, y: y0, w: pw, h: ph,
         cells: new Uint8Array(pw * ph), life: new Uint8Array(pw * ph),
-        frozen: new Uint8Array(pw * ph), temp: new Int16Array(pw * ph),
+        frozen: new Uint8Array(pw * ph), temp: new Int16Array(pw * ph), press: new Uint8Array(pw * ph),
       };
       if (full) p.noise = new Int8Array(pw * ph);
       for (let r = 0; r < ph; r++) {
@@ -89,6 +94,7 @@ export class Tracker {
         p.frozen.set(frozen.subarray(from, from + pw), to);
         p.noise?.set(noise.subarray(from, from + pw), to);
         for (let k = 0; k < pw; k++) p.temp[to + k] = Math.max(-32768, Math.min(32767, Math.round(temp[from + k])));
+        for (let k = 0; k < pw; k++) p.press[to + k] = airLevel(press[from + k]);
       }
       patches.push(p);
     }
@@ -108,6 +114,22 @@ export function palette(): Uint8Array {
   }
   return out;
 }
+
+/**
+ * Paliers de pression par unité : la vue pression distingue 1/8 d'unité, et
+ * sature à 255 paliers (≈ 32, le cœur d'un souffle). Une bande n'en porte
+ * qu'un octet par cellule ; le miroir range `palier / AIR_LEVELS`, que
+ * `airLevel()` rend tel quel.
+ */
+export const AIR_LEVELS = 8;
+
+/** Le palier d'une pression : arrondi au plus proche comme `floor(p·8 + 0,5)` du shader, borné à 255. */
+export function airLevel(p: number): number {
+  return Math.min(255, Math.floor(p * AIR_LEVELS + 0.5));
+}
+
+/** Ce que montre le bac : la matière, la température (`h`) ou la pression de l'air (`b`). */
+export type View = "matter" | "heat" | "air";
 
 /** Les quatre matières dont `life` change l'aspect, dans l'ordre qu'attend le shader. */
 export const GLOWING = [URANIUM, THERMITE, SWITCH, MAGNET] as const;
@@ -207,8 +229,8 @@ export class Renderer {
   private readonly glows = new Uint8Array(256);
   /** 1 pour les matières qui émettent (`lighting()`) : l'heure ne les assombrit pas. */
   private readonly emits = new Uint8Array(256);
-  /** Affiche `temp` au lieu de la matière. */
-  heatmap = false;
+  /** La matière, la température (`shadeHeat`) ou la pression (`shadeAir`). */
+  view: View = "matter";
   /** L'heure de la journée, voir `HOURS`. */
   tint: Tint = HOURS["apres-midi"];
 
@@ -242,7 +264,8 @@ export class Renderer {
     const w = this.grid.width;
     const warm = this.grid.ambient + GLOW;
     for (let y = y0; y < y1; y++) {
-      if (this.heatmap) this.shadeHeat(y * w + x0, y * w + x1);
+      if (this.view === "air") this.shadeAir(y * w + x0, y * w + x1);
+      else if (this.view === "heat") this.shadeHeat(y * w + x0, y * w + x1);
       else this.shade(y * w + x0, y * w + x1, warm);
     }
   }
@@ -306,6 +329,30 @@ export class Renderer {
         g = 255 * clamp01(u * 3 - 1);
         b = 255 * clamp01(u * 3 - 2);
       }
+      buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
+    }
+  }
+
+  /**
+   * La pression de l'air, par palier (`airLevel`) : bleu profond, cyan, puis
+   * blanc à 255 paliers. Sans pression, la matière assombrie aux 77/256, en
+   * entiers comme le shader : on voit où l'onde se heurte aux murs et quelle
+   * vitre elle presse. Tout en entiers, rampe comprise : en flottants, le
+   * GPU arrondissait autrement 2 % des paliers.
+   */
+  private shadeAir(from: number, to: number): void {
+    const { press, cells } = this.grid;
+    const { buffer, palette } = this;
+    for (let i = from; i < to; i++) {
+      const l = airLevel(press[i]);
+      if (l === 0) {
+        const base = palette[cells[i]];
+        const r = ((base & 0xff) * 77) >> 8, g = (((base >> 8) & 0xff) * 77) >> 8, b = (((base >> 16) & 0xff) * 77) >> 8;
+        buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
+        continue;
+      }
+      const r = Math.max(0, Math.min(255, 3 * l - 510)), g = Math.max(0, Math.min(255, 3 * l - 255));
+      const b = 60 + Math.min(195, Math.floor((39 * l) / 17)); // 195 × 3l / 255
       buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
     }
   }

@@ -226,8 +226,9 @@ Invariants :
 - Toute règle de déplacement passe par `y + this.gravity` et `drift()` (vent).
   Exceptions : `MAGNET`, qui tire la limaille d'un cran vers lui en ignorant
   la gravité, le lapin, dont les neuf cellules bougent d'un bloc par
-  `relocate()` (voir [Créatures](#créatures--le-lapin)), et le gaz poussé
-  par la pression (`blown()`, voir [Pression et vent](#pression-et-vent)).
+  `relocate()` (voir [Créatures](#créatures--le-lapin)), et le gaz ou la
+  poudre que pousse la pression (`blown()`, `swept()`, voir
+  [Pression et vent](#pression-et-vent)).
 - Déplacer = `tryMove()` (qui refuse une cible figée et vérifie
   `displaces()`), jamais écrire `cells` à la main.
 - Hors grille, `get()` renvoie `STONE` : les règles ne testent pas les bords.
@@ -372,9 +373,30 @@ mur, et une voisine qui n'est pas de l'air compte pour la cellule elle-même
 - **Une seule porte d'entrée : `puff(i, montant)`.** Elle n'écrit que dans
   l'air, plafonne à `MAX_P`, réveille le bloc et lève `CTL.gust`. Une écriture
   directe dans `press` laisserait un bloc endormi avec de la pression, ou
-  `breathe()` sauté. Sources aujourd'hui : `explode()` (onde jusqu'à `REACH`
-  rayons, pente `BLOW` — posée d'un coup, joué par `settle()` car elle dépasse
-  le damier) et l'eau vaporisée par la lave (`STEAM_PUFF`, à une cellule).
+  `breathe()` sauté. Sources aujourd'hui : `explode()` (l'onde, voir
+  ci-dessous) et l'eau vaporisée par la lave (`STEAM_PUFF`, à une cellule).
+- **L'onde d'un souffle** (`wave()`, appelée à la fin d'`explode()`) : un
+  volume de gaz fixe, `gas(portée)` — ce que la pente `BLOW` dépose sur tout
+  le disque de portée `REACH` rayons —, réparti par un parcours en largeur
+  **à travers l'air seulement**, depuis l'air du cratère. Elle contourne les
+  coins mais ne traverse pas un mur ; dans une pièce close, le même gaz n'a
+  que la pièce et la pression monte d'autant (jusqu'à `CONFINED` fois).
+  Posée d'un coup : à 60 ticks par seconde, une onde de choc traverse le bac
+  en moins d'un tick. Jouée par `settle()`, seul : elle dépasse le damier.
+  Son parcours (`seen`, `queue`) est à ce fil-là.
+- **Ce que la pression casse et soulève**, deux règles du damier qui ne lisent
+  rien tant que le tick a commencé sans pression (`gusty`) :
+  - `shatter()` (règle du `GLASS`) : au-delà de `SHATTER` dans l'air qui le
+    touche, le verre devient du sable, avec une chance qui croît avec
+    l'excès. Du sable, faute de matière « éclats » : c'est du verre broyé, qui
+    refond en verre à la chaleur et que l'onde emporte ensuite ;
+  - `swept()` (en tête d'`updatePowder()`) : chaque côté vaut la plus forte
+    pression de l'air parmi ses trois cellules, diagonales comprises (`side()`
+    ; un côté sans air prend la valeur d'en face). Au-delà de `SWEEP_MIN` —
+    bien plus que pour un gaz, sinon chaque dune d'un monde glissait —, la
+    poudre part avec une chance divisée par sa densité ; poussée de côté mais
+    bloquée, elle est soulevée en biais. Lecture à une cellule : sans risque
+    en multi-fils.
 - **`breathe()`**, après la chaleur : `AIR_STEPS` sous-pas de diffusion
   amortie (`FLOW`, `DAMP`) sur les blocs éveillés, chacun une passe partagée
   entre les fils (`JOB.air`, puis `JOB.gust` au dernier). Au dernier, un bloc
@@ -400,8 +422,10 @@ mur, et une voisine qui n'est pas de l'air compte pour la cellule elle-même
   [docs/rust.md](../rust.md). Un changement de `airChunk()` ou `hushed()` se
   reporte dans lib.rs.
 - `ponytail:` de `breathe()` : une diffusion, pas un fluide (ni vitesse ni
-  inertie), et ce qui fuit vers un bloc endormi est perdu pour le tick ;
-  `ponytail:` d'`explode()` : l'onde n'a pas de ligne de vue.
+  inertie), et ce qui fuit vers un bloc endormi est perdu pour le tick.
+- **La vue pression** (touche `b`) lit `press` par palier (`airLevel()` de
+  render.ts, 1/8 d'unité, un octet par cellule dans les bandes) : voir
+  [Rendu](#rendu).
 
 ### Électricité
 
@@ -523,16 +547,26 @@ tick en 1920×1080 chargé (`npm run directions`).
   que `engine.changed()` désigne (traités par un tick, ou écrits depuis — un
   geste bac en pause), une bande (`Patch`) par rangée de blocs changés, en
   données brutes : matière, `life`, figé, température arrondie au degré
-  (`Int16`). Un bac au repos n'envoie rien ; la première frame d'un moteur est
+  (`Int16`), pression par palier (`airLevel()`, `Uint8` : 1/8 d'unité,
+  saturé à 255). Un bac au repos n'envoie rien ; la première frame d'un moteur est
   entière et porte le grain (`noise`, fixe pour un moteur).
 - **Page** : le miroir de world.ts est colorié par
   [screen.ts](../../src/client/screen.ts), un shader WebGL2 sur des textures
-  entières (`texSubImage2D` du rectangle changé), ou sans WebGL2 par
-  `Renderer` puis `putImageData`.
-- **Deux copies d'une même règle** : `Renderer.shade()` / `shadeHeat()` et le
-  shader de screen.ts. Mêmes constantes (`GLOW`, `GLOWING`, `palette()`
-  partagées), mêmes arrondis. Changer un aspect (couleur tirée de `life`,
-  lumière, vue thermique) = changer les deux. `Renderer` sert au secours, aux
+  entières, plus une flottante pour la pression (`texSubImage2D` du rectangle
+  changé), ou sans WebGL2 par `Renderer` puis `putImageData`. Le miroir range
+  la pression en `palier / AIR_LEVELS`, exact en flottant : `airLevel()` y
+  retrouve le palier tel quel, et `Renderer` colorie pareil le moteur et le
+  miroir.
+- **Trois vues** (`View` de render.ts) : la matière, la vue thermique
+  (`shadeHeat`) et la vue pression (`shadeAir` : l'air du bleu profond au
+  blanc, le reste assombri aux 77/256). Les deux dernières sans éclairage ni
+  heure. La rampe de pression est calculée **en entiers** des deux côtés :
+  en flottants, le GPU arrondissait autrement 2 % des paliers.
+- **Deux copies d'une même règle** : `Renderer.shade()` / `shadeHeat()` /
+  `shadeAir()` et le shader de screen.ts. Mêmes constantes (`GLOW`,
+  `GLOWING`, `AIR_LEVELS`, `palette()` partagées), mêmes arrondis. Changer
+  un aspect (couleur tirée de `life`, lumière, vues thermique et pression) =
+  changer les deux. `Renderer` sert au secours, aux
   tests et à `npm run directions` ; le test du miroir (test/sandbox.ts)
   vérifie qu'un miroir se colorie comme le moteur.
 - **Seule exception : l'éclairage global** (*radiance cascades*, screen.ts),
@@ -553,7 +587,8 @@ tick en 1920×1080 chargé (`npm run directions`).
   du shader.
 - Ce qui change l'aspect **sans écriture ni tick** : la vue thermique ne
   regarde que la page (`order()` de world.ts la relève et fait tout
-  recolorier), l'éclairage et l'heure aussi (`light()`, `hour()` de world.ts) ; l'ambiante (seuil de lumière, pivot de la vue thermique)
+  recolorier), l'éclairage, l'heure et la vue pression aussi (`light()`,
+  `hour()`, `airView()` de world.ts) ; l'ambiante (seuil de lumière, pivot de la vue thermique)
   passe par `wakeAll()` et voyage avec la frame. Un nouveau réglage d'aspect
   doit faire l'un ou l'autre.
 - `engine.changed()` remet à zéro ce qu'il a rendu : un seul `Tracker` par

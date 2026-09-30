@@ -1145,6 +1145,52 @@ function top(e: Engine, id: MaterialId): number {
   for (let t = 0; t < 400 && e.busy > 0; t++) e.step();
   assert.equal(e.busy, 0, "puis le bac se rendort : la pression ne tient rien éveillé pour toujours");
 
+  // L'onde se répand par l'air : rien derrière un mur plein.
+  const mur = new Engine(96, 64, 5);
+  mur.rect(60, 0, 63, 63, STONE);
+  mur.explode(48, 32, 5);
+  let derrière = 0;
+  for (let y = 0; y < 64; y++) for (let x = 64; x < 96; x++) derrière += mur.press[y * 96 + x];
+  assert.equal(derrière, 0, "l'onde ne traverse pas un mur");
+
+  /** Cellules de verre éclatées par un TNT à `d` cellules de la vitre, à l'air libre ou dans une pièce close. */
+  const vitre = (d: number, close: boolean): number => {
+    const e = new Engine(160, 90, 3);
+    e.rect(0, 70, 159, 89, STONE);
+    e.rect(80 + d, 56, 80 + d, 69, GLASS);
+    if (close) { e.rect(80 - d, 56, 80 + d, 56, STONE); e.rect(80 - d, 56, 80 - d, 69, STONE); }
+    e.step();
+    e.explode(80, 63, 5);
+    for (let t = 0; t < 60; t++) e.step();
+    return 14 - count(e, GLASS) - (close ? 1 : 0); // la pièce prend une cellule de la vitre à son plafond
+  };
+  assert.ok(vitre(9, false) > 0, "une vitre proche d'un souffle éclate");
+  assert.equal(vitre(20, false), 0, "une vitre lointaine tient");
+  assert.ok(vitre(9, true) > vitre(9, false), `dans une pièce close, la même charge en casse plus (${vitre(9, true)} contre ${vitre(9, false)})`);
+  const éclats = new Engine(160, 90, 3);
+  éclats.rect(89, 60, 89, 69, GLASS);
+  éclats.explode(80, 65, 5);
+  for (let t = 0; t < 5; t++) éclats.step();
+  assert.ok(count(éclats, SAND) > 0, "le verre éclaté devient du sable");
+
+  // Le sable est soufflé par l'onde, pas par un bac calme.
+  const tas = (boom: boolean): number => {
+    const e = new Engine(160, 90, 3);
+    e.rect(0, 70, 159, 89, STONE);
+    e.rect(45, 60, 65, 69, SAND);
+    for (let t = 0; t < 30; t++) e.step();
+    const avant = e.cells.slice();
+    if (boom) e.explode(80, 66, 7);
+    let bougé = 0;
+    for (let t = 0; t < 10; t++) {
+      e.step();
+      for (let i = 0; i < avant.length; i++) if (avant[i] === SAND && e.cells[i] !== SAND) bougé++;
+    }
+    return bougé;
+  };
+  assert.equal(tas(false), 0, "un tas posé ne bouge pas");
+  assert.ok(tas(true) > 10, "l'onde arrache le sable du tas qui lui fait face");
+
   // Une grille posée (monde, rejeu, salon, annulation) repart sans pression, chez chacun.
   const f = new Engine(96, 64, 5);
   f.explode(48, 30, 5);

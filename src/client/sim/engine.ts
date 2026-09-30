@@ -40,6 +40,8 @@ const CALM_P = 0.02;
  */
 const REACH = 3;
 const BLOW = 1;
+/** Ce qu'une pièce close multiplie au plus la pression d'une onde (voir `wave()`) : une niche d'une cellule ne la porte pas à l'infini. */
+const CONFINED = 6;
 /** Pression d'une bouffée de vapeur (eau sur la lave). */
 const STEAM_PUFF = 6;
 /** Pression plafond d'une cellule : des souffles en chaîne ne la font pas grimper sans fin. */
@@ -48,6 +50,19 @@ const MAX_P = 200;
 const GUST = 1.5;
 /** Gradient sous lequel un gaz ne sent pas le vent (et ne tire rien au sort). */
 const GUST_MIN = 0.03;
+/**
+ * Pression d'air au contact au-delà de laquelle le verre peut éclater ; la
+ * chance par tick croît avec l'excès (1 au double). À l'air libre, l'onde d'un
+ * TNT la dépasse à dix cellules du centre ; dans une pièce close, elle ne
+ * s'échappe pas et tient au-dessus plus longtemps.
+ */
+const SHATTER = 6;
+/**
+ * Gradient sous lequel une poudre ne bouge pas : bien au-dessus de celui des
+ * gaz (`GUST_MIN`), pour que seul le cœur d'une onde soulève le sable — sinon
+ * chaque dune d'un monde généré glissait au moindre souffle lointain.
+ */
+const SWEEP_MIN = 0.5;
 /** Ticks pendant lesquels un métal qui vient de conduire refuse l'étincelle. */
 const RECOVERY = 8;
 /** Ticks entre deux étincelles d'une pile (plus long que `RECOVERY`, sinon le fil sature). */
@@ -365,6 +380,22 @@ function disc(radius: number): [number, number, number][] {
   return out;
 }
 
+/**
+ * Le gaz d'une onde de portée `reach` : la somme de `reach - d` sur tout son
+ * disque, ce qu'elle dépose à l'air libre avec la pente `BLOW`. Mis en cache,
+ * comme `disc()`.
+ */
+const GAS = new Map<number, number>();
+
+function gas(reach: number): number {
+  let sum = GAS.get(reach);
+  if (sum !== undefined) return sum;
+  sum = 0;
+  for (const [, , d] of disc(reach)) sum += reach - d;
+  GAS.set(reach, sum);
+  return sum;
+}
+
 /** Morceau de grille découpé puis reposé ailleurs (copier / coller). */
 export interface Clip {
   width: number;
@@ -412,6 +443,9 @@ export class Engine {
   private readonly hush: Uint8Array;
   /** Y avait-il de la pression quelque part au début du tick ? Sinon les gaz ne la lisent pas. */
   private gusty = false;
+  /** Parcours de l'onde d'un souffle (`wave()`) : cellules vues et file, à la taille du bac au premier souffle. Le fil du bac seul s'en sert. */
+  private seen = new Uint8Array(0);
+  private queue = new Int32Array(0);
   /** Tout ce que les fils partagent (voir `Memory`) : à passer à `Pool.bind()`. */
   readonly memory: Memory;
   /** Coordination des fils (`CTL`), lue et écrite par `Atomics`. */
@@ -1262,6 +1296,7 @@ export class Engine {
       case HERO_HEAD: case HERO_BODY: case HERO_LEGS: this.updatePart(HERO_SHAPE, x, y, id); return;
       // Le métal ne fait que sortir de sa période de repos.
       case METAL: if (this.life[i] > 0) this.life[i]--; return;
+      case GLASS: if (this.gusty) this.shatter(i, x, y); return;
     }
     switch (KIND[id]) {
       case KINDS.powder: this.updatePowder(i, x, y, id); return;
@@ -1272,6 +1307,7 @@ export class Engine {
   }
 
   private updatePowder(i: number, x: number, y: number, id: MaterialId): void {
+    if (this.gusty && this.swept(i, x, y, id)) return;
     const down = y + this.gravity;
     if (this.tryMove(i, x, down, id)) return;
     const dir = this.drift();
@@ -1345,6 +1381,64 @@ export class Engine {
     const dx = 2 * ax >= ay ? Math.sign(gx) : 0;
     const dy = 2 * ay >= ax ? Math.sign(gy) : 0;
     return this.tryMove(i, x + dx, y + dy, id);
+  }
+
+  /**
+   * Une poudre soufflée : comme `blown()`, mais la poudre n'est pas de l'air
+   * et n'a pas de pression à elle. Chaque côté vaut la plus forte pression
+   * de l'air parmi ses trois cellules, diagonales comprises : un grain au
+   * sommet d'un tas n'a d'air qu'au-dessus de lui, et c'est le vent qui file
+   * au ras du tas qui l'emporte. Un côté sans air prend la valeur d'en face
+   * (aucune poussée sur cet axe) : le sol ne pousse pas. Poussé de côté mais
+   * bloqué, le grain est soulevé en biais. Plus elle est légère, plus elle
+   * part (`DENSITY`) : la neige avant le sable, l'uranium à peine.
+   */
+  private swept(i: number, x: number, y: number, id: MaterialId): boolean {
+    const left = this.side(x - 1, y - 1, 0, 1), right = this.side(x + 1, y - 1, 0, 1);
+    const up = this.side(x - 1, y - 1, 1, 0), down = this.side(x - 1, y + 1, 1, 0);
+    const gx = (left < 0 ? right : left) - (right < 0 ? left : right);
+    const gy = (up < 0 ? down : up) - (down < 0 ? up : down);
+    const g2 = gx * gx + gy * gy;
+    if (!(g2 >= SWEEP_MIN * SWEEP_MIN)) return false; // `!` : deux côtés sans air donnent -1 - -1 = 0
+    if (this.rand() >= Math.sqrt(g2) * GUST * 2 / DENSITY[id]) return false;
+    const ax = Math.abs(gx), ay = Math.abs(gy);
+    const dx = 2 * ax >= ay ? Math.sign(gx) : 0;
+    const dy = 2 * ay >= ax ? Math.sign(gy) : 0;
+    if (this.tryMove(i, x + dx, y + dy, id)) return true;
+    return dx !== 0 && dy === 0 && this.tryMove(i, x + dx, y - this.gravity, id);
+  }
+
+  /**
+   * La plus forte pression de l'air parmi trois cellules, depuis (x, y) par
+   * pas de (sx, sy) ; -1 si aucune n'est de l'air (la pression, elle, n'est
+   * jamais négative).
+   */
+  private side(x: number, y: number, sx: number, sy: number): number {
+    const { press: p, cells, width: w } = this;
+    let most = -1;
+    for (let k = 0; k < 3; k++, x += sx, y += sy) {
+      if (!this.inBounds(x, y)) continue;
+      const j = y * w + x;
+      if (OPEN[cells[j]] && p[j] > most) most = p[j];
+    }
+    return most;
+  }
+
+  /**
+   * Le verre éclate sous la pression de l'air qui le touche : il devient du
+   * sable — du verre broyé, qui refond en verre à la chaleur et que l'onde
+   * emporte ensuite (`swept`). Ne lit rien tant que le tick a commencé sans
+   * pression (`gusty`) : une verrière coûte ce qu'elle coûtait.
+   */
+  private shatter(i: number, x: number, y: number): void {
+    const { press: p, cells, width: w } = this;
+    let most = 0;
+    if (y > 0 && OPEN[cells[i - w]]) most = Math.max(most, p[i - w]);
+    if (y < this.height - 1 && OPEN[cells[i + w]]) most = Math.max(most, p[i + w]);
+    if (x > 0 && OPEN[cells[i - 1]]) most = Math.max(most, p[i - 1]);
+    if (x < w - 1 && OPEN[cells[i + 1]]) most = Math.max(most, p[i + 1]);
+    if (most <= SHATTER) return;
+    if (this.rand() < (most - SHATTER) / SHATTER) this.become(x, y, SAND);
   }
 
   /**
@@ -1612,17 +1706,61 @@ export class Engine {
       if (!thrown) this.become(x, y, this.rand() < 0.5 ? FIRE : EMPTY);
       else if (this.rand() < 0.25) this.become(x, y, FIRE); // le cratère continue de brûler
     }
-    // Puis l'onde : de la pression dans l'air jusqu'à `REACH` rayons, plus
-    // forte au centre, qui chasse fumée et flammes vers l'extérieur
-    // (`blown`). Après le disque, pas pendant : l'air n'y est connu qu'une
-    // fois tout projeté. Joué par `settle()`, seul : la portée dépasse le damier.
-    // ponytail: l'onde passe à travers les murs (seul l'air la reçoit, mais
-    // sans ligne de vue) — une charge derrière une cloison souffle la fumée de
-    // l'autre côté. Tracer des rayons le jour où ça se remarque.
-    const reach = radius * REACH;
-    for (const [ox, oy, d] of disc(reach)) {
-      const x = cx + ox, y = cy + oy;
-      if (this.inBounds(x, y)) this.puff(this.index(x, y), BLOW * (reach - d));
+    // Puis l'onde. Après le disque, pas pendant : l'air n'y est connu qu'une
+    // fois tout projeté.
+    this.wave(cx, cy, radius);
+  }
+
+  /**
+   * L'onde d'un souffle : un volume de gaz fixe (`gas()`), réparti dans l'air
+   * que le cratère atteint **par l'air**, à `REACH` rayons au plus — plus
+   * fort au centre (`BLOW` par cellule jusqu'au bord de l'onde). À l'air
+   * libre, il remplit tout le disque ; dans une pièce close, le même gaz
+   * n'a que la pièce : la pression y monte d'autant (jusqu'à `CONFINED`
+   * fois), et le verre qui la ferme éclate plus loin. Et l'onde ne passe
+   * plus à travers les murs : posée sur tout le disque, elle soufflait la
+   * fumée de l'autre côté d'une cloison.
+   *
+   * Parcours en largeur depuis l'air du cratère, sur `wave` (hors damier :
+   * joué par `settle()`, seul, la portée le dépasse). Il contourne les coins :
+   * c'est un gaz, pas une lumière.
+   */
+  private wave(cx: number, cy: number, radius: number): void {
+    const { width: w, cells } = this;
+    const reach = radius * REACH, r2 = reach * reach;
+    const n = cells.length;
+    if (this.seen.length !== n) { this.seen = new Uint8Array(n); this.queue = new Int32Array(n); }
+    const { seen, queue } = this;
+    let head = 0, tail = 0;
+    const [x0, x1, y0, y1] = this.disc(cx, cy, radius);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const i = y * w + x, dx = x - cx, dy = y - cy;
+        if (dx * dx + dy * dy > radius * radius || !OPEN[cells[i]] || seen[i]) continue;
+        seen[i] = 1;
+        queue[tail++] = i;
+      }
+    }
+    let sum = 0;
+    while (head < tail) {
+      const i = queue[head++];
+      const x = i % w, y = (i / w) | 0, dx = x - cx, dy = y - cy;
+      sum += reach - Math.sqrt(dx * dx + dy * dy);
+      for (let k = 0; k < 4; k++) {
+        const nx = x + NX[k], ny = y + NY[k];
+        if (!this.inBounds(nx, ny)) continue;
+        const j = ny * w + nx, ex = nx - cx, ey = ny - cy;
+        if (seen[j] || ex * ex + ey * ey > r2 || !OPEN[cells[j]]) continue;
+        seen[j] = 1;
+        queue[tail++] = j;
+      }
+    }
+    if (sum <= 0) { for (let k = 0; k < tail; k++) seen[queue[k]] = 0; return; }
+    const scale = BLOW * Math.min(CONFINED, gas(reach) / sum);
+    for (let k = 0; k < tail; k++) {
+      const i = queue[k], dx = (i % w) - cx, dy = ((i / w) | 0) - cy;
+      seen[i] = 0;
+      this.puff(i, scale * (reach - Math.sqrt(dx * dx + dy * dy)));
     }
   }
 

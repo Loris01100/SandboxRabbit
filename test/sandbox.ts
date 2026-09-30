@@ -8,10 +8,10 @@
  */
 import assert from "node:assert/strict";
 import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
-import { Renderer } from "../src/client/sim/render.ts";
+import { AIR_LEVELS, Renderer, airLevel } from "../src/client/sim/render.ts";
 import { decode } from "../src/client/sim/codec.ts";
 import { count } from "../src/client/challenges.ts";
-import { EMPTY, FIRE, HERO, PILOT, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
+import { EMPTY, FIRE, HERO, PILOT, SAND, STONE, TNT, WATER } from "../src/client/sim/materials.ts";
 
 const W = 80, H = 45;
 
@@ -58,7 +58,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   const miroir = {
     width: W, height: H, ambient: 20,
     cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
-    noise: new Int8Array(n), temp: new Int16Array(n),
+    noise: new Int8Array(n), temp: new Int16Array(n), press: new Float32Array(n),
   };
   const reçues = () => {
     for (const f of news.splice(0)) {
@@ -71,6 +71,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
           miroir.life.set(p.life.subarray(from, from + p.w), to);
           miroir.frozen.set(p.frozen.subarray(from, from + p.w), to);
           miroir.temp.set(p.temp.subarray(from, from + p.w), to);
+          for (let k = 0; k < p.w; k++) miroir.press[to + k] = p.press[from + k] / AIR_LEVELS;
           if (p.noise) miroir.noise.set(p.noise.subarray(from, from + p.w), to);
         }
       }
@@ -96,6 +97,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
     assert.deepEqual(miroir.noise, e.noise, `même grain — ${quand}`);
     assert.deepEqual(miroir.temp, Int16Array.from(e.temp, Math.round), `mêmes températures, au degré — ${quand}`);
     assert.equal(miroir.ambient, e.ambient, `même ambiante — ${quand}`);
+    assert.deepEqual(Uint8Array.from(miroir.press, airLevel), Uint8Array.from(e.press, airLevel), `même pression, au palier — ${quand}`);
   };
   sim.order({ t: "do", g: { t: "paint", x: 20, y: 10, r: 3, id: FIRE, d: 1, over: true } });
   run(sim, 30);
@@ -107,6 +109,15 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   sim.order({ t: "set", k: { running: true, ambient: 60 } });
   run(sim, 20);
   pareil("une autre ambiante");
+  // Un souffle : la pression voyage jusqu'au miroir, puis y retombe à zéro.
+  sim.order({ t: "do", g: { t: "paint", x: 40, y: 30, r: 2, id: TNT, d: 1, over: true } });
+  sim.order({ t: "do", g: { t: "paint", x: 40, y: 27, r: 1, id: FIRE, d: 1, over: true } });
+  run(sim, 6);
+  pareil("un souffle");
+  assert.ok(miroir.press.some((p) => p > 0), "la pression d'un souffle arrive au miroir");
+  run(sim, 300);
+  pareil("un souffle retombé");
+  assert.ok(!miroir.press.some((p) => p > 0), "et y retombe à zéro");
 
   const page = new Renderer(miroir), moteur = new Renderer(sim.engine);
   page.draw();

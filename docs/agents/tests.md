@@ -18,7 +18,7 @@ TypeScript directement.
 
 | Script | Couvre | Charge |
 | --- | --- | --- |
-| [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), blocs de veille (dont la mer de lave qui doit s'endormir), pression et vent (un souffle chasse la fumée, la pierre n'en prend pas, elle retombe à zéro exactement et le bac se rendort, `wakeAll()` l'efface), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
+| [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), blocs de veille (dont la mer de lave qui doit s'endormir), pression et vent (un souffle chasse la fumée, la pierre n'en prend pas, l'onde ne traverse pas un mur, elle retombe à zéro exactement et le bac se rendort, `wakeAll()` l'efface ; une vitre proche éclate, une lointaine tient, une pièce close en casse plus ; l'onde arrache le sable d'un tas), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
 | [test/libm.ts](../../test/libm.ts) | les fonctions mathématiques déterministes : à au plus un ulp de `Math` sous V8 sur des centaines de milliers d'arguments (voisins des multiples de π/4 compris), un cas de référence de la crate `libm` au bit près, cas particuliers (±0, infinis, NaN, débordements) et la limite assumée de sin / cos. Leur **déterminisme** (mêmes bits que la crate) est vérifié par `npm run rust` | `sim/libm.ts` |
 | [test/ui.ts](../../test/ui.ts) | logique pure du panneau, touches réassignables ; ce que voit le héros ; rapports d'erreur (une fois chacun, cinq au plus, plafond) | `ui.ts`, `sight.ts`, `reporter()` d'`errors.ts` |
 | [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, vues sous débit, ménage (récents + plus vus), routage des messages du salon ; `/api/error` (ce qui est journalisé, `console.error` capturé ; vide, trop lourd, débit) | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
@@ -159,8 +159,9 @@ lentes dès la naissance du monde.
 
 Côté rendu, test/sandbox.ts recompose l'image comme la page (bandes recopiées
 dans un tableau miroir) et la compare, au pixel près, à un rendu témoin tout
-neuf — après un feu, un geste bac en pause, la vue thermique et une autre
-ambiante. Le témoin se tire **juste après** une frame, sinon il consomme les
+neuf — après un feu, un geste bac en pause, la vue thermique, une autre
+ambiante et un souffle, dont la pression doit arriver au miroir, au palier
+près, puis y retomber à zéro. Le témoin se tire **juste après** une frame, sinon il consomme les
 blocs changés (`engine.changed()`) à la place du bac.
 
 ## Budgets surveillés par la CI

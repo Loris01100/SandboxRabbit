@@ -3,7 +3,7 @@ import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
 import { current, paletteEl, select } from "./palette.ts";
 import { stored, write } from "./ui.ts";
 import { zoomInput } from "./view.ts";
-import { WIDTH, hour, light, resize, screen, set } from "./world.ts";
+import { WIDTH, airView, hour, light, resize, screen, set } from "./world.ts";
 
 /** Rayon du pinceau, en cellules. */
 export let brush = 5;
@@ -71,8 +71,18 @@ export function fit(w: number): void {
 const weatherInput = document.querySelector<HTMLSelectElement>("#weather")!;
 weatherInput.addEventListener("input", () => set({ weather: Number(weatherInput.value) }));
 
+// Vue thermique et vue pression : l'une ou l'autre. Cocher l'une décoche
+// l'autre, sinon la pression, qui passe devant, masquait la thermique cochée.
 export const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
-heatmapInput.addEventListener("change", () => set({ heatmap: heatmapInput.checked }));
+export const airmapInput = document.querySelector<HTMLInputElement>("#airmap")!;
+heatmapInput.addEventListener("change", () => {
+  set({ heatmap: heatmapInput.checked });
+  if (heatmapInput.checked && airmapInput.checked) { airmapInput.checked = false; airView(false); }
+});
+airmapInput.addEventListener("change", () => {
+  airView(airmapInput.checked);
+  if (airmapInput.checked && heatmapInput.checked) { heatmapInput.checked = false; set({ heatmap: false }); }
+});
 
 // Heure : la teinte du ciel, réglage de la page seule (world.ts). Le cycle
 // avance d'un cran par seconde : un fondu plus fin recolorierait tout le bac
@@ -108,7 +118,7 @@ const SETTINGS = "sandbox-rabbit:reglages";
  */
 const SAVED = [
   brushInput, speedInput, windInput, ambientInput, sizeInput,
-  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, lightingInput, hourInput,
+  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, airmapInput, lightingInput, hourInput,
 ];
 const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";

@@ -77,7 +77,7 @@ src/client/
     pool.ts              fils auxiliaires du moteur (mémoire partagée, Atomics)   (pur)
     engine.ts            l'automate cellulaire (tableaux plats)
     materials.ts         MATERIALS, CATEGORIES, PALETTE, SHORTCUTS
-    render.ts            cellules → ImageData, vue thermique, vignettes
+    render.ts            bandes (Tracker), Renderer : matière, vue thermique, vue pression ; vignettes
     codec.ts             RLE + base64 url (format des mondes sauvegardés)
     libm.ts              sin, cos, atan, atan2, exp, log déterministes (copie de musl)   (pur)
 src/worker/
@@ -108,7 +108,7 @@ aucun test précis.
   test/sim.ts lit la source et le vérifie.
 - Déplacements via `tryMove()`, `y + this.gravity` et `drift()`. Exceptions :
   `MAGNET`, le lapin qui bouge ses neuf cellules d'un bloc (`relocate()`),
-  et le gaz que pousse la pression (`blown()`).
+  et le gaz ou la poudre que pousse la pression (`blown()`, `swept()`).
 - La pression de l'air n'entre que par `puff()` : une écriture directe dans
   `press` laisse un bloc endormi sous pression, ou la passe `breathe()` sautée.
 - Une règle transforme un voisin avec `become()`, pas `set()` (qui libère le

@@ -14,7 +14,7 @@
  * dépend de la taille s'inscrit dans `onResize`.
  */
 import type { Knobs, News, Order } from "./sim/sandbox.ts";
-import { HOURS, type Grid, type Tint } from "./sim/render.ts";
+import { AIR_LEVELS, HOURS, type Grid, type Tint } from "./sim/render.ts";
 import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
 import { watchErrors } from "./errors.ts";
@@ -73,6 +73,17 @@ export const set = (k: Partial<Knobs>): void => order({ t: "set", k });
 export function light(on: boolean): void {
   if (on === lit) return;
   lit = on;
+  repaint = true;
+}
+
+/**
+ * La vue pression : l'air coloré par sa pression (`shadeAir` de render.ts).
+ * Réglage de la page seule, comme l'éclairage ; elle passe devant la vue
+ * thermique si les deux sont cochées.
+ */
+export function airView(on: boolean): void {
+  if (on === airmap) return;
+  airmap = on;
   repaint = true;
 }
 
@@ -151,15 +162,16 @@ export function askClip(x: number, y: number, x2: number, y2: number): Promise<C
 
 /**
  * Le miroir de la grille, tenu à jour par les bandes reçues (`blit()`) :
- * matière, `life`, figé, grain et température au degré — ce que l'écran
- * colorie. Remplacé en entier quand la taille change.
+ * matière, `life`, figé, grain, température au degré et pression par palier
+ * — ce que l'écran colorie. Remplacé en entier quand la taille change.
  */
-let mirror: Grid & { temp: Int16Array } | null = null;
+let mirror: Grid & { temp: Int16Array; press: Float32Array } | null = null;
 /** Une frame est arrivée depuis le dernier `present()`. */
 let fresh = false;
 /** Tout recolorier au prochain `present()` : vue thermique basculée, ambiante changée. */
 let repaint = false;
 let heatmap = false;
+let airmap = false;
 let lit = true;
 let tint: Tint = HOURS["apres-midi"];
 /** Le rectangle changé depuis le dernier `present()`, en cellules, bords droit et bas exclus. */
@@ -180,18 +192,21 @@ function blit(frame: Extract<News, { t: "frame" }>): void {
     mirror = {
       width: w, height: h, ambient: frame.ambient,
       cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
-      noise: new Int8Array(n), temp: new Int16Array(n),
+      noise: new Int8Array(n), temp: new Int16Array(n), press: new Float32Array(n),
     };
   }
-  if (mirror.ambient !== frame.ambient) { mirror.ambient = frame.ambient; repaint = true; }
+  const m = mirror;
+  if (m.ambient !== frame.ambient) { m.ambient = frame.ambient; repaint = true; }
   for (const p of frame.patches) {
     for (let r = 0; r < p.h; r++) {
       const from = r * p.w, to = (p.y + r) * w + p.x;
-      mirror.cells.set(p.cells.subarray(from, from + p.w), to);
-      mirror.life.set(p.life.subarray(from, from + p.w), to);
-      mirror.frozen.set(p.frozen.subarray(from, from + p.w), to);
-      mirror.temp.set(p.temp.subarray(from, from + p.w), to);
-      if (p.noise) mirror.noise.set(p.noise.subarray(from, from + p.w), to);
+      m.cells.set(p.cells.subarray(from, from + p.w), to);
+      m.life.set(p.life.subarray(from, from + p.w), to);
+      m.frozen.set(p.frozen.subarray(from, from + p.w), to);
+      m.temp.set(p.temp.subarray(from, from + p.w), to);
+      // Palier ÷ 8 : exact en flottant, et `airLevel()` le rend tel quel.
+      for (let k = 0; k < p.w; k++) m.press[to + k] = p.press[from + k] / AIR_LEVELS;
+      if (p.noise) m.noise.set(p.noise.subarray(from, from + p.w), to);
     }
     left = Math.min(left, p.x);
     top = Math.min(top, p.y);
@@ -223,7 +238,7 @@ export function present(): boolean {
     repaint = true;
   }
   if (repaint) { left = 0; top = 0; right = mirror.width; bottom = mirror.height; }
-  screen.paint(mirror, left, top, right, bottom, heatmap, lit, tint);
+  screen.paint(mirror, left, top, right, bottom, airmap ? "air" : heatmap ? "heat" : "matter", lit, tint);
   fresh = false;
   repaint = false;
   left = Infinity; top = Infinity; right = 0; bottom = 0;

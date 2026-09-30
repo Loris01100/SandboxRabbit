@@ -2,8 +2,8 @@
  * L'écran du bac : colorie le miroir de la grille (world.ts) dans le canvas.
  *
  * Deux façons, une interface :
- * - **WebGL2** : la grille monte en textures entières (matière, `life`, figé,
- *   grain, température au degré), et un shader colorie chaque pixel. Le Worker
+ * - **WebGL2** : la grille monte en textures (matière, `life`, figé, grain,
+ *   température au degré, pression par palier), et un shader colorie chaque pixel. Le Worker
  *   ne colorie plus rien — 6 ms par tick de gagnés en 1920×1080 chargé — et la
  *   page ne fait qu'envoyer à la carte le rectangle changé ;
  * - **2D** : le secours d'un navigateur sans WebGL2, le même `Renderer` qu'en
@@ -12,7 +12,7 @@
  * WebGL2 ajoute l'éclairage global (voir `SCENE`) : quelques passes de plus,
  * sur tout le bac, à chaque frame qui arrive.
  *
- * Le shader est la **copie** de `Renderer.shade()` / `shadeHeat()` (render.ts),
+ * Le shader est la **copie** de `Renderer.shade()` / `shadeHeat()` / `shadeAir()` (render.ts),
  * mêmes constantes et mêmes arrondis : une règle d'aspect changée d'un côté
  * l'est de l'autre. `preserveDrawingBuffer` garde l'image entre deux frames —
  * le PNG et la vidéo (share.ts) la relisent par `drawImage(canvas)`.
@@ -21,7 +21,7 @@
  * noir jusqu'au rechargement. Écouter `webglcontextlost` / `restored` et tout
  * remonter le jour où ça se voit.
  */
-import { GLOW, GLOWING, Renderer, lighting, palette, type Grid, type Tint } from "./sim/render.ts";
+import { AIR_LEVELS, GLOW, GLOWING, Renderer, lighting, palette, type Grid, type Tint, type View } from "./sim/render.ts";
 
 export interface Screen {
   /** « webgl2 » ou « 2d » : ce qui colorie, pour le dire à qui le demande. */
@@ -30,9 +30,10 @@ export interface Screen {
    * Repose le rectangle (x0, y0)–(x1, y1) exclus de `grid` ; une autre grille
    * (nouvelle taille) repart d'une image entière. `lit` : éclairage global,
    * WebGL2 seulement — il recalcule tout le bac, quel que soit le rectangle.
-   * `tint` : l'heure de la journée (`HOURS` de render.ts).
+   * `tint` : l'heure de la journée (`HOURS` de render.ts). `view` : matière,
+   * vue thermique ou vue pression — les deux dernières sans éclairage.
    */
-  paint(grid: Grid, x0: number, y0: number, x1: number, y1: number, heatmap: boolean, lit: boolean, tint: Tint): void;
+  paint(grid: Grid, x0: number, y0: number, x1: number, y1: number, view: View, lit: boolean, tint: Tint): void;
 }
 
 /** L'écran du canvas : WebGL2 s'il le peut, sinon 2D. Un canvas n'a qu'un contexte : le choix est définitif. */
@@ -60,11 +61,12 @@ uniform highp usampler2D life;
 uniform highp usampler2D frozen;
 uniform highp isampler2D noise;
 uniform highp isampler2D temp;
+uniform highp sampler2D press;
 uniform highp usampler2D palette;
 uniform highp usampler2D table;
 uniform vec3 tint;
 uniform float ambient;
-uniform bool heatmap;
+uniform int view;
 uniform ivec4 glowing;
 uniform sampler2D light;
 uniform bool lighting;
@@ -76,7 +78,18 @@ void main() {
   ivec2 p = ivec2(int(gl_FragCoord.x), size.y - 1 - int(gl_FragCoord.y));
   float t = float(texelFetch(temp, p, 0).r);
   vec3 c;
-  if (heatmap) {
+  if (view == 2) {
+    int l = int(min(255.0, floor(texelFetch(press, p, 0).r * ${AIR_LEVELS.toFixed(1)} + 0.5)));
+    if (l == 0) {
+      ivec3 b = ivec3(texelFetch(palette, ivec2(int(texelFetch(cells, p, 0).r), 0), 0).rgb);
+      c = vec3((b * 77) >> 8);
+    } else {
+      c = vec3(clamp(3 * l - 510, 0, 255), clamp(3 * l - 255, 0, 255), 60 + min(195, (39 * l) / 17));
+    }
+    color = vec4(floor(c) / 255.0, 1.0);
+    return;
+  }
+  if (view == 1) {
     if (t < ambient) {
       float cold = clamp((ambient - t) / 60.0, 0.0, 1.0);
       c = vec3(20.0 * (1.0 - cold), 40.0 + 80.0 * cold, 60.0 + 195.0 * cold);
@@ -264,7 +277,7 @@ const LIGHT_WIDTH = 480;
 const CASCADES = 6;
 
 /** Les tableaux du miroir montés en textures, une unité de texture chacun dans cet ordre ; la palette et l'éclairage prennent les suivantes. */
-const LAYERS = ["cells", "life", "frozen", "noise", "temp"] as const;
+const LAYERS = ["cells", "life", "frozen", "noise", "temp", "press"] as const;
 
 /** Une cible de rendu de l'éclairage : sa texture, son framebuffer, sa taille. */
 interface Target { texture: WebGLTexture; fb: WebGLFramebuffer; w: number; h: number }
@@ -297,12 +310,14 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   gl.bindVertexArray(gl.createVertexArray());
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
-  const formats: Record<(typeof LAYERS)[number], [number, number]> = {
-    cells: [gl.R8UI, gl.UNSIGNED_BYTE],
-    life: [gl.R8UI, gl.UNSIGNED_BYTE],
-    frozen: [gl.R8UI, gl.UNSIGNED_BYTE],
-    noise: [gl.R8I, gl.BYTE],
-    temp: [gl.R16I, gl.SHORT],
+  /** Format interne, type et format des données de chaque couche. La pression, flottante, n'est lue qu'au texel près (`NEAREST`). */
+  const formats: Record<(typeof LAYERS)[number], [number, number, number]> = {
+    cells: [gl.R8UI, gl.UNSIGNED_BYTE, gl.RED_INTEGER],
+    life: [gl.R8UI, gl.UNSIGNED_BYTE, gl.RED_INTEGER],
+    frozen: [gl.R8UI, gl.UNSIGNED_BYTE, gl.RED_INTEGER],
+    noise: [gl.R8I, gl.BYTE, gl.RED_INTEGER],
+    temp: [gl.R16I, gl.SHORT, gl.RED_INTEGER],
+    press: [gl.R32F, gl.FLOAT, gl.RED],
   };
   /** Une texture liée à `unit`, filtrée `filter` (les textures entières exigent `NEAREST`). */
   const texture = (unit: number, filter: number = gl.NEAREST) => {
@@ -323,7 +338,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   gl.useProgram(program);
   gl.uniform4i(gl.getUniformLocation(program, "glowing"), ...GLOWING);
   const ambient = gl.getUniformLocation(program, "ambient");
-  const heatmap = gl.getUniformLocation(program, "heatmap");
+  const viewAt = gl.getUniformLocation(program, "view");
   const lightingOn = gl.getUniformLocation(program, "lighting");
   const drawScale = gl.getUniformLocation(program, "scale");
   const tintAt = gl.getUniformLocation(program, "tint");
@@ -410,7 +425,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   let w = 0, h = 0;
   return {
     kind: "webgl2",
-    paint(grid, x0, y0, x1, y1, heat, lit, tint) {
+    paint(grid, x0, y0, x1, y1, view, lit, tint) {
       if (grid.width !== w || grid.height !== h) {
         w = grid.width; h = grid.height;
         x0 = 0; y0 = 0; x1 = w; y1 = h;
@@ -429,17 +444,17 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
         LAYERS.forEach((name, unit) => {
           gl.activeTexture(gl.TEXTURE0 + unit);
           gl.bindTexture(gl.TEXTURE_2D, textures[unit]);
-          gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, x1 - x0, y1 - y0, gl.RED_INTEGER, formats[name][1], grid[name] as unknown as ArrayBufferView);
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, x1 - x0, y1 - y0, formats[name][2], formats[name][1], grid[name] as unknown as ArrayBufferView);
         });
         gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
         gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
         gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
       }
-      const on = lit && !heat;
+      const on = lit && view === "matter";
       if (on) illuminate();
       gl.useProgram(program);
       gl.uniform1f(ambient, grid.ambient);
-      gl.uniform1i(heatmap, heat ? 1 : 0);
+      gl.uniform1i(viewAt, view === "air" ? 2 : view === "heat" ? 1 : 0);
       gl.uniform1i(lightingOn, on ? 1 : 0);
       gl.uniform1i(drawScale, lights!.scale);
       gl.uniform3f(tintAt, ...tint);
@@ -457,7 +472,7 @@ function flatScreen(canvas: HTMLCanvasElement): Screen {
   let image: ImageData | null = null;
   return {
     kind: "2d",
-    paint(grid, x0, y0, x1, y1, heat, _lit, tint) {
+    paint(grid, x0, y0, x1, y1, view, _lit, tint) {
       if (grid !== of || !renderer || !image) {
         of = grid;
         renderer = new Renderer(grid);
@@ -465,7 +480,7 @@ function flatScreen(canvas: HTMLCanvasElement): Screen {
         x0 = 0; y0 = 0; x1 = grid.width; y1 = grid.height;
       }
       if (x1 <= x0 || y1 <= y0) return;
-      renderer.heatmap = heat;
+      renderer.view = view;
       renderer.tint = tint;
       renderer.paint(x0, y0, x1, y1);
       ctx.putImageData(image, 0, 0, x0, y0, x1 - x0, y1 - y0);

@@ -6,7 +6,7 @@ import { combo, keyOf, read, stored, write, type Action } from "./ui.ts";
 import { bound, held, openSettings } from "./keys.ts";
 import { MOVES, follow, panBy, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
 import { current, emit, select } from "./palette.ts";
-import { brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, toolInput } from "./settings.ts";
+import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, toolInput } from "./settings.ts";
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
@@ -79,7 +79,9 @@ addEventListener("keydown", (e) => {
       return;
     case "gravity": flipGravity(); return;
     case "freeze": toolInput.value = toolInput.value === "paint" ? "freeze" : "paint"; return;
-    case "heat": heatmapInput.checked = !heatmapInput.checked; set({ heatmap: heatmapInput.checked }); return;
+    // L'événement rejoué décoche l'autre vue, comme un clic.
+    case "heat": heatmapInput.checked = !heatmapInput.checked; heatmapInput.dispatchEvent(new Event("change")); return;
+    case "air": airmapInput.checked = !airmapInput.checked; airmapInput.dispatchEvent(new Event("change")); return;
     case "help": openSettings("settings-keys"); return;
     case "view": nextView(); return;
     case "nextHero": gesture({ t: "hero" }); return;

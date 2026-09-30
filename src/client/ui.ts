@@ -115,7 +115,7 @@ export function panAfterZoom(client: number, edge: number, size: number, pan: nu
  */
 export const ACTIONS = [
   "pause", "mat1", "mat2", "mat3", "mat4", "mat5", "mat6", "mat7", "mat8", "mat9", "eraser",
-  "brushDown", "brushUp", "gravity", "freeze", "heat", "undo", "redo", "paste", "zoomIn", "zoomOut", "help",
+  "brushDown", "brushUp", "gravity", "freeze", "heat", "air", "undo", "redo", "paste", "zoomIn", "zoomOut", "help",
   "step", "terrain", "surprise", "full", "clear", "retry", "save", "gallery",
   "left", "right", "up", "down", "dig", "place", "view", "nextHero",
 ] as const;
@@ -125,7 +125,7 @@ export type Bindings = Record<Action, string>;
 /** Les touches d'origine, pensées pour l'AZERTY. Une combinaison s'écrit « Ctrl+z ». */
 export const DEFAULT_BINDINGS: Bindings = {
   pause: " ", mat1: "1", mat2: "2", mat3: "3", mat4: "4", mat5: "5", mat6: "6", mat7: "7", mat8: "8", mat9: "9", eraser: "0",
-  brushDown: "[", brushUp: "]", gravity: "g", freeze: "f", heat: "h", undo: "Ctrl+z", redo: "Ctrl+y", paste: "Ctrl+v",
+  brushDown: "[", brushUp: "]", gravity: "g", freeze: "f", heat: "h", air: "b", undo: "Ctrl+z", redo: "Ctrl+y", paste: "Ctrl+v",
   zoomIn: "+", zoomOut: "-", help: "?",
   step: ".", terrain: "n", surprise: "u", full: "p", clear: "Ctrl+Delete", retry: "t", save: "Ctrl+s", gallery: "o",
   left: "q", right: "d", up: "z", down: "s", dig: "e", place: "r", view: "v", nextHero: "c",
@@ -221,7 +221,7 @@ export const KEY_GROUPS: { name: string; actions: Action[]; mouse: [string, stri
     ],
   },
   { name: "Simulation", actions: ["pause", "step", "terrain", "surprise", "full", "clear", "help"], mouse: [] },
-  { name: "Physique du monde", actions: ["gravity", "heat"], mouse: [] },
+  { name: "Physique du monde", actions: ["gravity", "heat", "air"], mouse: [] },
   { name: "Défis", actions: ["retry"], mouse: [] },
   { name: "Mondes", actions: ["save", "gallery"], mouse: [] },
   {
@@ -245,6 +245,7 @@ export const ACTION_NAMES: Record<Action, string> = {
   gravity: "Inverser la gravité",
   freeze: "Passer de Peindre à Figer",
   heat: "Vue thermique",
+  air: "Vue pression",
   undo: "Annuler",
   redo: "Rétablir (aussi Ctrl+Maj+Z)",
   paste: "Reposer le morceau copié, centré sur le curseur",

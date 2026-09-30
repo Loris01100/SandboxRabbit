@@ -112,12 +112,14 @@ quelques secondes sur le runner.
 | Fichier | Rôle |
 | --- | --- |
 | [test/browser.ts](../test/browser.ts) | le script : lance Vite et Chromium, lit le rapport, charge la page du jeu. `npm run browser` |
-| [test/screen.html](../test/screen.html), [test/screen.ts](../test/screen.ts) | la page de comparaison : une grille (monde généré + une bande de chaque matière, `life`, température et figé variés) peinte par le shader de screen.ts et par `Renderer`, aux quatre heures et en vue thermique. Ouvrable à la main : http://localhost:5173/test/screen.html sous `npm run dev` |
+| [test/screen.html](../test/screen.html), [test/screen.ts](../test/screen.ts) | la page de comparaison : une grille (monde généré + une bande de chaque matière, `life`, température et figé variés) peinte par le shader de screen.ts et par `Renderer`, aux quatre heures, en vue thermique et en vue pression (la pression d'un souffle, plus une rampe de tous les paliers). Ouvrable à la main : http://localhost:5173/test/screen.html sous `npm run dev` |
 
 Ce qui est vérifié :
 
 1. **shader WebGL2 = `Renderer`**, à une unité près, sur moins de 2 % des
-   pixels (la vue thermique est exacte). C'est la seule garde des deux copies
+   pixels (les vues thermique et pression sont exactes : la rampe de pression
+   est calculée en entiers des deux côtés — en flottants, le GPU arrondissait
+   autrement 2 % des paliers). C'est la seule garde des deux copies
    du coloriage (voir « Le coloriage existe en deux copies » dans
    [AGENTS.md](../AGENTS.md)). L'éclairage global (`lit`) n'existe que côté
    shader : il n'est pas comparé ;
