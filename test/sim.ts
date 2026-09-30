@@ -1604,9 +1604,10 @@ function top(e: Engine, id: MaterialId): number {
  * navigateurs : dans le moteur, un salon Chrome + Firefox divergerait ; dans
  * le générateur, une graine ne redonnerait plus le même monde. Aucun test de
  * comportement ne le verrait, tous tournent sous le même V8 : on lit donc la
- * source. `Math.sqrt`, correctement arrondie, reste permise.
+ * source. `Math.sqrt`, correctement arrondie, reste permise ; pour le reste,
+ * sim/libm.ts (sin, cos, atan, atan2, exp, log), qui est lue elle aussi.
  */
-for (const fichier of ["../src/client/sim/engine.ts", "../src/client/terrain.ts"]) {
+for (const fichier of ["../src/client/sim/engine.ts", "../src/client/terrain.ts", "../src/client/sim/libm.ts"]) {
   const source = readFileSync(new URL(fichier, import.meta.url), "utf8");
   const approchées = source.match(/Math\.(hypot|sin|cos|tan|asin|acos|atan2?|sinh|cosh|tanh|exp|expm1|log|log1p|log2|log10|pow|cbrt)\b/g);
   assert.equal(approchées, null, `${fichier} n'emploie aucune fonction Math approchée (${approchées?.join(", ")})`);

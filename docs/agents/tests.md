@@ -11,7 +11,7 @@
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
 | `npm run directions` | mesure de décision, pas un test : voir [Choisir une direction](#choisir-une-direction) |
-| `npm run rust` | compile [rust/](../../rust/) en WASM puis lance [test/rust.ts](../../test/rust.ts) : `thermal()` et la pression (`breathe()`) en JavaScript contre leurs versions Rust, temps et égalité au bit près. Demande Rust installé ([docs/rust.md](../rust.md)) ; hors CI |
+| `npm run rust` | compile [rust/](../../rust/) en WASM puis lance [test/rust.ts](../../test/rust.ts) : `thermal()` et la pression (`breathe()`) en JavaScript contre leurs versions Rust, temps et égalité au bit près ; sim/libm.ts contre la crate Rust `libm`, mêmes bits exigés. Demande Rust installé ([docs/rust.md](../rust.md)) ; hors CI |
 
 Il n'y a **pas de framework de test** ni de linter. Node ≥ 24 exécute le
 TypeScript directement.
@@ -19,6 +19,7 @@ TypeScript directement.
 | Script | Couvre | Charge |
 | --- | --- | --- |
 | [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), blocs de veille (dont la mer de lave qui doit s'endormir), pression et vent (un souffle chasse la fumée, la pierre n'en prend pas, elle retombe à zéro exactement et le bac se rendort, `wakeAll()` l'efface), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
+| [test/libm.ts](../../test/libm.ts) | les fonctions mathématiques déterministes : à au plus un ulp de `Math` sous V8 sur des centaines de milliers d'arguments (voisins des multiples de π/4 compris), un cas de référence de la crate `libm` au bit près, cas particuliers (±0, infinis, NaN, débordements) et la limite assumée de sin / cos. Leur **déterminisme** (mêmes bits que la crate) est vérifié par `npm run rust` | `sim/libm.ts` |
 | [test/ui.ts](../../test/ui.ts) | logique pure du panneau, touches réassignables ; ce que voit le héros ; rapports d'erreur (une fois chacun, cinq au plus, plafond) | `ui.ts`, `sight.ts`, `reporter()` d'`errors.ts` |
 | [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, vues sous débit, ménage (récents + plus vus), routage des messages du salon ; `/api/error` (ce qui est journalisé, `console.error` capturé ; vide, trop lourd, débit) | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
 | [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles ; salon en lockstep, dont les messages mal formés d'un pair (geste d'invité, `turn` et départ de l'hôte) | `Sandbox` avec un rappel `send` qui empile |
@@ -56,6 +57,9 @@ n'est pas dans la CI :
    Il porte aussi la pression (`breathe()` → `air()`, deux versions exactes),
    comparée sur une salve d'explosions au-dessus du chantier, en 1920×1080 et
    1917×1077 ; il échoue si la salve laisse trop peu de pression à comparer.
+   Enfin, sim/libm.ts contre la crate `libm` : un million d'arguments par
+   fonction (doubles tirés bit à bit, voisins des multiples de π/4), le
+   moindre bit d'écart le fait échouer.
    Résultats et marche à suivre dans [docs/rust.md](../rust.md).
 
 Les noyaux sont un **minorant** : le vrai moteur a cinquante matières, des
@@ -119,10 +123,11 @@ tirages**. Quand le changement est voulu :
 Si elle change alors qu'on n'a pas touché au moteur : c'est un bug, pas une
 empreinte à recopier.
 
-En fin de fichier, un test **lit la source** d'engine.ts et de terrain.ts et
-refuse toute fonction `Math` approchée (`hypot`, `sin`, `exp`…) : leur résultat
-peut différer d'un bit entre navigateurs, ce qu'aucun test de comportement ne
-voit sous un seul V8. Un commentaire qui cite `Math.hypot` le ferait échouer :
+En fin de fichier, un test **lit la source** d'engine.ts, de terrain.ts et de
+sim/libm.ts, et refuse toute fonction `Math` approchée (`hypot`, `sin`,
+`exp`…) : leur résultat peut différer d'un bit entre navigateurs, ce qu'aucun
+test de comportement ne voit sous un seul V8. Ce qu'il faut à la place est
+dans sim/libm.ts. Un commentaire qui cite `Math.hypot` le ferait échouer :
 écrire `hypot()`.
 
 Les tests à tirage sensible prennent une graine fixe (`new Engine(W, H, 1234)`)

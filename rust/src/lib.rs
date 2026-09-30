@@ -650,3 +650,33 @@ fn air_f64x2(a: &Air, src: &[f32], dst: &mut [f32], c: usize) -> bool {
     }
     loud
 }
+
+// ─── Fonctions mathématiques ──────────────────────────────────────────────
+//
+// La référence de src/client/sim/libm.ts : la crate `libm` (musl en pur
+// Rust), dont le TypeScript est la copie ligne à ligne. test/rust.ts lui
+// passe des millions d'arguments et exige les mêmes bits. Un futur moteur
+// Rust appellerait ces fonctions-là directement.
+
+/// Applique la fonction `op` à `n` arguments : 0 sin, 1 cos, 2 atan, 3 exp,
+/// 4 log, 5 atan2 (`ys[i]`, `xs[i]`). Résultats dans `out`.
+///
+/// # Safety
+/// `xs`, `ys` et `out` désignent chacun `n` f64 réservés par `reserve`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn math(op: u32, xs: *const f64, ys: *const f64, out: *mut f64, n: usize) {
+    let (xs, ys, out) = unsafe {
+        (core::slice::from_raw_parts(xs, n), core::slice::from_raw_parts(ys, n), core::slice::from_raw_parts_mut(out, n))
+    };
+    for i in 0..n {
+        let x = xs[i];
+        out[i] = match op {
+            0 => libm::sin(x),
+            1 => libm::cos(x),
+            2 => libm::atan(x),
+            3 => libm::exp(x),
+            4 => libm::log(x),
+            _ => libm::atan2(ys[i], x),
+        };
+    }
+}

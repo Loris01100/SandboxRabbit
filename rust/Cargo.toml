@@ -4,11 +4,17 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-# Une bibliothèque chargée par JavaScript, sans wasm-bindgen : aucune
-# dépendance, donc rien à compiler pour Windows (ni Visual Studio, ni MinGW).
+# Une bibliothèque chargée par JavaScript, sans wasm-bindgen. Une seule
+# dépendance, `libm` (musl en pur Rust, sans code C) : rien à compiler pour
+# Windows (ni Visual Studio, ni MinGW). Elle sert de référence aux fonctions
+# mathématiques de src/client/sim/libm.ts, qui doivent rendre ses bits.
 [lib]
 crate-type = ["cdylib"]
 path = "src/lib.rs"
+
+[dependencies]
+# Version exacte : une autre pourrait changer un algorithme, donc un bit.
+libm = { version = "=0.2.16", default-features = false }
 
 [profile.release]
 opt-level = 3

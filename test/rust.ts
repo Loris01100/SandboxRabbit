@@ -29,6 +29,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { Engine, OPEN } from "../src/client/sim/engine.ts";
+import { atan, atan2, cos, exp, log, sin } from "../src/client/sim/libm.ts";
 import {
   ALCOHOL, CEMENT, FIRE, ICE, LAVA, MATERIALS, MERCURY, NITROGEN, SALTWATER, SAND, SMOKE, SNOW, STONE, WATER, WAX, WOOD,
 } from "../src/client/sim/materials.ts";
@@ -397,4 +398,69 @@ ${name} (pression) — ${W}×${H}, ${(awake * 100).toFixed(0)} % des blocs évei
     console.log(`  ${label.padEnd(24)} ${ms(time[m])}   ×${(js / time[m]).toFixed(2)}   ${same ? "identique au bit près" : `${diff[m]} cases différentes`}`);
     assert.ok(same, `${label} doit rendre exactement la pression de JavaScript (${name} ${W}×${H})`);
   });
+}
+
+/*
+ * Les fonctions mathématiques déterministes (src/client/sim/libm.ts) contre la
+ * crate Rust `libm` dont elles sont la copie : les mêmes bits, argument par
+ * argument, NaN compris. Un million d'arguments par fonction, dont des doubles
+ * tirés bit à bit (tous les exposants, sous-normaux compris) et les voisins
+ * des multiples de π/4, là où la réduction d'argument change de branche.
+ */
+{
+  const N = 1 << 20;
+  const { instance } = await WebAssembly.instantiate(readFileSync(WASM));
+  const x = instance.exports as { memory: WebAssembly.Memory; reserve(bytes: number): number; math(...args: number[]): void };
+  const at = { xs: x.reserve(N * 8), ys: x.reserve(N * 8), out: x.reserve(N * 8) };
+  const b = x.memory.buffer;
+  const xs = new Float64Array(b, at.xs, N), ys = new Float64Array(b, at.ys, N), out = new Float64Array(b, at.out, N);
+
+  let s = 777;
+  const next = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s; };
+  const u = () => next() / 0x1_0000_0000;
+  const scratch = new Float64Array(1), words = new Uint32Array(scratch.buffer);
+  /** Un double quelconque, tiré bit à bit : NaN, infinis et sous-normaux compris. */
+  const anyDouble = () => { words[0] = next(); words[1] = next(); return scratch[0]; };
+  /** Voisin d'un multiple de π/4, jusqu'au 1 000ᵉ : la réduction y perd le plus de bits. */
+  const nearQuarter = () => {
+    const k = Math.floor(u() * 2000) - 1000, v = k * (Math.PI / 4);
+    return v + (Math.floor(u() * 64) - 32) * Number.EPSILON * Math.max(1, Math.abs(v));
+  };
+  /** Dans le domaine de sin et cos (au-delà, NaN assumé côté TypeScript). */
+  const trig = (): number => {
+    const r = u();
+    if (r < 0.3) return nearQuarter();
+    if (r < 0.6) return (u() * 2 - 1) * 10;
+    if (r < 0.8) return (u() * 2 - 1) * 1_647_000;
+    const v = anyDouble();
+    return Math.abs(v) < 1_647_000 || !Number.isFinite(v) ? v : v % 1_647_000; // `%` est exact
+  };
+  const wide = (range: number) => (): number => (u() < 0.5 ? anyDouble() : (u() * 2 - 1) * range);
+
+  const OPS: [string, number, (a: number, b: number) => number, () => number][] = [
+    ["sin", 0, (a) => sin(a), trig],
+    ["cos", 1, (a) => cos(a), trig],
+    ["atan", 2, (a) => atan(a), wide(10)],
+    ["exp", 3, (a) => exp(a), wide(750)],
+    ["log", 4, (a) => log(a), wide(1e6)],
+    ["atan2", 5, (a, c) => atan2(c, a), wide(100)],
+  ];
+  console.log(`\nfonctions mathématiques — ${N} arguments chacune, TypeScript contre la crate libm`);
+  for (const [name, op, ours, draw] of OPS) {
+    for (let i = 0; i < N; i++) { xs[i] = draw(); ys[i] = draw(); }
+    const t0 = performance.now();
+    x.math(op, at.xs, at.ys, at.out, N);
+    const rust = performance.now() - t0;
+    let differ = 0, first = "";
+    const t1 = performance.now();
+    for (let i = 0; i < N; i++) {
+      const r = ours(xs[i], ys[i]);
+      if (Object.is(r, out[i]) || (r !== r && out[i] !== out[i])) continue;
+      if (!differ) first = `${name}(${op === 5 ? `${ys[i]}, ` : ""}${xs[i]}) : ${r} contre ${out[i]}`;
+      differ++;
+    }
+    const js = performance.now() - t1;
+    console.log(`  ${name.padEnd(6)} TS ${ms(js).padStart(9)}   Rust ${ms(rust).padStart(9)}   ${differ ? `${differ} différences` : "identique au bit près"}`);
+    assert.equal(differ, 0, `libm.ts doit rendre les bits de la crate libm — premier écart : ${first}`);
+  }
 }

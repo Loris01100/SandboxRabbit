@@ -21,11 +21,11 @@ README, commentaires du code, messages d'`assert` et UI sont **en français**.
 npm install
 npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, D1 local (migrations : --local)
 npm run typecheck  # QUATRE projets tsc : client (DOM), Worker, tests (Node + DOM), test/api.ts (Node + Worker)
-npm run check      # asserts : test/sim.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts (Node exécute le TS)
+npm run check      # asserts : test/sim.ts, test/libm.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts (Node exécute le TS)
 npm run browser    # Chromium (Playwright) : shader WebGL2 = Renderer, page qui charge sans erreur (docs/navigateur.md)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
 npm run directions # mesure de décision : 1 cœur, N cœurs, projection (GPU : test/gpu.html sous npm run dev)
-npm run rust       # prototype Rust/WASM de thermal() et de la pression contre le moteur JS (demande Rust : docs/rust.md)
+npm run rust       # prototype Rust/WASM de thermal() et de la pression contre le moteur JS, libm.ts contre la crate libm (demande Rust : docs/rust.md)
 npm run build      # typecheck puis vite build
 npm run preview    # build puis wrangler dev sur le bundle
 npm run loc        # taille du projet par poste
@@ -79,6 +79,7 @@ src/client/
     materials.ts         MATERIALS, CATEGORIES, PALETTE, SHORTCUTS
     render.ts            cellules → ImageData, vue thermique, vignettes
     codec.ts             RLE + base64 url (format des mondes sauvegardés)
+    libm.ts              sin, cos, atan, atan2, exp, log déterministes (copie de musl)   (pur)
 src/worker/
   index.ts               entrée Cloudflare : fetch → app, cron, réexport de Room
   app.ts                 routes Hono /api/*, en-têtes, fallback ASSETS ; interface Env
@@ -86,7 +87,7 @@ src/worker/
   room.ts                Durable Object du salon (relaie, ne simule pas)
   relay.ts               qui a le droit de dire quoi dans un salon      (pur)
 migrations/              schéma D1, un fichier numéroté par changement
-rust/                    prototype : thermal() et la pression en Rust → WASM, mesurés par test/rust.ts (pas branchés sur le bac)
+rust/                    prototype : thermal() et la pression en Rust → WASM, et la crate libm, référence de libm.ts ; mesurés par test/rust.ts (pas branchés sur le bac)
 test/                    scripts d'assert (+ bench.ts, loc.ts) ; browser.ts + screen.html : tests dans Chromium
 ```
 
@@ -102,8 +103,9 @@ aucun test précis.
   tirage, semé par la graine — bâtir un monde ne doit pas décaler celui du bac.
 - Pas de fonction `Math` « approchée selon l'implémentation » (`hypot`, `sin`,
   `exp`, `pow`…) dans engine.ts ni terrain.ts : un bit d'écart entre
-  navigateurs fait diverger un salon. `Math.sqrt` est permise. test/sim.ts lit
-  la source et le vérifie.
+  navigateurs fait diverger un salon. `Math.sqrt` est permise ; `sin`, `cos`,
+  `atan`, `atan2`, `exp`, `log` viennent de `sim/libm.ts`, déterministes.
+  test/sim.ts lit la source et le vérifie.
 - Déplacements via `tryMove()`, `y + this.gravity` et `drift()`. Exceptions :
   `MAGNET`, le lapin qui bouge ses neuf cellules d'un bloc (`relocate()`),
   et le gaz que pousse la pression (`blown()`).

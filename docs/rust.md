@@ -50,8 +50,9 @@ fixe la version de Rust (1.98.1) et la cible `wasm32-unknown-unknown`. Au
 premier `cargo` lancé depuis `rust/`, rustup les télécharge. Tout le monde
 compile donc avec la même version, sans `rustup target add`.
 
-Pas de wasm-pack ni de wasm-bindgen : le module n'a aucune dépendance (voir
-plus bas), `cargo` suffit.
+Pas de wasm-pack ni de wasm-bindgen : `cargo` suffit. Une seule dépendance,
+la crate `libm` (musl en pur Rust, pas de code C à compiler), téléchargée par
+`cargo` au premier `npm run rust` — il faut donc le réseau cette fois-là.
 
 Pour vérifier : `cargo --version` dans un nouveau terminal.
 Pour tout désinstaller : `rustup self uninstall`.
@@ -113,15 +114,16 @@ test. Il ne tourne pas en CI, qui n'a pas Rust.
 | Fichier | Rôle |
 | --- | --- |
 | `rust-toolchain.toml` | version de Rust et cible WASM, installées d'office par rustup |
-| `Cargo.toml` | la bibliothèque `thermal`, compilée en `cdylib` (un `.wasm` chargeable), optimisée au maximum en `release` |
+| `Cargo.toml` | la bibliothèque `thermal`, compilée en `cdylib` (un `.wasm` chargeable), optimisée au maximum en `release` ; sa dépendance `libm`, en version exacte (`=0.2.16`) : une autre version pourrait changer un algorithme, donc un bit |
 | `.cargo/config.toml` | cible par défaut `wasm32-unknown-unknown`, SIMD 128 bits activé. Lu seulement quand `cargo` est lancé **depuis** `rust/` : `npm run rust` s'y place |
-| `src/lib.rs` | le code : `reserve()`, `thermal()` et `air()` (la pression) |
+| `src/lib.rs` | le code : `reserve()`, `thermal()`, `air()` (la pression) et `math()` (les fonctions de la crate `libm` sur un tableau d'arguments) |
 | `target/` | le résultat de la compilation (ignoré par git) : `target/wasm32-unknown-unknown/release/thermal.wasm`, 10 Ko |
 
 ## Comment JavaScript et Rust se parlent
 
-Le module est en `no_std` : sans bibliothèque standard, sans dépendance, sans
-wasm-bindgen. Il exporte deux fonctions et sa mémoire.
+Le module est en `no_std` : sans bibliothèque standard ni wasm-bindgen, avec
+la seule crate `libm`. Il exporte `reserve()`, les calculs (`thermal()`,
+`air()`, `math()`) et sa mémoire.
 
 1. JavaScript appelle `reserve(octets)` pour chaque tableau (cellules, `life`,
    les deux tampons de température, blocs de veille, tables des matières).
@@ -327,6 +329,39 @@ Ce qu'on en tire :
   toute la bordure de chaque bloc éveillé à chaque sous-pas. Un drapeau « sans
   pression » par bloc, tenu en double tampon comme `press`, la remplacerait
   par neuf lectures.
+
+### Les fonctions mathématiques (30 septembre 2026)
+
+L'idée de départ était : « en Rust, `libm` est du code pur, les mêmes bits
+partout ; on pourrait enfin écrire des règles avec de la trigonométrie ».
+En y regardant, **Rust n'est pas nécessaire au jeu** : une fonction écrite en
++ − × ÷ et en lectures de bits est aussi déterministe en JavaScript. D'où
+[src/client/sim/libm.ts](../src/client/sim/libm.ts), la copie ligne à ligne
+de `sin`, `cos`, `atan`, `atan2`, `exp` et `log` de la crate, que le moteur
+peut appeler dès aujourd'hui (voir
+[simulation.md](agents/simulation.md#reproductibilité)).
+
+Rust y sert de **juge** : une implémentation écrite ailleurs, par d'autres,
+du même algorithme. `math()` passe un million d'arguments par fonction à la
+crate, test/rust.ts les passe à libm.ts, et exige les mêmes bits :
+
+| Fonction | TypeScript (V8) | Rust (WASM) | Écart |
+| --- | --- | --- | --- |
+| sin | 50 à 54 ms | 25 ms | identique au bit près |
+| cos | 61 ms | 18 ms | identique au bit près |
+| atan | 34 ms | 12 ms | identique au bit près |
+| exp | 31 ms | 11 ms | identique au bit près |
+| log | 31 ms | 7 ms | identique au bit près |
+| atan2 | 40 ms | 15 ms | identique au bit près |
+
+Soit 30 à 60 ns par appel en TypeScript, deux à quatre fois plus vite en
+Rust. Pour comparaison, `sin` et `cos` de V8 ne rendent **pas** les bits de
+musl sur environ 1 % des arguments (un ulp d'écart ; `atan` et `exp`, si) :
+deux bibliothèques correctes, deux résultats. C'est tout le problème que
+libm.ts règle.
+
+Le jour où le moteur passe en Rust, ses règles appelleront la crate, et
+retomberont sur les bits qu'avaient les parties jouées en TypeScript.
 
 ## Brancher Rust sur le vrai moteur (pas fait)
 

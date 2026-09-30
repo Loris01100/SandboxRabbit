@@ -199,6 +199,20 @@ Invariants :
   employait `hypot`, et un salon mixte pouvait diverger à la première
   explosion. Les tests tournent tous sous V8 et ne le verraient pas — test/sim.ts
   lit donc la source.
+- **Besoin d'un angle, d'une onde, d'une décroissance ?**
+  [sim/libm.ts](../../src/client/sim/libm.ts) : `sin`, `cos`, `atan`,
+  `atan2(y, x)`, `exp`, `log`, écrites en + − × ÷ et lectures de bits, donc
+  les mêmes bits partout. C'est la copie ligne à ligne de musl, telle que la
+  porte la crate Rust `libm` (0.2.16) : `npm run rust` exige les mêmes bits
+  sur un million d'arguments par fonction, et un moteur Rust appellerait la
+  crate. Mesuré : `sin` et `cos` de V8 diffèrent de musl d'un ulp sur 1 % des
+  arguments — deux implémentations correctes, pas les mêmes bits. Limites :
+  pas de `pow` (`exp(y * log(x))` est déterministe aussi, à ~1e-13 près), et
+  `sin` / `cos` rendent NaN au-delà de |x| ≈ 1,6 million (`ponytail:` de
+  `remPio2`). Environ 30 à 60 ns par appel sous V8 : de quoi en semer dans
+  une règle, pas dans chaque cellule de chaque tick. libm.ts ne se retouche
+  qu'avec la crate : une constante ou un ordre d'opérations changé, et
+  `npm run rust` échoue.
 - Changer **l'ordre** des tirages d'une règle change l'empreinte, même à
   comportement visible identique. C'est voulu.
 - Rejouer en cours de partie exige les tableaux **plus** `seed`, `scan` et
