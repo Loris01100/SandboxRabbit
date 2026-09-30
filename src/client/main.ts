@@ -798,8 +798,21 @@ const speedValue = document.querySelector<HTMLOutputElement>("#speed-value")!;
 speedInput.addEventListener("input", () => {
   speed = Number(speedInput.value) / 4;
   set({ speed });
-  speedValue.value = `×${speed.toLocaleString("fr-FR")}`;
+  showSpeed(null);
 });
+
+/**
+ * La vitesse demandée, et celle atteinte quand le bac n'arrive plus à suivre :
+ * au-delà de 12 ms de simulation par frame, les ticks en retard sont
+ * abandonnés (sandbox.ts). Sans ça, un ×4 sur un bac noyé ne changeait rien,
+ * et rien ne disait pourquoi.
+ */
+function showSpeed(pace: number | null): void {
+  const wanted = `×${speed.toLocaleString("fr-FR")}`;
+  const behind = pace !== null && pace < speed * 0.9;
+  speedValue.value = behind ? `${wanted} → ×${pace.toLocaleString("fr-FR", { maximumFractionDigits: 1 })}` : wanted;
+  speedValue.title = behind ? "Le bac est trop chargé pour tenir la vitesse demandée : voici celle qu'il atteint" : "";
+}
 
 const windInput = document.querySelector<HTMLInputElement>("#wind")!;
 const windValue = document.querySelector<HTMLOutputElement>("#wind-value")!;
@@ -1270,6 +1283,7 @@ listen((news) => {
     }
     case "stats":
       filledEl.textContent = news.filled.toLocaleString("fr-FR");
+      showSpeed(news.pace);
       return;
     case "say":
       statusEl.textContent = news.text;

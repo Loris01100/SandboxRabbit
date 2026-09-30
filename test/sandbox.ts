@@ -45,6 +45,17 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.equal(area(frame), W * H, "la première frame couvre tout le bac");
 }
 
+// Les stats disent la vitesse atteinte : ×1 sur un petit bac, rien en pause.
+{
+  const { sim, news } = bac();
+  run(sim, 40);
+  const pace = last(news, "stats")!.pace!;
+  assert.ok(Math.abs(pace - 1) < 0.1, `un tick par 60e de seconde sur un petit bac (${pace})`);
+  sim.order({ t: "set", k: { running: false } });
+  run(sim, 80);
+  assert.equal(last(news, "stats")!.pace, null, "en pause, pas de vitesse à afficher");
+}
+
 /**
  * Les frames ne portent que les blocs changés : la page les recopie dans son
  * miroir (world.ts), qui doit rester, cellule pour cellule, la grille du

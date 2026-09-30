@@ -69,7 +69,9 @@ const BOLT = [0, 0, 1 / 300, 1 / 60];
  * Météo : quelques gouttes par tick sur la ligne d'où vient la matière (donc en
  * bas si la gravité est inversée). L'ambiante décide de leur nature — c'est ce
  * qui donne enfin à voir le curseur de température. `level` : 0 sec, 1 pluie,
- * 2 orage, 3 gros orage — autant de fois plus de gouttes, et des éclairs.
+ * 2 orage, 3 gros orage. L'orage ne pleut pas plus fort, il ajoute des
+ * éclairs : trois fois plus de gouttes noyaient le bac en une minute, et l'eau
+ * qui s'étale coûtait jusqu'à 12 ms le tick en 640×360 — la vitesse ne tenait plus.
  *
  * Le tirage passe par `engine.rand()`, pas par `Math.random()` : la pluie fait
  * partie de la partie, un rejeu doit la retrouver goutte pour goutte. La simple
@@ -79,7 +81,7 @@ export function weather(engine: Engine, level: number): void {
   if (!(level > 0)) return;
   const id = engine.ambient <= 0 ? SNOW : WATER;
   const y = engine.gravity === 1 ? 0 : engine.height - 1;
-  for (let n = Math.max(2, (engine.width / 160) | 0) * level; n > 0; n--) {
+  for (let n = Math.max(2, (engine.width / 160) | 0); n > 0; n--) {
     engine.set(Math.floor(engine.rand() * engine.width), y, id);
   }
   if (level > 1 && engine.rand() < BOLT[level]) bolt(engine, Math.floor(engine.rand() * engine.width), y);
