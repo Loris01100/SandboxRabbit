@@ -1,7 +1,7 @@
 import {
   ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FALLOUT, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
-  FILINGS, HERO, HERO_BODY, HERO_HARM, HERO_HEAD, HERO_LEGS, HERO_SLOTS, MAGNET, MINE, NANITE, NITRO, PILOT, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL,
-  RUST, SALT, SALTWATER, SAND, SEED, SMOKE, SODIUM, SOURCE, SPARK, STEAM, STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
+  BAG, FILINGS, HERO, HERO_BODY, HERO_HARM, HERO_HEAD, HERO_LEGS, HERO_SLOTS, MAGNET, MINE, NANITE, NITRO, PILOT, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL,
+  RUST, SALT, SALTWATER, SAND, SEED, SMOKE, SODIUM, SOURCE, SPARK, STEAM, STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, placeable, type MaterialId,
 } from "./materials.ts";
 
 /**
@@ -24,12 +24,12 @@ const COOLING = 0.02;
  * poussait la fumée qu'à quatre cellules de son bord, trop lent pour se voir.
  */
 const AIR_STEPS = 3;
-/** Part de l'écart avec les voisines échangée par sous-pas (au-delà de 0,25 le calcul s'emballe). */
-const FLOW = 0.2;
 /** Ce qui reste de la pression après un sous-pas : elle retombe en une seconde environ. */
 const DAMP = 0.98;
 /** Sous ce seuil, partout dans un bloc, sa pression est remise à zéro et il peut s'endormir. */
 const CALM_P = 0.02;
+/** Élan sous lequel l'air d'un bloc est au calme, comme `CALM_P` pour la pression. */
+const CALM_V = 0.005;
 /**
  * Portée de l'onde d'un souffle, en rayons, et sa pente : la pression vaut
  * `BLOW` par cellule qui reste jusqu'au bord de l'onde, donc un gradient
@@ -46,6 +46,15 @@ const CONFINED = 6;
 const STEAM_PUFF = 6;
 /** Pression plafond d'une cellule : des souffles en chaîne ne la font pas grimper sans fin. */
 const MAX_P = 200;
+/**
+ * Raideur de l'air : ce qu'une différence de pression entre deux cellules
+ * donne d'élan, par sous-pas, à l'air de la face qui les sépare (`windChunk`).
+ * Sous 0,5 le schéma reste stable (une onde ne gagne pas d'énergie d'un
+ * sous-pas à l'autre) ; à 0,25 l'onde avance d'une demi-cellule par sous-pas.
+ */
+const WIND_K = 0.25;
+/** Ce que l'air garde de son élan à chaque sous-pas : la traînée. Un courant meurt en quelques dixièmes de seconde. */
+const DRAG = 0.97;
 /** Chance, par tick et par unité de gradient, qu'un gaz soit poussé par le vent. */
 const GUST = 1.5;
 /** Gradient sous lequel un gaz ne sent pas le vent (et ne tire rien au sort). */
@@ -84,6 +93,9 @@ const SPLASH = 4;
  */
 const RUST_FRESH = 1 / 2400;
 const RUST_SALT = 1 / 480;
+/** Humidité d'une rouille au contact de l'eau (`life`), et ce qu'elle perd d'une cellule à la suivante. */
+const WET = 250;
+const SEEP = 25;
 /** Rayon du souffle nucléaire. */
 const NUKE = 16;
 /** Portée de l'aimant, en cellules. */
@@ -100,10 +112,11 @@ const PULL_SPAN = Array.from({ length: 2 * PULL + 1 }, (_, k) => Math.floor(Math
  *     ░ █ ◆ █      queue, dos, cœur, museau
  *     █ . █ .      pattes
  *
- * Tourné vers la gauche, on inverse les `dx`. Le cœur d'abord.
- * ponytail: la forme ne suit pas la gravité — retournée, le lapin tombe vers le
- * plafond en gardant les oreilles en haut, et y marche sur la tête. À revoir si
- * la gravité inversée devient autre chose qu'un gag.
+ * Tourné vers la gauche, on inverse les `dx`. Le cœur d'abord. La gravité
+ * inversée inverse les `dy` (`tall()`) : le lapin a les pattes au plafond et
+ * les oreilles vers le bas, et `gravity` retourne d'un coup ceux qui sont
+ * déjà là (`turnRabbits()`). Sans ça il tombait vers le plafond oreilles en
+ * haut, et y marchait sur la tête.
  */
 const RABBIT_DX = new Int8Array([0, 0, 0, 1, -2, -1, 1, -2, 0]);
 const RABBIT_DY = new Int8Array([0, -2, -1, -1, 0, 0, 0, 1, 1]);
@@ -303,6 +316,10 @@ for (let id = 0; id < 256; id++) if ((KIND[id] === KINDS.powder || KIND[id] === 
 const PART_SHIFT = 5;
 const PART = 1 << PART_SHIFT;
 
+/** 1 = matière que le héros peut porter dans son sac et poser (`placeable` de materials.ts). */
+const PLACEABLE = new Uint8Array(256);
+for (let id = 0; id < 256; id++) PLACEABLE[id] = placeable(id) ? 1 : 0;
+
 /**
  * Le souffle de chaque explosif, lu par `settle()` au moment de le jouer :
  * rayon, + 256 avec les retombées (`nuke()`). Il dépend de la matière, pas de
@@ -321,7 +338,7 @@ const EXPLOSIVE = new Uint8Array(256);
 for (let id = 0; id < 256; id++) EXPLOSIVE[id] = BLAST[id] > 0 ? 1 : 0;
 
 /** Les travaux que `run()` répartit entre les fils, exécutés par `job()`. */
-export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, air: 5, gust: 6, hush: 7, stop: 9 } as const;
+export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, air: 5, gust: 6, hush: 7, wind: 8, stop: 9 } as const;
 /** Cases de `control` (Int32 partagé) : génération, travail, prochain, finis, nombre, différés, héros, de la pression quelque part. */
 export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6, held: 7, gust: 8 } as const;
 /** Cases de `params` (Float64 partagé) : ce qu'un fil auxiliaire recopie avant chaque travail (`sync`). */
@@ -336,7 +353,7 @@ const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pi
 export interface Memory {
   width: number;
   height: number;
-  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "pressA" | "pressB" | "hush" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "asked" | "held" | "waiting" | "jobs" | "control" | "params", ArrayBufferLike>;
+  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "pressA" | "pressB" | "windX" | "windY" | "hush" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "asked" | "held" | "waiting" | "jobs" | "control" | "params", ArrayBufferLike>;
 }
 
 /** Le constructeur de tampon à employer : partagé si la plateforme le permet (Node, page isolée). */
@@ -465,6 +482,15 @@ export class Engine {
    */
   press: Float32Array;
   private pressNext: Float32Array;
+  /**
+   * L'élan de l'air, sur les faces entre cellules : `windX[i]` entre i et sa
+   * voisine de droite, `windY[i]` entre i et celle du dessous (positif : vers
+   * la droite, vers le bas). Il fait voyager l'onde au lieu de l'étaler, et
+   * c'est lui que suit le vent sur les gaz (`blown()`). Nul hors de l'air et
+   * dans un bloc endormi, comme la pression.
+   */
+  readonly windX: Float32Array;
+  readonly windY: Float32Array;
   private readonly pressA: Float32Array;
   private readonly pressB: Float32Array;
   /** 1 = bloc de veille dont la pression vient d'être remise à zéro (`airChunk`) : `hushChunk` vide aussi l'autre tampon. */
@@ -496,6 +522,9 @@ export class Engine {
    * résultat.
    */
   pool: { run(engine: Engine, kind: number, count: number): void } | null = null;
+  /** Le sac du héros en cours de tour (`updateHero`, `stash()`, `put()`) ; propre à chaque fil, rangé dans son corps à la fin du tour. */
+  private bagId: MaterialId = EMPTY;
+  private bagN = 0;
   /** Blocs de veille éveillés au dernier tick : 0 = bac au repos. */
   busy = 0;
   /**
@@ -589,6 +618,7 @@ export class Engine {
     const b = memory?.buffers ?? {
       cells: new Shareable(n), life: new Shareable(n), tempA: new Shareable(n * 4), tempB: new Shareable(n * 4),
       pressA: new Shareable(n * 4), pressB: new Shareable(n * 4), hush: new Shareable(chunks),
+      windX: new Shareable(n * 4), windY: new Shareable(n * 4),
       clock: new Shareable(n), frozen: new Shareable(n), noise: new Shareable(n),
       awake: new Shareable(chunks), stir: new Shareable(chunks),
       // Une demande d'explosion par cellule au plus (`blast()`) : la file tient toujours.
@@ -608,6 +638,8 @@ export class Engine {
     this.pressB = new Float32Array(b.pressB);
     this.press = this.pressA;
     this.pressNext = this.pressB;
+    this.windX = new Float32Array(b.windX);
+    this.windY = new Float32Array(b.windY);
     this.hush = new Uint8Array(b.hush);
     this.clock = new Uint8Array(b.clock);
     this.frozen = new Uint8Array(b.frozen);
@@ -646,8 +678,46 @@ export class Engine {
 
   set gravity(value: 1 | -1) {
     if (value === this.fall) return;
+    this.turnRabbits(value);
     this.fall = value;
     this.wakeAll();
+  }
+
+  /** Le sens vertical d'une forme : le lapin se retourne avec la gravité, le héros reste debout (la page lit sa fiche à des places fixes). */
+  private tall(shape: Shape): number {
+    return shape === RABBIT_SHAPE ? this.fall : 1;
+  }
+
+  /**
+   * La gravité s'inverse : chaque lapin se retourne **dans sa boîte** (ses
+   * quatre rangées), pattes vers le nouveau sol — le cœur se décale d'une
+   * rangée. Autour du cœur, les oreilles d'un lapin posé partaient dans le
+   * sol et il mourait écrasé. Fait entre deux ticks, sur ce fil, avant de
+   * changer `fall` (l'ancienne forme se lit encore). Une case de la boîte prise
+   * par autre chose (du sable dans un coin) laisse le corps incomplet : le
+   * lapin en meurt au tick suivant, comme sous un souffle.
+   */
+  private turnRabbits(next: 1 | -1): void {
+    const { cells, life, width: w } = this;
+    const { dx, dy, id } = RABBIT_SHAPE;
+    const old = this.fall;
+    const hearts: number[] = [];
+    for (let i = 0; i < cells.length; i++) if (cells[i] === RABBIT) hearts.push(i);
+    for (const i of hearts) {
+      const x = i % w, y = (i / w) | 0, ny = y - old;
+      const f = this.intact(RABBIT_SHAPE, x, y, 1) >= this.intact(RABBIT_SHAPE, x, y, -1) ? 1 : -1;
+      const fed = life[i];
+      for (let k = 0; k < id.length; k++) {
+        const px = x + f * dx[k], py = y + old * dy[k];
+        if (this.get(px, py) === id[k]) { cells[py * w + px] = EMPTY; life[py * w + px] = 0; }
+      }
+      for (let k = 0; k < id.length; k++) {
+        const px = x + f * dx[k], py = ny + next * dy[k];
+        if (!this.inBounds(px, py) || cells[py * w + px] !== EMPTY) continue;
+        cells[py * w + px] = id[k];
+        if (k === 0) life[py * w + px] = fed; // la satiété suit le cœur
+      }
+    }
   }
 
   /** Température de l'air au repos : tout y retourne (climat de la scène). La changer réveille tout le bac. */
@@ -680,6 +750,8 @@ export class Engine {
     // salon : elle repart de zéro des deux côtés. Elle ne vit qu'une seconde.
     this.pressA.fill(0);
     this.pressB.fill(0);
+    this.windX.fill(0);
+    this.windY.fill(0);
     Atomics.store(this.control, CTL.gust, 0);
   }
 
@@ -996,6 +1068,8 @@ export class Engine {
   }
 
   private swap(a: number, b: number): void {
+    // Une cellule différée qu'on pousse ne rejouera pas à sa place d'avant (`release()`).
+    this.held[b] = 0;
     const c = this.cells[a]; this.cells[a] = this.cells[b]; this.cells[b] = c;
     const l = this.life[a]; this.life[a] = this.life[b]; this.life[b] = l;
     const t = this.temp[a]; this.temp[a] = this.temp[b]; this.temp[b] = t;
@@ -1128,6 +1202,7 @@ export class Engine {
       case JOB.heat: this.heatChunk(item); return;
       case JOB.diffuse: this.diffuseChunk(item); return;
       case JOB.settle: this.settleChunk(item); return;
+      case JOB.wind: this.windChunk(item); return;
       case JOB.air: this.airChunk(item, false); return;
       case JOB.gust: this.airChunk(item, true); return;
       case JOB.hush: this.hushChunk(item); return;
@@ -1235,10 +1310,11 @@ export class Engine {
    * balayage (celles du bas d'abord) : ce qui ne dépend ni du nombre de fils
    * ni de l'ordre où ils les ont posées.
    *
-   * ponytail: une cellule différée qu'une règle voisine a échangée entre-temps
-   * (un liquide plus dense qui passe dessous) est jouée à sa nouvelle place
-   * par ce qui l'a remplacée, qui a déjà bougé à ce tick : un pas de trop,
-   * rare. Suivre `held` dans `swap()` le jour où ça se voit.
+   * Une place dont `held` a été effacé est sautée : `swap()` a déplacé la
+   * cellule différée entre-temps (un liquide plus dense passé dessous), et sa
+   * place porte maintenant ce qui l'a remplacée — qui faisait sinon un pas de
+   * trop. La cellule différée, elle, a été bougée comme toute cellule qu'on
+   * pousse : elle attend le tick suivant.
    */
   private release(): void {
     const count = Atomics.load(this.control, CTL.held);
@@ -1254,6 +1330,7 @@ export class Engine {
     for (let k = 0; k < count; k++) {
       const ry = (order[k] / w) | 0, rx = order[k] - ry * w;
       const x = leftToRight ? rx : w - 1 - rx, y = down ? h - 1 - ry : ry, i = y * w + x;
+      if (!held[i]) continue; // déplacée par `swap()` : voir plus haut
       held[i] = 0;
       if (cells[i] !== EMPTY && !frozen[i]) this.update(i, x, y, cells[i]);
     }
@@ -1343,6 +1420,7 @@ export class Engine {
       case HERO: this.updateHero(i, x, y); return;
       case HERO_HEAD: case HERO_BODY: case HERO_LEGS: this.updatePart(HERO_SHAPE, x, y, id); return;
       case METAL: this.updateMetal(i, x, y); return;
+      case RUST: this.updateRust(i, x, y); return;
       case GLASS: if (this.gusty) this.shatter(i, x, y); return;
     }
     switch (KIND[id]) {
@@ -1413,13 +1491,11 @@ export class Engine {
    * n'est lu ni tiré : les gaz montent comme avant, aux mêmes tirages.
    */
   private blown(i: number, x: number, y: number, id: MaterialId): boolean {
-    const { press: p, cells, width: w } = this;
-    const v = p[i];
-    const up = y > 0 && OPEN[cells[i - w]] ? p[i - w] : v;
-    const down = y < this.height - 1 && OPEN[cells[i + w]] ? p[i + w] : v;
-    const left = x > 0 && OPEN[cells[i - 1]] ? p[i - 1] : v;
-    const right = x < w - 1 && OPEN[cells[i + 1]] ? p[i + 1] : v;
-    const gx = left - right, gy = up - down;
+    const { windX: vx, windY: vy, width: w } = this;
+    // L'élan de l'air à la cellule (moyenne de ses faces), ramené à l'échelle
+    // d'un gradient (÷ `WIND_K`) : les seuils sont ceux d'avant l'élan.
+    const gx = ((x > 0 ? vx[i - 1] : 0) + vx[i]) / (2 * WIND_K);
+    const gy = ((y > 0 ? vy[i - w] : 0) + vy[i]) / (2 * WIND_K);
     const g2 = gx * gx + gy * gy;
     if (g2 < GUST_MIN * GUST_MIN) return false;
     if (this.rand() >= Math.sqrt(g2) * GUST) return false;
@@ -1934,25 +2010,58 @@ export class Engine {
 
   /**
    * Métal : sort de sa période de repos (`life`, voir `RECOVERY`), et rouille
-   * s'il trempe. Le tirage n'a lieu que contre l'eau : un fil sec ne tire rien,
+   * s'il trempe — ou s'il touche une rouille humide (`updateRust()`), au
+   * prorata de son humidité : l'eau s'infiltre par la rouille, et une poutre
+   * trempée finit rongée de part en part, pas seulement en surface. Le tirage
+   * n'a lieu que contre l'eau ou la rouille humide : un fil sec ne tire rien,
    * et les parties sans métal mouillé gardent leur suite de tirages. Mouillé,
    * il tient son bloc éveillé — sinon un fil au fond d'un lac étale s'endort
    * et ne rouille jamais. La rouille ne conduit pas : un circuit qui trempe
    * finit coupé.
-   *
-   * ponytail: seule la surface mouillée rouille ; le métal dessous, au contact
-   * de la rouille et pas de l'eau, reste sain. Une barre épaisse est donc
-   * protégée par sa propre rouille, à l'inverse du vrai fer. À revoir si
-   * quelqu'un veut voir une poutre ronger de part en part.
    */
   private updateMetal(i: number, x: number, y: number): void {
     if (this.life[i] > 0) this.life[i]--;
+    let damp = 0;
     for (let k = 0; k < 4; k++) {
-      const n = this.get(x + NX[k], y + NY[k]);
-      if (n !== WATER && n !== SALTWATER) continue;
-      this.wake(i);
-      if (this.rand() < (n === SALTWATER ? RUST_SALT : RUST_FRESH)) this.become(x, y, RUST);
-      return;
+      const nx = x + NX[k], ny = y + NY[k];
+      if (!this.inBounds(nx, ny)) continue;
+      const j = ny * this.width + nx, n = this.cells[j];
+      if (n === WATER || n === SALTWATER) {
+        this.wake(i);
+        if (this.rand() < (n === SALTWATER ? RUST_SALT : RUST_FRESH)) this.become(x, y, RUST);
+        return;
+      }
+      if (n === RUST && this.life[j] > damp) damp = this.life[j];
+    }
+    if (damp === 0) return;
+    this.wake(i);
+    if (this.rand() < (RUST_FRESH * damp) / WET) this.become(x, y, RUST);
+  }
+
+  /**
+   * Rouille : `life` est son humidité. Au contact de l'eau, `WET` ; sinon celle
+   * de sa voisine la plus humide moins `SEEP`, et elle sèche d'un cran par tick.
+   * L'eau passe ainsi de proche en proche dans une barre rouillée (dix cellules
+   * au plus loin du bord), et le métal qu'elle touche rouille à son tour. Humide,
+   * elle tient éveillés son bloc et le métal voisin : c'est elle qui agit.
+   */
+  private updateRust(i: number, x: number, y: number): void {
+    const { cells, life, width } = this;
+    let wet = 0;
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
+      if (!this.inBounds(nx, ny)) continue;
+      const j = ny * width + nx, n = cells[j];
+      if (n === WATER || n === SALTWATER) { wet = WET; break; }
+      if (n === RUST && life[j] > SEEP && life[j] - SEEP > wet) wet = life[j] - SEEP;
+    }
+    const next = Math.max(wet, life[i] > 0 ? life[i] - 1 : 0);
+    life[i] = next;
+    if (next === 0) return;
+    this.wake(i);
+    for (let k = 0; k < 4; k++) {
+      const nx = x + NX[k], ny = y + NY[k];
+      if (this.inBounds(nx, ny) && cells[ny * width + nx] === METAL) this.wake(ny * width + nx);
     }
   }
 
@@ -2179,22 +2288,22 @@ export class Engine {
   }
 
   /**
-   * La pression de l'air, après la chaleur : `AIR_STEPS` sous-pas de
-   * diffusion entre cellules d'air sur les blocs éveillés, chacun une passe
-   * répartie entre les fils (lecture de `press`, écriture de `pressNext`,
-   * échange). Au dernier, un bloc dont toute la pression est sous `CALM_P`
-   * la remet à zéro (`hush`) et peut s'endormir ; les autres se tiennent
-   * éveillés. Le gradient qui en sort pousse les gaz (`blown`).
+   * La pression de l'air, après la chaleur : `AIR_STEPS` sous-pas sur les
+   * blocs éveillés, chacun en deux passes réparties entre les fils — l'élan
+   * des faces (`windChunk`, poussé par les écarts de pression, freiné par
+   * `DRAG`), puis la pression de chaque cellule selon ce que ses faces
+   * apportent ou emportent (`airChunk`, lecture de `press`, écriture de
+   * `pressNext`, échange). L'air a donc de l'inertie : une onde voyage au lieu
+   * de s'étaler, et un courant continue de pousser les gaz (`blown`) après que
+   * la pression est retombée. Au dernier sous-pas, un bloc calme — pression
+   * sous `CALM_P`, élan sous `CALM_V` — est remis à zéro (`hush`, l'élan par
+   * `hushChunk`) et peut s'endormir ; un bloc agité se tient éveillé et
+   * réveille ses quatre voisins, où l'onde entre au tick suivant.
    *
    * Tant que rien n'a soufflé (`CTL.gust` à 0), la passe est sautée : un bac
-   * sans explosion ne paie rien. Un bloc endormi a une pression nulle dans
-   * les deux tampons — il ne s'endort qu'une fois remis à zéro, et `puff()`
-   * le réveille —, ses voisins peuvent donc le lire sans `pulled()`.
-   *
-   * ponytail: une diffusion amortie, pas un vrai fluide (ni vitesse ni
-   * inertie) : l'onde s'étale au lieu de voyager, et ce qui sort d'un bloc
-   * éveillé vers un bloc endormi est perdu pour le tick. À revoir si l'on veut
-   * des ventilateurs ou des courants d'air qui durent.
+   * sans explosion ne paie rien. Un bloc endormi a pression et élan nuls —
+   * il ne s'endort qu'une fois remis à zéro, et `puff()` le réveille —, ses
+   * voisins peuvent donc le lire sans `pulled()`.
    */
   private breathe(): void {
     if (Atomics.load(this.control, CTL.gust) === 0) return;
@@ -2203,6 +2312,8 @@ export class Engine {
     let count = 0;
     for (let c = 0; c < awake.length; c++) if (awake[c]) jobs[count++] = c;
     for (let s = 0; s < AIR_STEPS; s++) {
+      this.publish();
+      this.run(JOB.wind, count);
       this.publish();
       this.run(s === AIR_STEPS - 1 ? JOB.gust : JOB.air, count);
       const press = this.press;
@@ -2214,14 +2325,44 @@ export class Engine {
   }
 
   /**
-   * Un sous-pas de pression sur le bloc `c`. Une cellule qui n'est pas de
-   * l'air vaut 0 ; une voisine qui n'en est pas (ou le bord) compte pour la
-   * cellule elle-même : rien ne passe à travers un mur. `last` : le bloc
-   * décide s'il se calme. Calcul en 64 bits rangé en 32, comme la chaleur :
-   * le même au bit près partout, et dans le port Rust (rust/src/lib.rs).
+   * Un sous-pas d'élan sur le bloc `c` : chaque face qu'il tient (à droite et
+   * en dessous de ses cellules) prend `WIND_K` fois la différence de pression
+   * de part et d'autre, puis perd sa traînée (`DRAG`). Une face qui touche
+   * autre chose que de l'air (ou le bord) reste immobile : rien ne passe à
+   * travers un mur. Chaque bloc n'écrit que ses faces et ne lit que la
+   * pression, que personne n'écrit pendant cette passe : sans risque en
+   * multi-fils. En 64 bits rangé en 32, comme la pression.
+   */
+  private windChunk(c: number): void {
+    const { width: w, height: h, cells, press: p, windX: vx, windY: vy } = this;
+    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
+    // Pression nulle autour et élan nul ici : il le reste. Pas l'élan de la
+    // bordure, que les blocs voisins écrivent pendant cette même passe — le
+    // lire rendait le résultat dépendant du nombre de fils (test/pool.ts).
+    if (this.still(x0, y0, x1, y1)) return;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = y * w + x;
+        if (!OPEN[cells[i]]) { vx[i] = 0; vy[i] = 0; continue; }
+        vx[i] = x < w - 1 && OPEN[cells[i + 1]] ? (vx[i] + WIND_K * (p[i] - p[i + 1])) * DRAG : 0;
+        vy[i] = y < h - 1 && OPEN[cells[i + w]] ? (vy[i] + WIND_K * (p[i] - p[i + w])) * DRAG : 0;
+      }
+    }
+  }
+
+  /**
+   * Un sous-pas de pression sur le bloc `c` : ce que les quatre faces de la
+   * cellule apportent ou emportent (`windChunk`), puis l'amortissement
+   * (`DAMP`). Jamais sous zéro — une dépression n'a pas de sens ici, et
+   * `hushed()` compte sur l'absence de -0. Une cellule qui n'est pas de l'air
+   * vaut 0. `last` : le bloc décide s'il se calme ; agité, il réveille aussi
+   * ses quatre voisins, pour que l'onde y entre au tick suivant au lieu de
+   * buter sur un bloc endormi. Calcul en 64 bits rangé en 32, comme la chaleur
+   * : le même au bit près partout, et dans le port Rust (rust/src/lib.rs).
    */
   private airChunk(c: number, last: boolean): void {
-    const { width: w, height: h, cells, press: p, pressNext: q } = this;
+    const { width: w, height: h, cells, press: p, pressNext: q, windX: vx, windY: vy } = this;
     const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
     if (this.hushed(x0, y0, x1, y1)) {
@@ -2234,25 +2375,42 @@ export class Engine {
       for (let x = x0; x < x1; x++) {
         const i = y * w + x;
         if (!OPEN[cells[i]]) { q[i] = 0; continue; }
-        const v = p[i];
-        const up = y > 0 && OPEN[cells[i - w]] ? p[i - w] : v;
-        const down = y < h - 1 && OPEN[cells[i + w]] ? p[i + w] : v;
-        const left = x > 0 && OPEN[cells[i - 1]] ? p[i - 1] : v;
-        const right = x < w - 1 && OPEN[cells[i + 1]] ? p[i + 1] : v;
-        const next = (v + FLOW * (up + down + left + right - 4 * v)) * DAMP;
-        q[i] = next;
-        if (next >= CALM_P) loud = true;
+        const inX = x > 0 ? vx[i - 1] : 0, inY = y > 0 ? vy[i - w] : 0;
+        const next = (p[i] + inX - vx[i] + inY - vy[i]) * DAMP;
+        q[i] = next > 0 ? next : 0;
+        if (next >= CALM_P || Math.abs(vx[i]) >= CALM_V || Math.abs(vy[i]) >= CALM_V) loud = true;
       }
     }
     if (!last) return;
     if (loud) {
       this.hush[c] = 0;
       this.stir[c] = 1;
+      const { cols, rows } = this, cx = c % cols, cy = (c / cols) | 0;
+      if (cx > 0) this.stir[c - 1] = 1;
+      if (cx < cols - 1) this.stir[c + 1] = 1;
+      if (cy > 0) this.stir[c - cols] = 1;
+      if (cy < rows - 1) this.stir[c + cols] = 1;
       Atomics.store(this.control, CTL.gust, 1);
       return;
     }
+    // Son élan est remis à zéro par `hushChunk()`, une passe plus loin : ici,
+    // les blocs voisins lisent encore ses faces.
     this.hush[c] = 1;
     for (let y = y0; y < y1; y++) q.fill(0, y * w + x0, y * w + x1);
+  }
+
+  /** Pour `windChunk()` : pression nulle sur le bloc et sa bordure, élan nul sur le bloc seul. */
+  private still(x0: number, y0: number, x1: number, y1: number): boolean {
+    const { width: w, height: h, press: p, windX: vx, windY: vy } = this;
+    const ya = Math.max(0, y0 - 1), yb = Math.min(h, y1 + 1);
+    const xa = Math.max(0, x0 - 1), xb = Math.min(w, x1 + 1);
+    for (let y = ya; y < yb; y++) {
+      for (let i = y * w + xa, end = y * w + xb; i < end; i++) if (p[i] !== 0) return false;
+    }
+    for (let y = y0; y < y1; y++) {
+      for (let i = y * w + x0, end = y * w + x1; i < end; i++) if (vx[i] !== 0 || vy[i] !== 0) return false;
+    }
+    return true;
   }
 
   /**
@@ -2263,22 +2421,26 @@ export class Engine {
    * chantier en 1920×1080 coûtait 42 ms de pression par tick.
    */
   private hushed(x0: number, y0: number, x1: number, y1: number): boolean {
-    const { width: w, height: h, press: p } = this;
+    const { width: w, height: h, press: p, windX: vx, windY: vy } = this;
     const ya = Math.max(0, y0 - 1), yb = Math.min(h, y1 + 1);
     const xa = Math.max(0, x0 - 1), xb = Math.min(w, x1 + 1);
     for (let y = ya; y < yb; y++) {
-      for (let i = y * w + xa, end = y * w + xb; i < end; i++) if (p[i] !== 0) return false;
+      for (let i = y * w + xa, end = y * w + xb; i < end; i++) if (p[i] !== 0 || vx[i] !== 0 || vy[i] !== 0) return false;
     }
     return true;
   }
 
-  /** Dernière passe : un bloc calmé vide aussi l'autre tampon, pour dormir à zéro dans les deux. */
+  /** Dernière passe : un bloc calmé vide aussi l'autre tampon et son élan, pour dormir à zéro partout. */
   private hushChunk(c: number): void {
     if (!this.hush[c]) return;
-    const { width: w, pressNext: q } = this;
+    const { width: w, pressNext: q, windX: vx, windY: vy } = this;
     const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(this.height, y0 + CHUNK);
-    for (let y = y0; y < y1; y++) q.fill(0, y * w + x0, y * w + x1);
+    for (let y = y0; y < y1; y++) {
+      q.fill(0, y * w + x0, y * w + x1);
+      vx.fill(0, y * w + x0, y * w + x1);
+      vy.fill(0, y * w + x0, y * w + x1);
+    }
   }
 
   /** Retourne le pôle de l'aimant sous le curseur : attirer ↔ repousser. */
@@ -2461,8 +2623,9 @@ export class Engine {
    */
   private spawn(shape: Shape, x: number, y: number, f: number, over = false): number {
     const { dx, dy, id } = shape;
+    const v = this.tall(shape);
     for (let k = 0; k < id.length; k++) {
-      const px = x + f * dx[k], py = y + dy[k];
+      const px = x + f * dx[k], py = y + v * dy[k];
       if (!this.inBounds(px, py)) return -1;
       const j = this.index(px, py);
       if (this.frozen[j]) return -1;
@@ -2472,7 +2635,7 @@ export class Engine {
       return -1;
     }
     for (let k = 0; k < id.length; k++) {
-      const px = x + f * dx[k], py = y + dy[k];
+      const px = x + f * dx[k], py = y + v * dy[k];
       if (k === 0 && this.cells[this.index(px, py)] === id[0]) continue;
       this.become(px, py, id[k]);
     }
@@ -2482,9 +2645,10 @@ export class Engine {
   /** Nombre de cellules de la créature de cœur (x, y) à leur place pour le sens `f`, cœur compris. */
   private intact(shape: Shape, x: number, y: number, f: number): number {
     const { dx, dy, id } = shape;
+    const v = this.tall(shape);
     let n = 0;
     for (let k = 0; k < id.length; k++) {
-      if (this.get(x + f * dx[k], y + dy[k]) === id[k]) n++;
+      if (this.get(x + f * dx[k], y + v * dy[k]) === id[k]) n++;
     }
     return n;
   }
@@ -2492,8 +2656,9 @@ export class Engine {
   /** Change tout le corps (ce qu'il en reste) en `into` : mort, cuisson, gel. */
   private kill(shape: Shape, x: number, y: number, f: number, into: MaterialId): void {
     const { dx, dy, id } = shape;
+    const v = this.tall(shape);
     for (let k = 0; k < id.length; k++) {
-      const px = x + f * dx[k], py = y + dy[k];
+      const px = x + f * dx[k], py = y + v * dy[k];
       if (this.get(px, py) === id[k]) this.become(px, py, into);
     }
   }
@@ -2505,7 +2670,7 @@ export class Engine {
   private maim(shape: Shape, x: number, y: number, f: number): void {
     let burning = false;
     for (let k = 1; k < shape.id.length; k++) {
-      if (this.get(x + f * shape.dx[k], y + shape.dy[k]) === FIRE) burning = true;
+      if (this.get(x + f * shape.dx[k], y + this.tall(shape) * shape.dy[k]) === FIRE) burning = true;
     }
     this.kill(shape, x, y, f, burning ? FIRE : EMPTY);
   }
@@ -2535,7 +2700,7 @@ export class Engine {
     if (t < FROST) { this.kill(R, x, y, f, ICE); return; }
     // De l'eau par-dessus les oreilles (plus dense qu'elle, il coule) ou du
     // sable : il n'a pas de santé comme le héros, il s'étouffe d'un coup.
-    if (this.stifling(this.airway(x, y)) && this.rand() < DROWN) {
+    if (this.stifling(this.airway(x, y, this.fall)) && this.rand() < DROWN) {
       this.kill(R, x, y, f, EMPTY);
       return;
     }
@@ -2548,7 +2713,7 @@ export class Engine {
 
     if (this.life[i] <= 250 - MEAL) {
       for (let k = 0; k < MOUTH_DX.length; k++) {
-        const mx = x + f * MOUTH_DX[k], my = y + MOUTH_DY[k];
+        const mx = x + f * MOUTH_DX[k], my = y + this.fall * MOUTH_DY[k];
         if (this.get(mx, my) === PLANT) {
           this.become(mx, my, EMPTY);
           this.life[i] += MEAL;
@@ -2559,7 +2724,7 @@ export class Engine {
     if (this.life[i] >= BREED && this.rand() < LITTER && this.mate(x, y)) {
       // Le petit naît derrière lui, sinon par-dessus (il retombera).
       let baby = this.spawnRabbit(x - 4 * f, y, f);
-      if (baby < 0) baby = this.spawnRabbit(x, y - 4, f);
+      if (baby < 0) baby = this.spawnRabbit(x, y - 4 * this.fall, f);
       if (baby >= 0) {
         this.life[baby] = NEWBORN;
         this.life[i] -= LITTER_COST;
@@ -2605,12 +2770,13 @@ export class Engine {
   private relocate(shape: Shape, x: number, y: number, f: number, nx: number, ny: number, nf: number, wet: boolean): boolean {
     const { moveFrom: from, moveTo: to, cells, life, frozen } = this;
     const { dx, dy, id } = shape;
+    const v = this.tall(shape);
     const size = id.length;
     this.moving = size;
     for (let k = 0; k < size; k++) {
-      const tx = nx + nf * dx[k], ty = ny + dy[k];
+      const tx = nx + nf * dx[k], ty = ny + v * dy[k];
       if (!this.inBounds(tx, ty)) return false;
-      from[k] = this.index(x + f * dx[k], y + dy[k]); // corps intact : dans la grille
+      from[k] = this.index(x + f * dx[k], y + v * dy[k]); // corps intact : dans la grille
       to[k] = this.index(tx, ty);
       if (frozen[from[k]]) return false; // une patte figée tient tout le lapin
     }
@@ -2659,10 +2825,11 @@ export class Engine {
    */
   private updatePart(shape: Shape, x: number, y: number, id: MaterialId): void {
     const { dx, dy, id: ids } = shape;
+    const v = this.tall(shape);
     for (let k = 1; k < ids.length; k++) {
       if (ids[k] !== id) continue;
-      if (this.get(x - dx[k], y - dy[k]) === ids[0]) return;
-      if (this.get(x + dx[k], y - dy[k]) === ids[0]) return;
+      if (this.get(x - dx[k], y - v * dy[k]) === ids[0]) return;
+      if (this.get(x + dx[k], y - v * dy[k]) === ids[0]) return;
     }
     this.become(x, y, EMPTY);
   }
@@ -2711,7 +2878,11 @@ export class Engine {
     const name = life[this.slot(x, y, S.name)];
     let age = life[this.slot(x, y, S.age)];
     if (age < 250 && this.rand() < YEAR) age++;
-    let dug = life[this.slot(x, y, S.dug)], laid = life[this.slot(x, y, S.laid)];
+    let dug = life[this.slot(x, y, S.dug)];
+    // Le sac, le temps du tour (`stash()`, `put()`) : une matière, et combien.
+    this.bagId = life[this.slot(x, y, S.bag)];
+    this.bagN = this.bagId === EMPTY || !KNOWN[this.bagId] ? 0 : life[this.slot(x, y, S.load)];
+    if (this.bagN === 0) this.bagId = EMPTY;
 
     const p = name !== 0 && name === this.chosen ? this.pilot : 0, g = this.gravity;
     const dir = (p & PILOT.right ? 1 : 0) - (p & PILOT.left ? 1 : 0);
@@ -2722,8 +2893,8 @@ export class Engine {
     if (p & PILOT.down && this.rand() < DIG) dug += this.dig(x - 1, y + 2, y + 2) + this.dig(x, y + 2, y + 2) + this.dig(x + 1, y + 2, y + 2);
     if (p & PILOT.place) {
       const id = p >> 8;
-      if (p & PILOT.up) laid += this.lay(x - 1, y + 2, id) + this.lay(x, y + 2, id) + this.lay(x + 1, y + 2, id);
-      else laid += this.lay(x + 2 * face, y + 1, id);
+      if (p & PILOT.up) { this.put(x - 1, y + 2, id); this.put(x, y + 2, id); this.put(x + 1, y + 2, id); }
+      else this.put(x + 2 * face, y + 1, id);
     }
 
     const wet = head || KIND[this.get(x, y + 2)] === KINDS.liquid;
@@ -2748,7 +2919,8 @@ export class Engine {
     life[this.slot(cx, cy, S.harm)] = harm;
     life[this.slot(cx, cy, S.age)] = age;
     life[this.slot(cx, cy, S.dug)] = Math.min(250, dug);
-    life[this.slot(cx, cy, S.laid)] = Math.min(250, laid);
+    life[this.slot(cx, cy, S.bag)] = this.bagId;
+    life[this.slot(cx, cy, S.load)] = this.bagN;
     if (name === this.chosen) this.hero = at;
   }
 
@@ -2767,15 +2939,15 @@ export class Engine {
    * damier garantit. Des créatures jusqu'au bout : de l'air, on n'étouffe pas
    * sur une supposition.
    */
-  private airway(x: number, y: number): MaterialId {
-    const over = this.get(x, y - 3);
+  private airway(x: number, y: number, v: number = 1): MaterialId {
+    const over = this.get(x, y - 3 * v);
     if (!CREATURE[over]) return over;
-    const left = this.get(x - 1, y - 2);
+    const left = this.get(x - 1, y - 2 * v);
     if (!CREATURE[left]) return left;
-    const right = this.get(x + 1, y - 2);
+    const right = this.get(x + 1, y - 2 * v);
     if (!CREATURE[right]) return right;
     for (let k = 4; k <= 15; k++) {
-      const id = this.get(x, y - k);
+      const id = this.get(x, y - k * v);
       if (!CREATURE[id]) return id;
     }
     return EMPTY;
@@ -2808,10 +2980,35 @@ export class Engine {
       const kind = KIND[id];
       if ((kind === KINDS.static || kind === KINDS.powder) && id !== METAL && !CREATURE[id] && this.inBounds(x, y) && !this.frozen[this.index(x, y)]) {
         this.become(x, y, EMPTY);
+        this.stash(id);
         n++;
       }
     }
     return n;
+  }
+
+  /**
+   * Creuser ramasse : la cellule arrachée va au sac s'il est vide ou porte déjà
+   * cette matière, et qu'elle se pose (`placeable` : ni nanites, braise ni
+   * source). Sinon elle est perdue, comme avant le sac — il ne porte qu'une
+   * matière à la fois, et creuser autre chose ne le vide pas.
+   */
+  private stash(id: MaterialId): void {
+    if (!PLACEABLE[id] || this.bagN >= BAG) return;
+    if (this.bagN > 0 && this.bagId !== id) return;
+    this.bagId = id;
+    this.bagN++;
+  }
+
+  /**
+   * Pose une cellule : du sac s'il n'est pas vide, sinon la matière de la
+   * palette (`palette`, de `pilot`) — le bac reste un bac à sable, on peut
+   * toujours bâtir sans avoir creusé.
+   */
+  private put(x: number, y: number, palette: MaterialId): void {
+    const fromBag = this.bagN > 0;
+    if (this.lay(x, y, fromBag ? this.bagId : palette) === 0 || !fromBag) return;
+    if (--this.bagN === 0) this.bagId = EMPTY;
   }
 
   /**
@@ -2851,7 +3048,7 @@ export class Engine {
     for (let d = 2; d <= SIGHT; d++) {
       for (let s = f, n = 0; n < 2; s = -s, n++) {
         const px = x + s * d;
-        for (let dy = -1; dy <= 2; dy++) if (this.get(px, y + dy) === PLANT) return s;
+        for (let dy = -1; dy <= 2; dy++) if (this.get(px, y + this.fall * dy) === PLANT) return s;
       }
     }
     return 0;

@@ -9,6 +9,7 @@ import { look } from "../src/client/sight.ts";
 import { REPORT, reporter } from "../src/client/errors.ts";
 import { MIX, boomShape, humLevel, panOf, rainLevel } from "../src/client/sound.ts";
 import { readFileSync } from "node:fs";
+import { decode, locate } from "./pile.ts";
 
 // Objectifs : ce qui vient d'un autre visiteur ne passe pas sans contrôle.
 {
@@ -209,6 +210,18 @@ import { readFileSync } from "node:fs";
   assert.equal(savedValue({ rate: 2, vitesse: 3 }, "speed", renamed), 3, "du plus récent au plus ancien");
   assert.equal(savedValue({ x: 1 }, "brush", renamed), undefined, "jamais retenu : défaut");
   assert.equal(savedValue({ mirror: false }, "mirror", {}), false, "false est une valeur, pas une absence");
+}
+
+// `npm run pile` : le décodage des cartes de sources (VLQ base64), sur une carte
+// écrite à la main — deux segments sur la ligne 1, un sur la ligne 2.
+{
+  const carte = decode({ sources: ["../src/a.ts"], names: ["f"], mappings: "AAAAA,KAAK;AACA" });
+  assert.deepEqual(locate(carte, 1, 1), { source: "../src/a.ts", line: 1, column: 1, name: "f" });
+  assert.deepEqual(locate(carte, 1, 9), { source: "../src/a.ts", line: 1, column: 6, name: undefined }, "le dernier segment qui commence avant la colonne");
+  // Seule la colonne générée repart de zéro à chaque ligne : la colonne
+  // d'origine reste relative au segment d'avant (5, plus 0).
+  assert.deepEqual(locate(carte, 2, 3), { source: "../src/a.ts", line: 2, column: 6, name: undefined }, "valeurs relatives au segment d'avant, d'une ligne à l'autre");
+  assert.equal(locate(carte, 9, 1), null, "au-delà de la carte : rien");
 }
 
 console.log("ok — panneau conforme");

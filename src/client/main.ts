@@ -539,12 +539,9 @@ let startedAt = 0;
 /** Le bouton du dernier défi lancé : la touche « recommencer » le reclique. */
 let lastChallenge: HTMLButtonElement | null = null;
 
-// Meilleur temps par défi, en secondes.
-// ponytail: local à la machine, pas de classement. Un classement qui croirait le
-// temps annoncé se tricherait d'une requête, et le vérifier demande au Worker de
-// rejouer la partie (~9 s de calcul pour 5 min, hors de l'offre gratuite) : voir
-// « Classement vérifié des défis » dans les Pistes du README. À revoir si le
-// Worker passe à l'offre payante.
+// Meilleur temps par défi, en secondes d'horloge murale, propre à ce
+// navigateur. Le classement public (board.ts) compte en ticks : c'est ce que
+// le rejeu joint prouve.
 const RECORDS = "sandbox-rabbit:records";
 const records = stored<Record<string, number>>(RECORDS, {});
 const best = (name: string): string => (records[name] === undefined ? "" : ` (record : ${records[name]} s)`);
@@ -554,6 +551,8 @@ function startChallenge(c: Challenge): void {
   challenge = c;
   startedAt = performance.now();
   goalEl.textContent = `${c.name} — ${c.goal}${best(c.name)}`;
+  // Un classement pour les défis livrés seulement : un monde-défi n'est pas bâti en code.
+  if (CHALLENGES.includes(c)) void import("./board.ts").then((b) => b.show(c.name, watch));
 }
 
 /**
@@ -744,8 +743,10 @@ function frame(now: number): void {
 requestAnimationFrame(frame);
 
 /** Défi réussi : le bac l'a vu, la page tient le chrono et les records. */
-function win(): void {
+function win(film: Recording | null): void {
   if (!challenge) return;
+  const c = challenge;
+  if (CHALLENGES.includes(c)) void import("./board.ts").then((b) => b.won(c.name, film, watch));
   const secs = Math.round((performance.now() - startedAt) / 1000);
   const record = records[challenge.name] === undefined || secs < records[challenge.name];
   if (record) {
@@ -777,7 +778,7 @@ listen((news) => {
       statusEl.textContent = news.text;
       return;
     case "won":
-      return win();
+      return win(news.film);
     case "rec": {
       film = { w: news.w, h: news.h };
       playbackButton.disabled = false;

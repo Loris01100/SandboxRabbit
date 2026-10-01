@@ -79,6 +79,7 @@ parallèle**. Le reste (micro-optimisations, portage) vient après.
 | Éclairage du secours 2D (`FlatLight`) : calendrier des pas précalculé, lecture bilinéaire en ligne, texels opaques sautés, collecte sous-échantillonnée, mélange par rangée | lumière 13,6 → 4,5 ms (320×180), 22,9 → 4,4 ms (1920×1080) ; coloriage éclairé 1920×1080 73 → 32 ms (27 sans lumière) | [rendu.md](rendu.md#le-secours-2d) |
 | Salon chargé au premier clic (room.ts par `import()` de lobby.ts) | page 86 221 → 81 754 octets | [architecture.md](architecture.md#salon-partagé-bac-multijoueur) |
 | `FlatLight` chargé à la demande (sim/flatlight.ts) | page 89 186 → 85 274 octets | [rendu.md](rendu.md#le-secours-2d) |
+| Rayons de `FlatLight` dans un fil à lui (sim/flatlight-worker.ts) : la page ne garde que la collecte | page : ~4,5 ms de rayons à chaque éclairage → collecte 0,3 à 0,9 ms ; la grille passe de 80 à 160 texels de large (rayons ~50 ms, hors de la page) | [rendu.md](rendu.md#le-secours-2d) |
 | Plafond de fils porté de 7 à 14 | bac plein de nanites en 1080p : 28 ms à 7 fils → 19 à 15 (16 cœurs) | `helpers()` de sim/worker.ts |
 
 ## Les pistes mesurées et laissées de côté
@@ -95,6 +96,21 @@ parallèle**. Le reste (micro-optimisations, portage) vient après.
 La leçon des deux : avant de porter quoi que ce soit, chercher le calcul qu'on
 peut **ne pas faire**. Les trois blocs qui ne s'endormaient pas ont rapporté plus
 que tout ce qui précède.
+
+## Ce qui a coûté, et pourquoi on l'a gardé
+
+- **L'élan de l'air** (`windX`, `windY`, [simulation.md](simulation.md#pression-et-vent)) :
+  `breathe()` passe de 11 à 13 ms à 23 ms dans la salve 1920×1080 de
+  `npm run rust` (32 % d'un tick de 74 ms), pendant la seconde qui suit les
+  souffles ; rien sans explosion. Le prix d'une onde qui voyage au lieu de
+  s'étaler. Piste : un drapeau « au calme » par bloc, en double tampon, pour
+  que `hushed()` et `still()` ne relisent plus trois tableaux sur toute la
+  bordure ([rust.md](../rust.md#la-pression-avec-élan-2-octobre-2026)).
+- **La correction bilinéaire des cascades** (`CASCADE`,
+  [rendu.md](rendu.md#léclairage-global-scene-cascade-fluence)) : quatre
+  marches par texel au lieu d'une, sur toutes les cascades sauf la plus
+  lointaine. Pas mesurée à part ; « Finesse de l'éclairage » (Graphismes)
+  reste le levier si une carte faible peine.
 
 ## Ce qu'une optimisation ne doit pas changer
 

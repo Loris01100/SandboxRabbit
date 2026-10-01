@@ -31,6 +31,7 @@ npm run rust       # prototype Rust/WASM de thermal() et de la pression contre l
 npm run build      # typecheck puis vite build
 npm run preview    # build puis wrangler dev sur le bundle
 npm run loc        # taille du projet par poste
+npm run pile       # retraduit une pile d'erreur de production dans les sources : npm run pile < pile.txt (recettes.md)
 npm run cf-typegen # régénère worker-configuration.d.ts après un changement de bindings
 npm run deploy     # à ne lancer que sur demande explicite
 ```
@@ -44,7 +45,7 @@ pas de linter.
 | --- | --- |
 | [docs/agents/architecture.md](docs/agents/architecture.md) | toucher à la page, au Worker de simulation, au salon, à l'API, au stockage ou au codec. Protocoles `Order` / `News` et salon, routes, clés `localStorage`. |
 | [docs/agents/simulation.md](docs/agents/simulation.md) | modifier `engine.ts`, `materials.ts` ou `render.ts`. Tous les invariants du moteur, les usages de `life`. |
-| [docs/agents/recettes.md](docs/agents/recettes.md) | ajouter une matière, une règle, un défi, un geste, un ordre, un contrôle, un raccourci, une route, une migration. |
+| [docs/agents/recettes.md](docs/agents/recettes.md) | ajouter une matière, une règle, un défi, un geste, un ordre, un contrôle, un raccourci, une route, une migration ; décoder une pile d'erreur de production. |
 | [docs/agents/rendu.md](docs/agents/rendu.md) | toucher à `screen.ts` : la chaîne grille → pixel, les textures et les quatre programmes WebGL2, l'éclairage global (*radiance cascades*) et son dimensionnement, la perte de contexte, le secours 2D. |
 | [docs/agents/performance.md](docs/agents/performance.md) | optimiser quoi que ce soit : quoi lancer selon la question, comment profiler, ce qui a déjà payé (et de combien), les pistes laissées de côté. |
 | [docs/agents/tests.md](docs/agents/tests.md) | écrire ou corriger un test, mettre à jour l'empreinte du moteur, comprendre la CI et ses budgets. |
@@ -76,6 +77,7 @@ src/client/
   room.ts share.ts theme.ts   salon (pseudos, curseurs), sauvegarde/exports, jour-nuit (reçoivent leurs dépendances par init…())
   gallery.ts             la galerie (recherche, tri, J'aime, remix), chargée à sa première ouverture par share.ts
   lobby.ts               porte du salon : charge room.ts au premier clic sur « Bac partagé »
+  board.ts               classement des défis, chargé au premier défi : records jugés par sim/judge.ts, publication
   audio.ts sound.ts      son : porte (charge sound.ts au premier geste) et synthèse Web Audio ; Heard / Hum de sandbox.ts
   errors.ts              exceptions de la page et du Worker de simulation → POST /api/error ; reporter() (pur)
   sim/
@@ -86,6 +88,8 @@ src/client/
     materials.ts         MATERIALS, CATEGORIES, PALETTE, SHORTCUTS
     render.ts            bandes (Tracker), Renderer : matière, vue thermique, vue pression ; vignettes
     flatlight.ts         éclairage global du secours 2D, chargé à la demande par screen.ts      (pur)
+    flatlight-worker.ts  fil de l'éclairage du secours : les rayons de FlatLight, hors de la page
+    judge.ts verdict.ts  le juge du classement : un fil qui rejoue chaque record ; verdict() (pur)
     codec.ts             RLE + base64 url (format des mondes sauvegardés)
     libm.ts              sin, cos, atan, atan2, exp, log déterministes (copie de musl)   (pur)
 src/worker/
@@ -96,7 +100,7 @@ src/worker/
   relay.ts               qui a le droit de dire quoi dans un salon      (pur)
 migrations/              schéma D1, un fichier numéroté par changement
 rust/                    prototype : thermal() et la pression en Rust → WASM, et la crate libm, référence de libm.ts ; mesurés par test/rust.ts (pas branchés sur le bac)
-test/                    scripts d'assert (+ bench.ts, stress.ts, drift.ts, loc.ts) ; browser.ts + screen.html : tests dans Chromium
+test/                    scripts d'assert (+ bench.ts, stress.ts, drift.ts, loc.ts, pile.ts) ; browser.ts + screen.html : tests dans Chromium
 ```
 
 ## Règles à ne pas enfreindre
@@ -159,7 +163,7 @@ reproductible, ids de matière gelés, CSP, cloisonnement de la page,
   sandbox.ts, sinon le rejeu diverge. S'il la remplace, il arrête d'abord le
   rejeu (`this.play(false)`).
 - `localStorage` uniquement via `read` / `write` / `forget` de ui.ts.
-- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts`, `palette.ts`, `settings.ts`, `hero.ts`, `audio.ts`, `sound.ts`, `gallery.ts`, `lobby.ts` n'importent pas main.ts (cycle).
+- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts`, `palette.ts`, `settings.ts`, `hero.ts`, `audio.ts`, `sound.ts`, `gallery.ts`, `lobby.ts`, `board.ts` n'importent pas main.ts (cycle).
 - Une frame ne porte que les bandes changées : world.ts les recopie toutes
   dans son miroir, n'en saute jamais une. Un réglage qui change l'aspect sans
   écriture (comme `heatmap`) fait tout recolorier.

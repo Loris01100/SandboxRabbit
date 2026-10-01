@@ -130,7 +130,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`) et la largeur du bac qui l'a faite (`w`) — `latestGrid()` rend les deux —, pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askGrid()` / `askClip()` / `askFilm()` |
 | `say` | à la demande | message pour la barre de statut |
-| `won` | à la demande | le défi en cours est réussi (vérifié toutes les 500 ms dans le Worker) |
+| `won` | à la demande | le défi en cours est réussi (vérifié toutes les 500 ms dans le Worker), avec `film` : la partie depuis la construction d'un défi livré (`trial`), si le classement peut la recevoir (`fair()`), sinon `null` |
 | `rec` / `play` | à la demande | fin d'enregistrement, début/fin de rejeu |
 | `start` | quand l'hôte (re)part | `{rec}` : sa grille entière et l'état de son tirage, à diffuser aux invités |
 | `turn` | 20 × / s chez l'hôte, tant que le bac avance ou qu'il y a des gestes | `{ticks, beats, sums}` : jusqu'où il est allé, ce qui s'est passé, et une empreinte par seconde |
@@ -249,15 +249,33 @@ de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixel
 - **Pseudos** : le joueur l'annonce dans l'URL (`/api/room/:id?nick=…`, champ
   « Pseudo » de Paramètres › Général, retenu dans `:reglages`) ; le DO le
   nettoie (`nick()` : sans caractère de contrôle, 24 caractères), le
-  distingue de ceux déjà pris (`unique()` : « Alice 2 »), et donne un
-  numéro de 1 à 8 (`freeId()`, recyclé au départ), d'où la couleur
-  (`peerColor()` d'ui.ts). Rien ne l'authentifie : on peut entrer sous le nom
-  d'un absent (voir le `ponytail:` de room.ts). Pseudo vide : « Joueur N ».
+  distingue de ceux déjà pris, et donne un numéro de 1 à 8 (`freeId()`,
+  recyclé au départ), d'où la couleur (`peerColor()` d'ui.ts). Pseudo vide :
+  « Joueur N ».
+- **Pseudos réservés** : le navigateur tire une fois une clé
+  (`browserKey()`, `localStorage` `:cle-salon`) et l'envoie avec le pseudo
+  (`&key=`). Le DO n'en garde que l'empreinte (`fingerprint()`, SHA-256) et
+  tient un **carnet** par salon (`ctx.storage`, clé `"names"`) : pour chaque
+  pseudo, l'empreinte de qui l'a porté et sa dernière venue. `claim()`
+  (relay.ts, pur) rend le pseudo s'il n'est ni porté dans le salon ni retenu
+  par une autre clé depuis moins de `KEEP` (30 jours), sinon « Alice 2 »
+  (`unique()`, qui prend la liste des noms pris ou une fonction) ; il retient
+  ensuite ce pseudo pour cette clé et oublie ce qui a passé `KEEP`. Sans clé,
+  rien n'est retenu. Ce n'est pas une authentification : qui vole la clé
+  d'un navigateur prend ses pseudos.
 - **Curseurs** : main.ts passe la cellule survolée à `pointAt()` de room.ts
   avec la sonde ; il part au plus toutes les `POINT` = 80 ms, seulement s'il a
   changé et qu'on n'est pas seul. Chez les autres, un `.peer` (point et nom)
   dans `#peers`, replacé à chaque image par `placeCursors()` (zoom et caméra
   compris, comme le cadre du héros). -1, -1 : hors du bac, caché.
+- **Fantômes** : un invité attend l'aller-retour par l'hôte avant de voir son
+  geste. `relay()` pose donc tout de suite un **fantôme** (`ghost()` : un
+  disque pour `paint`, un rectangle pour `rect`, à la couleur de la matière,
+  dans `#peers`, classes `.ghost` / `.ghost.round`), replacé avec les
+  curseurs par `placeCursors()`. Un `turn` qui apporte des gestes efface les
+  fantômes de plus de 40 ms (`settleGhosts()`) ; aucun ne dure plus de
+  `GHOST` = 1 s — un geste refusé (lecture seule) ne laisse pas de trace.
+  Rien de tout cela ne touche la grille.
 - Client : [src/client/room.ts](../../src/client/room.ts) pour le réseau,
   `host()` / `follow()` / `catchUp()` de
   [sandbox.ts](../../src/client/sim/sandbox.ts) pour la simulation.
@@ -364,10 +382,12 @@ le charger dans Node. Ce qui en a besoin (le Durable Object) vit dans
 | --- | --- | --- |
 | `GET /api/health` | état + backend (`d1` / `memory`) | — |
 | `GET /api/worlds` | les 50 plus récents, les 50 plus vus **et** les 50 plus aimés (`kept()` de store.ts, 150 max), avec `parent` et `likes` ; `data` **coupé au premier bloc** (matière seule, pour les vignettes) | — |
-| `GET /api/worlds/:id` | monde complet, **incrémente `views`** | seul chemin de chargement depuis la galerie ; au-delà du débit (compteur `vue:` à part), servi sans compter la vue |
+| `GET /api/worlds/:id` | monde complet, **incrémente `views`** une fois par IP et par monde (`who()`, table `sightings`) | seul chemin de chargement depuis la galerie ; au-delà du débit (compteur `vue:` à part), servi sans compter la vue |
 | `POST /api/worlds` | `{name, width, height, data, goal?, parent?}` → `201 {id, token}` | débit, `data` ≤ 200 000, dimensions entières et ≤ 1920×1080 cellules (`CELLS`, la plus grande grille du menu : en ajouter une plus grande = relever ce plafond), `goal` validé par regex, `parent` (le monde remixé) à la forme d'un id (`UUID`) — son existence n'est pas vérifiée, le ménage peut l'effacer après coup |
-| `POST /api/worlds/:id/like` | un « J'aime » de plus → `200 {likes}` | débit (compteur `vote:` à part), `404` si l'id n'a pas la forme d'un id ou que le monde n'existe pas. Pas de dédoublonnage côté Worker (pas de comptes) : la page retient ses votes (`:votes`) — voir le `ponytail:` de la route |
+| `POST /api/worlds/:id/like` | un « J'aime » de plus → `200 {likes}` (le total inchangé si cette IP a déjà voté) | débit (compteur `vote:` à part), `404` si l'id n'a pas la forme d'un id ou que le monde n'existe pas. Un vote par IP et par monde (`who()`, table `votes`) ; la page retient aussi les siens (`:votes`) pour éteindre le bouton |
 | `DELETE /api/worlds/:id` | en-tête `x-world-token` requis | débit, `403` si mauvais jeton |
+| `GET /api/records/:challenge` | les `BOARD` (30) meilleurs records d'un défi livré, du moins de ticks au plus, **rejeu compris** (`film`) : la page les juge | `404` pour un défi absent de `TRIALS` |
+| `POST /api/records` | `{challenge, name, ticks, film}` → `201 {id}` | débit (compteur `record:` à part), `challenge` dans `TRIALS` (les noms de `CHALLENGES`, test/api.ts compare), `ticks` entier de 1 à `TRIAL_TICKS` (cinq minutes), `film` en base64 url ≤ 200 000 caractères, `name` nettoyé par `nick()` (« Anonyme » s'il est vide). Le rejeu **n'est pas rejoué** ici (voir [Classement des défis](#classement-des-défis)) |
 | `GET /api/room/:id` | upgrade WebSocket vers le DO | `503` sans binding `ROOM`, débit, `426` sans upgrade |
 | `POST /api/error` | rapport d'erreur d'un joueur (texte brut, par `sendBeacon`) → `console.error({message, report, agent})` → `204` ; rien en base | corps ≤ 16 Kio (`bodyLimit`, `413`), débit (compteur `erreur:` à part : une page qui boucle n'empêche pas de sauvegarder), `400` si vide |
 | `* /api/*` | `404` JSON | — |
@@ -394,8 +414,9 @@ Les rapports se lisent dans les journaux du Worker, gardés par
 `observability` (wrangler.jsonc) : tableau de bord Cloudflare → Workers →
 sandbox-rabbit → Observability, filtre `message = "erreur joueur"`, ou en
 direct avec `npx wrangler tail`. En `npm run dev`, ils s'affichent dans le
-terminal. Les piles de production pointent dans le bundle minifié (voir le
-`ponytail:` d'errors.ts).
+terminal. Les piles de production pointent dans le bundle minifié
+(`index-….js:1:48213`) : `npm run pile < pile.txt` les retraduit dans les
+sources (recette dans [recettes.md](recettes.md#décoder-une-pile-de-production)).
 
 ### Stockage
 
@@ -410,6 +431,16 @@ répond 500.
   le `POST`, et ne sort d'aucune lecture (`shown()` en mémoire, colonnes
   nommées dans les `SELECT` D1). Ne jamais écrire `SELECT *`.
 - Le client garde ses jetons dans `localStorage` (`sandbox-rabbit:mondes`).
+- **Votes et vues, une fois par IP** (migration 0006) : tables `votes(world,
+  voter)` et `sightings(world, viewer)`, la paire en clé primaire. Jamais
+  l'IP : `who()` d'app.ts en garde les 16 premiers octets d'un SHA-256 de
+  `sel:monde:ip` (`cf-connecting-ip`). Le monde y entre pour qu'on ne suive
+  pas un visiteur d'un monde à l'autre ; le sel est le secret `SALT`
+  (`npx wrangler secret put SALT`), un sel fixe sinon. `see()` / `like()` :
+  un lot D1 `INSERT OR IGNORE`, puis `UPDATE … + changes()` — la ligne
+  insérée ou non décide du +1, sans aller-retour de plus. En mémoire, deux
+  ensembles `monde|empreinte`. `purge` efface aussi les lignes orphelines.
+  Limite (`ponytail:` de store.ts) : plusieurs IP, plusieurs votes.
 - Ménage nocturne (cron `0 4 * * *`, `scheduled` dans index.ts) : garde les
   mondes que la galerie montre, les 50 plus récents, les 50 plus vus et les 50
   plus aimés (`kept()` en mémoire, `KEPT` en SQL) : 50 sauvegardes de spam ne
@@ -417,8 +448,13 @@ répond 500.
 - Colonnes servies : `COLUMNS` de store.ts, la même liste pour `list()` et
   `get()` — `parent` (migration 0005, sans clé étrangère : le parent peut
   partir au ménage, l'enfant garde le lien) et `likes` (incrémenté par
-  `UPDATE … RETURNING likes`, une seule requête). Les mondes à `token` NULL (d'avant la migration 0004) ne
+  `UPDATE … RETURNING likes`, dans le lot du vote). Les mondes à `token` NULL (d'avant la migration 0004) ne
   partent que par là.
+- **Records des défis** (migration 0007) : table `records(id, challenge, name,
+  ticks, film, created_at)`, index `(challenge, ticks, created_at)`.
+  `board()` en sert les `BOARD` meilleurs, `enter()` en ajoute un ; le
+  ménage ne garde que les `BOARD` meilleurs de chaque défi (`ROW_NUMBER()
+  OVER (PARTITION BY challenge …)`).
 - Schéma : un **nouveau** fichier numéroté dans [migrations/](../../migrations/),
   jamais de retouche d'un fichier existant. Appliquer avec
   `npx wrangler d1 migrations apply sandbox-rabbit --remote`.
@@ -446,7 +482,7 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
 | [main.ts](../../src/client/main.ts) | souris, raccourcis, défis, rejeu, chargement du bac, boucle rAF, câblage de tout le DOM | non |
-| [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`hero`, relevée par `track()`), fiche de l'encadré Héros (`card()` : nom, santé, âge, température, compteurs lus dans le miroir ; `nameInput`, `heroId`), cadre `#halo` autour du héros piloté dans les vues de côté (`mark()`, repère posé sur la scène, pas dans le rendu), caméra décrochée (`loose`), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
+| [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`hero`, relevée par `track()`), fiche de l'encadré Héros (`card()` : nom, santé, âge, température, cellules creusées et sac (« sac : N × matière ») lus dans le miroir ; `nameInput`, `heroId`), cadre `#halo` autour du héros piloté dans les vues de côté (`mark()`, repère posé sur la scène, pas dans le rendu), caméra décrochée (`loose`), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
 | [palette.ts](../../src/client/palette.ts) | palette des matières et six récentes ; `select()`, qui tient `current` et `emit` (matière des sources) | non |
 | [settings.ts](../../src/client/settings.ts) | contrôles du panneau (pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage), ceux des onglets Graphismes (limite d'images par seconde, échelle entière, finesse de l'éclairage) et Son (case, volume général, un curseur `data-mix` par famille de sons) de la fenêtre Paramètres, et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
 | [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan`. Échelle entière (`wholePixels()`, Paramètres › Graphismes) : `fitCanvas()` pose largeur **et** hauteur du canvas au plus grand multiple entier, en pixels physiques, qui tient dans la scène (`wholeScale` d'ui.ts) — ou étire si l'arrondi coûte plus d'un quart de la taille ; refait à chaque changement de taille de la scène (`ResizeObserver`, différé d'une image : sur téléphone la scène suit la hauteur du bac) et de la grille | non |
@@ -455,7 +491,7 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | [audio.ts](../../src/client/audio.ts) | porte du son : retient case, volumes (général et par famille, `soundMix()`) et fond sonore, et ne charge sound.ts (`import()`) qu'au premier geste du joueur — le navigateur refuse de jouer avant, et la page a son budget (84 Kio). `initSound()` (main.ts), `hear()` à chaque frame, `setHum()` à chaque `stats` | non |
 | [sound.ts](../../src/client/sound.ts) | le son, synthétisé par Web Audio (aucun fichier) : explosion (bruit blanc sous un passe-bas qui se referme, plus long et plus grave avec le rayon), éclair puis tonnerre, boucles de feu (claquements), de lave (bruit brun) et de pluie ; stéréo selon la colonne ; six voix au plus ; se tait onglet caché. `MIX` : les familles (explosions, tonnerre, feu, lave, pluie), chacune multipliée par son curseur — en ajouter une, c'est aussi son `data-mix` dans index.html (test/ui.ts le vérifie). Tirage en `Math.random()` : il ne touche que l'oreille | `humLevel()`, `rainLevel()`, `boomShape()`, `panOf()` : **oui** (test/ui.ts) |
 | [errors.ts](../../src/client/errors.ts) | remonte les exceptions de la page et du Worker de simulation vers `POST /api/error` (voir « Erreurs des joueurs ») | `reporter()` : **oui** (test/ui.ts) |
-| [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, remonté après une perte de contexte ; secours 2D par `Renderer`, éclairé par `FlatLight` (sim/flatlight.ts, chargé à la demande) | non |
+| [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, remonté après une perte de contexte ; secours 2D par `Renderer`, éclairé par `FlatLight` (sim/flatlight.ts, chargé à la demande, ses rayons dans le fil de [sim/flatlight-worker.ts](../../src/client/sim/flatlight-worker.ts)) | non |
 | [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence, touches réassignables), accès `localStorage` tolérant | **oui** (test/ui.ts) |
 | [sight.ts](../../src/client/sight.ts) | ce que voit le héros : `look()` lance un éventail de rayons dans une grille et rend une colonne de pixels | **oui** (test/ui.ts) |
 | [gestures.ts](../../src/client/gestures.ts) | `Gesture` + `applyGesture(engine, g)` + météo (`weather(engine, niveau)` : 0 sec, 1 pluie, 2 orage, 3 gros orage, éclairs compris ; le niveau est le réglage `weather` et le champ `weather` d'une `Scene`, booléen dans les enregistrements d'avant l'orage) | **oui** |
@@ -463,11 +499,48 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | [challenges.ts](../../src/client/challenges.ts) | défis et décors bâtis en code | **oui** |
 | [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
 | [lobby.ts](../../src/client/lobby.ts) | porte du salon : charge room.ts au premier clic sur « Bac partagé », et relaie d'ici là les appels de main.ts dans le vide | non |
-| [room.ts](../../src/client/room.ts) | salon côté navigateur, chargé à la demande : lockstep, pseudo (`#nick`), liste des joueurs (`#roster`), curseurs des autres (`pointAt()`, `placeCursors()`, calque `#peers`), verrou de l'hôte (`#room-lock`) | non |
+| [room.ts](../../src/client/room.ts) | salon côté navigateur, chargé à la demande : lockstep, pseudo (`#nick`), liste des joueurs (`#roster`), curseurs des autres (`pointAt()`, `placeCursors()`, calque `#peers`), fantômes des gestes en route (`ghost()`), clé du navigateur (`browserKey()`), verrou de l'hôte (`#room-lock`) | non |
 | [share.ts](../../src/client/share.ts) | sauvegarde (avec `parent` : l'origine d'un remix, `setOrigin()` / `forgetOrigin()`), jetons des mondes déposés, PNG, vidéo, lien ; export / import du rejeu ; charge gallery.ts au premier clic sur « Galerie » | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
 | [gallery.ts](../../src/client/gallery.ts) | la galerie, chargée à sa première ouverture (`import()`, hors du budget de la page) : vignettes, recherche par nom, tri (récents, vus, aimés), « J'aime », remix, suppression des siens | non (la recherche, `matches()` d'ui.ts : **oui**) |
+| [board.ts](../../src/client/board.ts) | le classement des défis livrés, chargé au premier défi lancé (`import()` de main.ts) : `show()` (records servis, jugés un à un par le fil de [sim/judge.ts](../../src/client/sim/judge.ts), dix au plus affichés, ▶ pour regarder un rejeu), `won()` (propose « Publier au classement ») | non (le jugement, `verdict()` de [sim/verdict.ts](../../src/client/sim/verdict.ts) : **oui**) |
 | [theme.ts](../../src/client/theme.ts) | thème Système / Jour / Nuit, onglet Général de la fenêtre Paramètres (onglets câblés dans keys.ts) | non |
 | [sim/*](../../src/client/sim/) | moteur, rendu, codec, registre, bac | **oui** |
+
+### Classement des défis
+
+Pour les défis **livrés** (`CHALLENGES`), pas les mondes-défis de la galerie :
+leur grille n'est pas bâtie en code, un juge n'aurait rien à quoi comparer le
+départ.
+
+- **Le bac enregistre chaque défi** depuis sa construction (`trial` de
+  sandbox.ts, un `Recorder` à part de celui du joueur), créé dans `scene()`
+  juste après `stamp()`. Gestes et ticks y vont comme dans `rec` ; tout ce
+  qui oublie le défi (`won = null`) l'oublie aussi, lancer un rejeu aussi.
+  À la victoire, `won` remonte avec la partie si `fair()` (replay.ts) la
+  reçoit : 320×180, au plus `TRIAL_TICKS` (cinq minutes), **sans grille posée
+  d'un coup** (annuler, rétablir) **ni morceau collé** — l'un et l'autre
+  peuvent poser une grille déjà gagnée.
+- **Le temps est en ticks** de simulation, celui du rejeu ; le record
+  personnel (`:records`, main.ts) reste à l'horloge murale.
+- **Le Worker ne juge pas** : rejouer cinq minutes coûterait ~9 s de calcul,
+  hors de l'offre gratuite. Il range les records par ticks annoncés et sert
+  les rejeux avec. **La page juge** : board.ts envoie chaque record au fil
+  de [sim/judge.ts](../../src/client/sim/judge.ts), un à la fois, qui le
+  décompresse (`unpack()`) et appelle `verdict()`
+  ([sim/verdict.ts](../../src/client/sim/verdict.ts)) : le défi rebâti **en
+  code** dans un moteur neuf doit donner la grille de départ du rejeu
+  (`encode()` comparé), le rejeu doit être recevable et durer les ticks
+  annoncés, et le défi doit être gagné à la fin. Seuls les records qui
+  tiennent s'affichent (dix au plus) ; le titre compte les écartés.
+- Le moteur étant déterministe et le même à un fil ou à quatre, ce qui a
+  gagné chez le joueur gagne chez le juge, au tick près — la victoire n'est
+  pourtant relevée que toutes les 500 ms : le rejeu s'arrête au tick où le
+  bac l'a vue, et le juge regarde au même.
+- **Limite** (`ponytail:` de `POST /api/records`) : un faux record entre au
+  classement, et `BOARD` faux records en tête le vident chez tous les
+  visiteurs jusqu'au ménage. Juger côté Worker le jour où un tricheur s'y met.
+- Un défi ajouté à `CHALLENGES` s'ajoute à `TRIALS` d'app.ts (test/api.ts
+  compare les deux listes).
 
 ### Galerie et mondes-défis
 
@@ -489,7 +562,7 @@ main.ts (vider, nouveau monde, décor, autre chargement, taille) appelle
 liste en main, « d'un monde disparu » s'il n'y est plus) et compte ses remix.
 
 **J'aime** : un bouton par carte, éteint une fois voté (`:votes`, 500 ids au
-plus). Cliquer une carte
+plus) ; le Worker, lui, ne compte qu'un vote par IP. Cliquer une carte
 recharge le monde par `GET /api/worlds/:id` — ne pas « optimiser » en
 réutilisant la copie en main, c'est ce chemin qui compte les vues. Le `×` de
 suppression n'apparaît que sur les cartes dont on détient le jeton. Un monde
@@ -512,7 +585,7 @@ kilo-octets de lien ne se déplient pas en gigaoctets. Le rejeu validé part au
 bac par `watch()` (rappel passé à `initShare()`) : ordre `reel`, puis lecture
 comme au bouton « Rejouer », taille du bac ajustée (`fit()`).
 
-Les modules périphériques (`room`, `lobby`, `share`, `gallery`, `theme`, `view`, `keys`, `palette`, `settings`, `hero`, `audio`, `sound`) ne doivent **pas**
+Les modules périphériques (`room`, `lobby`, `share`, `gallery`, `theme`, `view`, `keys`, `palette`, `settings`, `hero`, `audio`, `sound`, `board`) ne doivent **pas**
 importer main.ts (cycle) : main.ts leur passe ce dont ils ont besoin par un
 `init…()` à rappels.
 
@@ -522,7 +595,8 @@ Un `localStorage.getItem` nu jette quand les cookies sont bloqués, et au
 chargement d'un module cela laisse la page blanche. Clés existantes :
 `sandbox-rabbit:mondes`, `:reglages`, `:records`, `:bac`, `:theme`, `:touches`
 (les touches réassignées, relues par `parseBindings()`), `:votes` (les mondes
-aimés depuis ce navigateur, gallery.ts).
+aimés depuis ce navigateur, gallery.ts), `:cle-salon` (la clé qui réserve
+ses pseudos de salon, room.ts).
 
 `:bac` suit le format d'un lien de partage, `320~<grille>` (`loadWorld()` de
 main.ts lit les deux ; une valeur sans `~`, d'avant, se charge dans le bac tel

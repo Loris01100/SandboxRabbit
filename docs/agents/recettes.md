@@ -99,6 +99,11 @@ n'exprime pas : une entrée dans `CHALLENGES` de
 Les boutons, le chrono, le record et la détection (toutes les 500 ms, dans le
 Worker) sont génériques. test/sim.ts construit déjà chaque défi : vérifier
 qu'il ne démarre pas gagné. Mettre à jour la liste des défis du README.
+**Ajouter son nom à `TRIALS`** d'[app.ts](../../src/worker/app.ts), la liste
+des défis qui ont un classement : test/api.ts échoue tant qu'elle diffère de
+`CHALLENGES`. `build` ne doit pas tirer au sort : le juge du classement
+(sim/verdict.ts) le rebâtit dans un moteur neuf et compare la grille au
+départ du rejeu.
 `scene()` de sandbox.ts bâtit un défi à 20 °C (`AMBIENT`), l'ambiante du
 panneau rendue ensuite : `build` n'a pas à s'en soucier.
 
@@ -209,3 +214,22 @@ app.ts (binding optionnel `?` s'il est absent en local ou en test), puis
 comme absent (valeur par défaut) par les mondes d'avant ; ne jamais changer le
 sens d'un bloc existant. Vérifier dans test/sim.ts qu'une chaîne de l'ancien
 format se relit toujours.
+
+## Décoder une pile de production
+
+Un rapport d'erreur (journaux du Worker, filtre `message = "erreur joueur"`)
+cite le bundle minifié : `index-AbC123.js:1:48213`.
+
+1. Se placer sur **le commit déployé** : les cartes de sources ne sont
+   jamais publiées, on reconstruit le même code. Le nom haché du fichier le
+   garantit — `npm run pile` dit quand un fichier cité manque au build.
+2. Copier la pile dans un fichier, puis `npm run pile < pile.txt`
+   ([test/pile.ts](../../test/pile.ts)) : il lance `vite build` avec
+   `SOURCEMAP=hidden`, lit les cartes des fichiers cités, **les efface** de
+   `dist/`, et réécrit chaque ligne avec son `fichier.ts:ligne:colonne`.
+   Sous Windows, passer par l'entrée standard : npm coupe un argument à son
+   premier saut de ligne.
+
+Ce qu'on oublie : `dist/` est alors un build de ce commit-là. Ne pas lancer
+`wrangler deploy` dessus sans `npm run build` ; et ne jamais garder une carte
+dans `dist/` (`hidden` n'empêche que le lien vers elle, pas son envoi).

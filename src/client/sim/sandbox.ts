@@ -16,7 +16,7 @@ import type { Pool } from "./pool.ts";
 import { encode } from "./codec.ts";
 import { EMBER, FIRE, HERO, HERO_SLOTS, LAVA, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../gestures.ts";
-import { Player, Recorder, isGesture, put, vet, vetBeats, type Beat, type Recording } from "../replay.ts";
+import { Player, Recorder, fair, isGesture, put, vet, vetBeats, type Beat, type Recording } from "../replay.ts";
 import { CHALLENGES, SCENES, count } from "../challenges.ts";
 import { SEEDS, terrain } from "../terrain.ts";
 import { parseGoal, ticksFor } from "../ui.ts";
@@ -76,7 +76,8 @@ export type News =
   | { t: "desync" }
   | { t: "reply"; ask: number; value: unknown }
   | { t: "say"; text: string }
-  | { t: "won" }
+  /** Défi gagné, avec la partie depuis sa construction si le classement peut la recevoir (`fair()`), sinon null. */
+  | { t: "won"; film: Recording | null }
   | { t: "rec"; ticks: number; beats: number; size: number; w: number; h: number }
   | { t: "play"; on: boolean };
 
@@ -138,6 +139,13 @@ export class Sandbox {
   private player: Player | null = null;
   /** Condition de victoire du défi en cours, lue deux fois par seconde. */
   private won: ((e: Engine) => boolean) | null = null;
+  /**
+   * La partie du défi livré en cours, enregistrée depuis sa construction,
+   * pour le classement : elle part avec la victoire, et chaque visiteur la
+   * rejoue pour y croire (sim/verdict.ts). À part de `rec` : le joueur
+   * enregistre, ou pas, ce qu'il veut. Oubliée avec le défi.
+   */
+  private trial: Recorder | null = null;
   private cursor = { x: -1, y: -1 };
   /** Reliquat de tick quand la vitesse n'est pas entière (ralenti). */
   private pending = 0;
@@ -194,6 +202,7 @@ export class Sandbox {
         if (!isGesture(o.g, this.engine.cells.length)) return;
         applyGesture(this.engine, o.g);
         this.rec?.gesture(o.g);
+        this.trial?.gesture(o.g);
         this.stream?.gesture(o.g);
         return;
       case "set": {
@@ -220,6 +229,7 @@ export class Sandbox {
       case "terrain": return this.world(o.seed);
       case "goal": {
         const goal = parseGoal(o.goal);
+        this.trial = null; // un monde-défi de la galerie n'a pas de classement : sa grille n'est pas bâtie en code
         this.won = goal
           ? (e) => (goal.op === "ge" ? count(e, goal.id) >= goal.n : count(e, goal.id) < goal.n)
           : null;
@@ -329,7 +339,12 @@ export class Sandbox {
       // En pause, plus rien ne crépite : le fond sonore se tait avec le bac.
       const on = this.knobs.running;
       this.send({ t: "stats", filled, hum: on ? { fire, lava, rain: this.knobs.weather } : { fire: 0, lava: 0, rain: 0 } });
-      if (this.won?.(this.engine)) { this.won = null; this.send({ t: "won" }); }
+      if (this.won?.(this.engine)) {
+        const film = this.trial && fair(this.trial.rec) ? this.trial.rec : null;
+        this.won = null;
+        this.trial = null;
+        this.send({ t: "won", film });
+      }
     }
 
     if (this.engine.busy > 0) this.touched = true;
@@ -409,6 +424,7 @@ export class Sandbox {
     this.play(false);
     this.record(false);
     this.won = null;
+    this.trial = null;
     // La partie de départ de l'hôte passe au même crible qu'un rejeu importé.
     const ok = vet(rec);
     try {
@@ -423,6 +439,7 @@ export class Sandbox {
   private tick(): void {
     const rain = this.knobs.weather;
     this.rec?.tick(rain); // avant le pas : c'est l'état de la scène qui va servir
+    this.trial?.tick(rain);
     this.stream?.tick(rain);
     weather(this.engine, rain);
     this.engine.step();
@@ -438,6 +455,7 @@ export class Sandbox {
    */
   private stamp(): void {
     this.rec?.stamp();
+    this.trial?.stamp(); // annuler pendant un défi : la partie n'ira pas au classement (`fair()`)
     this.stream?.stamp();
   }
 
@@ -461,6 +479,7 @@ export class Sandbox {
         // Un défi vidé est souvent gagné d'avance (Débâcle : plus de glace du
         // tout) : vider l'abandonne.
         this.won = null;
+        this.trial = null;
         return;
       case "undo": return this.jump(this.undoStack, this.redoStack, "Annulé", "Rien à annuler.");
       case "redo": return this.jump(this.redoStack, this.undoStack, "Rétabli", "Rien à rétablir.");
@@ -521,6 +540,9 @@ export class Sandbox {
     this.engine.ambient = ambient;
     this.stamp();
     this.won = challenge ? challenge.won : null;
+    // Après `stamp()`, sur la grille que le salon vient d'arrondir : le juge
+    // rebâtit la même et la compare à celle-ci.
+    this.trial = challenge ? new Recorder(this.engine, this.knobs.weather) : null;
   }
 
   /**
@@ -536,6 +558,7 @@ export class Sandbox {
     terrain(this.engine, Math.min(SEEDS, Math.max(1, Math.floor(seed) || 1)));
     this.stamp();
     this.won = null;
+    this.trial = null;
   }
 
   /**
@@ -563,6 +586,7 @@ export class Sandbox {
     // Un autre monde : l'objectif du défi en cours ne le concerne plus. Un
     // monde-défi de la galerie réarme le sien juste après (ordre `goal`).
     this.won = null;
+    this.trial = null;
     if (ask !== undefined) this.send({ t: "reply", ask, value: true });
   }
 
@@ -572,6 +596,7 @@ export class Sandbox {
     // Un bac neuf (la cuvette, ou rien) remplirait d'avance plus d'un objectif.
     // Un défi livré se rebâtit après (`fit()` puis l'ordre `scene`).
     this.won = null;
+    this.trial = null;
     const { wind, ambient, gravity, emit } = this.engine;
     this.engine = new Engine(width, height);
     Object.assign(this.engine, { wind, ambient, gravity, emit });
@@ -635,6 +660,7 @@ export class Sandbox {
       return;
     }
     this.snapshot(); // le bac d'avant reste annulable
+    this.trial = null; // le rejeu remplace la grille du défi : il ne se gagne plus au classement
     this.player = new Player(this.film, this.engine);
     this.send({ t: "play", on: true });
   }

@@ -57,13 +57,37 @@ export function nick(raw: unknown): string {
  * joueurs portaient le même nom, et la liste ne disait plus qui était qui.
  * Vide reste vide : la page affiche « Joueur N », déjà distinct par son numéro.
  */
-export function unique(name: string, taken: string[]): string {
-  if (!name || !taken.includes(name)) return name;
+export function unique(name: string, taken: string[] | ((name: string) => boolean)): string {
+  const busy = typeof taken === "function" ? taken : (n: string) => taken.includes(n);
+  if (!name || !busy(name)) return name;
   for (let n = 2; ; n++) {
     const tail = ` ${n}`;
     const candidate = [...name].slice(0, NICK - tail.length).join("").trimEnd() + tail;
-    if (!taken.includes(candidate)) return candidate;
+    if (!busy(candidate)) return candidate;
   }
+}
+
+/** Durée pendant laquelle un pseudo reste à qui l'a porté, en ms : trente jours sans revenir, il se libère. */
+export const KEEP = 30 * 24 * 3600 * 1000;
+
+/** Le carnet des pseudos d'un salon : pour chacun, l'empreinte de la clé de qui le porte et sa dernière venue. */
+export type Book = Record<string, { key: string; at: number }>;
+
+/**
+ * Le pseudo qu'obtient un arrivant de clé `key` (empreinte de la clé que son
+ * navigateur garde, room.ts côté page) : le sien s'il est libre — ni porté
+ * dans le salon (`taken`), ni retenu au carnet par une autre clé depuis moins
+ * de `KEEP` —, sinon « Alice 2 »… Le carnet retient ensuite ce pseudo pour
+ * cette clé, et oublie ce qui a passé `KEEP`. Sans clé, rien n'est retenu :
+ * on ne protège pas un nom qu'on ne saurait rendre. Pur : le Durable Object
+ * (room.ts) le range dans son stockage.
+ */
+export function claim(book: Book, name: string, key: string, now: number, taken: string[]): { name: string; book: Book } {
+  const fresh: Book = {};
+  for (const [n, e] of Object.entries(book)) if (now - e.at < KEEP) fresh[n] = e;
+  const got = unique(name, (n) => taken.includes(n) || (fresh[n] !== undefined && fresh[n].key !== key));
+  if (got && key) fresh[got] = { key, at: now };
+  return { name: got, book: fresh };
 }
 
 /** Le plus petit numéro de joueur libre, de 1 à `PLACES` : il donne sa couleur au curseur, et se recycle quand un joueur part. */

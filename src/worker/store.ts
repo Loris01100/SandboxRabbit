@@ -24,6 +24,27 @@ export interface World {
   token?: string | null;
 }
 
+/** Un record du classement d'un défi livré. */
+export interface Entry {
+  id: string;
+  /** Le nom du défi (`CHALLENGES` de src/client/challenges.ts, `TRIALS` d'app.ts). */
+  challenge: string;
+  /** Le pseudo de qui l'a fait, nettoyé comme au salon (`nick()`). */
+  name: string;
+  /** Durée annoncée, en ticks de simulation (60 par seconde). */
+  ticks: number;
+  /** Le rejeu, compressé (`pack()` de src/client/replay.ts) : c'est lui la preuve, que chaque visiteur rejoue. */
+  film: string;
+  createdAt: string;
+}
+
+/**
+ * Records gardés par défi, servis tous : la page en rejoue jusqu'à en avoir
+ * dix qui tiennent. Plus que dix pour qu'une poignée de faux records déposés
+ * en tête ne chasse pas les vrais du classement.
+ */
+export const BOARD = 30;
+
 /** Le monde tel qu'il est servi : sans son jeton. */
 const shown = ({ token: _, ...world }: World): World => world;
 
@@ -36,10 +57,17 @@ export interface Store {
   remove(id: string, token: string): Promise<boolean>;
   /** Ne garde que les mondes choisis par `kept()` (ménage nocturne). */
   purge(keep: number): Promise<void>;
-  /** Compte un chargement. Appelé par `GET /api/worlds/:id`, seul chemin de chargement. */
-  see(id: string): Promise<void>;
-  /** Compte un « J'aime » ; rend le nouveau total, ou null si le monde n'existe pas. */
-  like(id: string): Promise<number | null>;
+  /**
+   * Compte un chargement, une fois par visiteur (`viewer`, l'empreinte que
+   * `who()` d'app.ts tire de son IP). Appelé par `GET /api/worlds/:id`, seul
+   * chemin de chargement.
+   */
+  see(id: string, viewer: string): Promise<void>;
+  /** Compte un « J'aime », une fois par votant ; rend le total, ou null si le monde n'existe pas. */
+  like(id: string, voter: string): Promise<number | null>;
+  /** Les `BOARD` meilleurs records d'un défi, du plus court au plus long (à égalité, le premier déposé). */
+  board(challenge: string): Promise<Entry[]>;
+  enter(entry: Entry): Promise<void>;
 }
 
 /**
@@ -56,14 +84,24 @@ export function createStore(env: Env): Store {
 }
 
 const memory = new Map<string, World>();
+/** Les votes et les vues déjà comptés, `monde|empreinte` (tables `votes` et `sightings` en D1). */
+const voted = new Set<string>();
+const sighted = new Set<string>();
+const entries: Entry[] = [];
+
+/** L'ordre du classement : le moins de ticks, puis le plus ancien. */
+const faster = (a: Entry, b: Entry): number => a.ticks - b.ticks || a.createdAt.localeCompare(b.createdAt);
 
 /**
  * Mondes gardés, et montrés par la galerie : les `keep` plus récents, les
  * `keep` plus vus **et** les `keep` plus aimés. Avec les seuls récents, 50 sauvegardes vides (deux minutes
  * et demie au débit permis) poussaient tous les autres mondes dehors, et le
  * ménage nocturne les effaçait.
- * ponytail: un spammeur à plusieurs IP peut encore gonfler les vues de ses
- * mondes ; un compte ou un Turnstile le jour où ça arrive.
+ * Une vue et un vote comptent une fois par IP et par monde (`see()`,
+ * `like()`) : une seule machine ne hisse plus un monde en tête.
+ *
+ * ponytail: un spammeur à plusieurs IP le peut encore — une vue par adresse.
+ * Un compte ou un Turnstile le jour où ça arrive.
  */
 function kept(worlds: World[], keep: number): World[] {
   const recent = [...worlds].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -97,19 +135,36 @@ function memoryStore(): Store {
       if (!world || !world.token || world.token !== token) return false;
       return memory.delete(id);
     },
-    async see(id) {
+    async see(id, viewer) {
       const world = memory.get(id);
-      if (world) world.views++;
+      if (!world || sighted.has(`${id}|${viewer}`)) return;
+      sighted.add(`${id}|${viewer}`);
+      world.views++;
     },
-    async like(id) {
+    async like(id, voter) {
       const world = memory.get(id);
       if (!world) return null;
-      world.likes = (world.likes ?? 0) + 1;
-      return world.likes;
+      if (!voted.has(`${id}|${voter}`)) {
+        voted.add(`${id}|${voter}`);
+        world.likes = (world.likes ?? 0) + 1;
+      }
+      return world.likes ?? 0;
     },
     async purge(keep) {
       const alive = kept([...memory.values()], keep);
       for (const world of memory.values()) if (!alive.includes(world)) memory.delete(world.id);
+      for (const set of [voted, sighted]) for (const key of set) if (!memory.has(key.split("|")[0])) set.delete(key);
+      const best = new Set<Entry>();
+      for (const name of new Set(entries.map((e) => e.challenge))) {
+        for (const e of entries.filter((x) => x.challenge === name).sort(faster).slice(0, BOARD)) best.add(e);
+      }
+      for (let i = entries.length - 1; i >= 0; i--) if (!best.has(entries[i])) entries.splice(i, 1);
+    },
+    async board(challenge) {
+      return entries.filter((e) => e.challenge === challenge).sort(faster).slice(0, BOARD);
+    },
+    async enter(entry) {
+      entries.push(entry);
     },
   };
 }
@@ -141,18 +196,44 @@ function d1Store(db: D1Database): Store {
       const { meta } = await db.prepare("DELETE FROM worlds WHERE id = ? AND token = ?").bind(id, token).run();
       return meta.changes > 0;
     },
-    async see(id) {
-      await db.prepare("UPDATE worlds SET views = views + 1 WHERE id = ?").bind(id).run();
+    // Les deux en un lot (une transaction, dans l'ordre) : `changes()` vaut 1 si
+    // l'empreinte vient d'entrer, 0 si elle y était — l'incrément ne compte
+    // donc que la première fois, sans lecture à part. Un monde absent n'a pas
+    // de ligne à mettre à jour ; sa ligne de vote orpheline part au ménage.
+    async see(id, viewer) {
+      await db.batch([
+        db.prepare("INSERT OR IGNORE INTO sightings (world, viewer) VALUES (?, ?)").bind(id, viewer),
+        db.prepare("UPDATE worlds SET views = views + changes() WHERE id = ?").bind(id),
+      ]);
     },
-    async like(id) {
-      // Une seule requête : l'incrément et le nouveau total, sans lecture à part.
-      const row = await db.prepare("UPDATE worlds SET likes = likes + 1 WHERE id = ? RETURNING likes").bind(id).first<{ likes: number }>();
-      return row?.likes ?? null;
+    async like(id, voter) {
+      const [, update] = await db.batch<{ likes: number }>([
+        db.prepare("INSERT OR IGNORE INTO votes (world, voter) VALUES (?, ?)").bind(id, voter),
+        db.prepare("UPDATE worlds SET likes = likes + changes() WHERE id = ? RETURNING likes").bind(id),
+      ]);
+      return update.results[0]?.likes ?? null;
     },
     async purge(keep) {
+      await db.batch([
+        db.prepare(`DELETE FROM worlds WHERE NOT (${KEPT})`).bind(keep),
+        db.prepare("DELETE FROM votes WHERE world NOT IN (SELECT id FROM worlds)"),
+        db.prepare("DELETE FROM sightings WHERE world NOT IN (SELECT id FROM worlds)"),
+        db.prepare(
+          "DELETE FROM records WHERE id NOT IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY challenge ORDER BY ticks, created_at) AS rank FROM records) WHERE rank <= ?)",
+        ).bind(BOARD),
+      ]);
+    },
+    async board(challenge) {
+      const { results } = await db
+        .prepare("SELECT id, challenge, name, ticks, film, created_at AS createdAt FROM records WHERE challenge = ? ORDER BY ticks, created_at LIMIT ?")
+        .bind(challenge, BOARD)
+        .all<Entry>();
+      return results;
+    },
+    async enter(entry) {
       await db
-        .prepare(`DELETE FROM worlds WHERE NOT (${KEPT})`)
-        .bind(keep)
+        .prepare("INSERT INTO records (id, challenge, name, ticks, film, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(entry.id, entry.challenge, entry.name, entry.ticks, entry.film, entry.createdAt)
         .run();
     },
   };

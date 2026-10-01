@@ -190,10 +190,12 @@ void main() {
  *    texel opaque qui brille, lui, ne reçoit rien : la lumière de son voisin
  *    est la sienne, et le bord d'une mer de lave virait au jaune saturé.
  *
- * ponytail: cascades « à la vanille », sans la correction bilinéaire des
- * rayons : de légers anneaux autour d'une petite flamme isolée, et un mur
- * fin fuit un peu vu de loin (mipmaps). Passer au *bilinear fix* le jour où
- * ça se remarque.
+ * Avec le *bilinear fix* : un rayon qui hérite de la cascade du dessus
+ * marche jusqu'à chacune des quatre sondes dont il hérite (`CASCADE`), au lieu
+ * de reprendre leur lumière depuis sa propre position — sans ça, des anneaux
+ * aux frontières des cascades autour d'une petite flamme. Quatre fois plus de
+ * marche dans `CASCADE` : la finesse de l'éclairage (Paramètres) en reste le
+ * levier pour une carte modeste.
  */
 const SCENE = `#version 300 es
 precision highp float;
@@ -232,6 +234,26 @@ uniform bool top;
 uniform vec2 size;
 out vec4 color;
 
+// Marche de a vers b, au pas de la cascade : la lumière ramassée (rgb) et ce
+// qui passe encore au bout (a). Le rayon s'arrête au bord ou presque opaque.
+vec4 march(vec2 a, vec2 b, float stride, float lod) {
+  vec2 seg = b - a;
+  float len = length(seg);
+  vec2 dir = seg / max(len, 1e-4);
+  vec3 rad = vec3(0.0);
+  float through = 1.0;
+  for (float s = stride * 0.5; s < len; s += stride) {
+    vec2 p = a + dir * s;
+    if (p.x < 0.0 || p.y < 0.0 || p.x >= size.x || p.y >= size.y) break;
+    vec4 m = textureLod(scene, p / size, lod);
+    float pass = pow(1.0 - m.a, stride);
+    if (m.a > 0.0) rad += through * m.rgb / m.a * (1.0 - pass);
+    through *= pass;
+    if (through < 0.01) break;
+  }
+  return vec4(rad, through);
+}
+
 void main() {
   ivec2 t = ivec2(gl_FragCoord.xy);
   int side = 2 << level;
@@ -245,35 +267,38 @@ void main() {
   float far = float((1 << (2 * level + 2)) - 1) / 3.0;
   float stride = float(max(1, (1 << level) >> 1));
   float lod = log2(stride);
-  vec3 rad = vec3(0.0);
-  float through = 1.0;
-  for (float s = near + stride * 0.5; s < far; s += stride) {
-    vec2 p = origin + dir * s;
-    if (p.x < 0.0 || p.y < 0.0 || p.x >= size.x || p.y >= size.y) break;
-    vec4 m = textureLod(scene, p / size, lod);
-    float pass = pow(1.0 - m.a, stride);
-    if (m.a > 0.0) rad += through * m.rgb / m.a * (1.0 - pass);
-    through *= pass;
-    if (through < 0.01) break;
+  vec2 start = origin + dir * near;
+  if (top) {
+    color = vec4(march(start, origin + dir * far, stride, lod).rgb, 1.0);
+    return;
   }
-  if (!top && through >= 0.01) {
-    int up = side * 2;
-    ivec2 count = textureSize(upper, 0) / up;
-    vec2 u = origin / float(2 << level) - 0.5;
-    ivec2 i0 = ivec2(floor(u));
-    vec2 f = u - floor(u);
-    vec3 sum = vec3(0.0);
-    for (int k = 0; k < 4; k++) {
-      ivec2 corner = clamp(i0 + ivec2(k & 1, k >> 1), ivec2(0), count - 1);
-      float w = ((k & 1) == 1 ? f.x : 1.0 - f.x) * ((k >> 1) == 1 ? f.y : 1.0 - f.y);
+  // *Bilinear fix* : quatre rayons, un par sonde du dessus, chacun de notre
+  // début d'anneau jusqu'au début d'anneau de cette sonde-là, puis ce qu'elle
+  // voit au-delà (ses quatre directions filles), pondérés en bilinéaire. Un
+  // seul rayon depuis notre sonde héritait de sondes décalées par rapport à
+  // lui : des anneaux autour d'une petite flamme, et un mur fin vu de loin
+  // laissait passer la lumière.
+  int up = side * 2;
+  ivec2 count = textureSize(upper, 0) / up;
+  vec2 u = origin / float(2 << level) - 0.5;
+  ivec2 i0 = ivec2(floor(u));
+  vec2 f = u - floor(u);
+  vec3 total = vec3(0.0);
+  for (int k = 0; k < 4; k++) {
+    ivec2 corner = clamp(i0 + ivec2(k & 1, k >> 1), ivec2(0), count - 1);
+    float w = ((k & 1) == 1 ? f.x : 1.0 - f.x) * ((k >> 1) == 1 ? f.y : 1.0 - f.y);
+    vec2 above = (vec2(corner) + 0.5) * float(2 << level);
+    vec4 seg = march(start, above + dir * far, stride, lod);
+    vec3 beyond = vec3(0.0);
+    if (seg.a >= 0.01) {
       for (int c = 0; c < 4; c++) {
         int child = d * 4 + c;
-        sum += w * texelFetch(upper, corner * up + ivec2(child % up, child / up), 0).rgb;
+        beyond += texelFetch(upper, corner * up + ivec2(child % up, child / up), 0).rgb;
       }
     }
-    rad += through * sum * 0.25;
+    total += w * (seg.rgb + seg.a * beyond * 0.25);
   }
-  color = vec4(rad, 1.0);
+  color = vec4(total, 1.0);
 }`;
 
 const FLUENCE = `#version 300 es
@@ -525,6 +550,9 @@ const relight = (cells: number): number => Math.max(50, Math.min(200, cells / 10
  * rectangle changé. L'éclairage y passe par `FlatLight` (sim/flatlight.ts),
  * qui ressemble au shader sans en être une copie, chargé à la première frame
  * éclairée : d'ici là, et s'il ne se charge pas, le bac est peint sans lumière.
+ * La page collecte ; le calcul part dans un fil à lui (flatlight-worker.ts),
+ * un seul à la fois, et la lumière qui revient fait repeindre le bac entier.
+ * Sans ce fil (il n'a pas pu naître), le calcul se fait ici.
  */
 function flatScreen(canvas: HTMLCanvasElement): Screen {
   const ctx = canvas.getContext("2d", { alpha: false })!;
@@ -535,6 +563,38 @@ function flatScreen(canvas: HTMLCanvasElement): Screen {
   let loading = false;
   let litAt = -Infinity;
   let wasLit = false;
+  let worker: Worker | null = null;
+  let busy = false;
+  let alone = false; // le fil de l'éclairage n'a pas pu naître : calcul sur place
+  /** Le bac entier, repeint avec la lumière qui vient d'arriver. */
+  const repaint = (): void => {
+    if (!of || !renderer || !image || !wasLit) return;
+    renderer.paint(0, 0, of.width, of.height);
+    ctx.putImageData(image, 0, 0);
+  };
+  /** Confie le calcul au fil de l'éclairage ; false s'il n'y en a pas (calcul sur place). */
+  const solveAway = (grid: Grid): boolean => {
+    if (alone || !lights) return false;
+    if (!worker) {
+      try {
+        worker = new Worker(new URL("./sim/flatlight-worker.ts", import.meta.url), { type: "module" });
+      } catch {
+        alone = true;
+        return false;
+      }
+      worker.onmessage = (e: MessageEvent<{ light: Float32Array; width: number; height: number; scale: number }>) => {
+        busy = false;
+        lights?.adopt(e.data.light, e.data.width, e.data.height, e.data.scale);
+        repaint();
+      };
+      worker.onerror = () => { alone = true; busy = false; worker = null; };
+    }
+    if (busy) return true; // un calcul en cours : la lumière d'avant tient encore
+    busy = true;
+    const job = lights.collect(grid);
+    worker.postMessage(job, [job.emit.buffer, job.alpha.buffer]);
+    return true;
+  };
   return {
     kind: "2d",
     detail() {},
@@ -559,8 +619,10 @@ function flatScreen(canvas: HTMLCanvasElement): Screen {
       const now = performance.now();
       if (on && lights && now - litAt >= relight(grid.width * grid.height)) {
         litAt = now;
-        lights.compute(grid);
-        x0 = 0; y0 = 0; x1 = grid.width; y1 = grid.height;
+        if (!solveAway(grid)) {
+          lights.compute(grid);
+          x0 = 0; y0 = 0; x1 = grid.width; y1 = grid.height;
+        }
       }
       renderer.lights = on ? lights : null;
       renderer.view = view;

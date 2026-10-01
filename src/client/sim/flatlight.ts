@@ -7,9 +7,12 @@
 import { RED_HOT, lighting, type Grid } from "./render.ts";
 
 /** Largeur de la grille de lumière du secours 2D, en texels au plus : un texel couvre `scale × scale` cellules. */
-export const FLAT_LIGHT = 80;
+export const FLAT_LIGHT = 160;
 /** Rayons lancés par texel dans le secours 2D, répartis sur le tour. */
 const RAYS = 16;
+
+/** Ce que la page envoie au fil de l'éclairage (flatlight-worker.ts) : le niveau 0, collecté. */
+export interface Gathered { emit: Float32Array; alpha: Float32Array; width: number; height: number; scale: number }
 
 /** Un niveau de la pyramide de lumière : émission prémultipliée (r, g, b) et opacité, moyennées. */
 interface Level { width: number; height: number; emit: Float32Array; alpha: Float32Array }
@@ -28,12 +31,11 @@ interface Level { width: number; height: number; emit: Float32Array; alpha: Floa
  * opaques sautés : ~4,5 ms par éclairage, de 320×180 à 1920×1080, d'où
  * l'espacement de `relight()` (screen.ts).
  *
- * ponytail: une grille de 80 texels, six fois plus grossière que celle du
- * shader (480) : une ombre fine (un pilier de 3 cellules en 320×180) s'y
- * dilue, et les deux chemins se ressemblent sans coïncider — `npm run
- * browser` ne compare pas l'éclairage. Doubler la grille quadruple le coût
- * (~18 ms) : à revoir si une ombre fine manque dans un bac sans WebGL2, ou si
- * le calcul part dans un Worker.
+ * Dans la page, le calcul tourne dans un fil à lui (flatlight-worker.ts) : la
+ * page collecte (`collect()`, ~1 ms), le fil lance les rayons (`solve()`)
+ * sans que rien ne l'attende — d'où une grille de 160 texels, où une ombre
+ * fine se voit. Les deux chemins se ressemblent sans coïncider : `npm run
+ * browser` ne compare pas l'éclairage.
  */
 export class FlatLight {
   /** Cellules par côté de texel. */
@@ -42,7 +44,7 @@ export class FlatLight {
   width = 0;
   height = 0;
   /** La lumière reçue, trois flottants (r, g, b, de 0 à ~1) par texel : ce que le mélange ajoute. */
-  light = new Float32Array(0);
+  light: Float32Array = new Float32Array(0);
   private levels: Level[] = [];
   private readonly table = lighting();
   /**
@@ -57,17 +59,47 @@ export class FlatLight {
     return [Math.cos(a), Math.sin(a)] as const;
   }));
 
-  /** Recalcule toute la lumière de `grid`. */
+  /** Recalcule toute la lumière de `grid`, ici même : les tests, et une page sans fil d'éclairage. */
   compute(grid: Grid): void {
+    this.collect(grid);
+    this.solve();
+  }
+
+  /**
+   * La part de la page : collecter la grille de lumière (`SCENE`), et la
+   * rendre à envoyer au fil de l'éclairage — des copies, que `postMessage`
+   * peut transférer sans toucher aux tampons d'ici.
+   */
+  collect(grid: Grid): Gathered {
     const scale = Math.max(1, Math.ceil(grid.width / FLAT_LIGHT));
     const lw = Math.ceil(grid.width / scale), lh = Math.ceil(grid.height / scale);
     if (lw !== this.width || lh !== this.height || scale !== this.scale) this.allocate(lw, lh);
     this.scale = scale;
     this.gather(grid);
+    const { emit, alpha } = this.levels[0];
+    return { emit: emit.slice(), alpha: alpha.slice(), width: lw, height: lh, scale };
+  }
+
+  /** Le fil de l'éclairage reçoit une collecte (`collect()`) : il la pose au niveau 0. */
+  load(g: Gathered): void {
+    if (g.width !== this.width || g.height !== this.height || g.scale !== this.scale) this.allocate(g.width, g.height);
+    this.scale = g.scale;
+    this.levels[0].emit.set(g.emit);
+    this.levels[0].alpha.set(g.alpha);
+  }
+
+  /** La part du fil de l'éclairage : pyramide, rayons, lissage, fin de `FLUENCE`. */
+  solve(): void {
     for (let k = 1; k < this.levels.length; k++) this.reduce(this.levels[k - 1], this.levels[k]);
     this.march();
     this.smooth();
     this.finish();
+  }
+
+  /** La page reçoit la lumière calculée par le fil de l'éclairage ; ignorée si le bac a changé de taille entre-temps. */
+  adopt(light: Float32Array, width: number, height: number, scale: number): void {
+    if (width !== this.width || height !== this.height || scale !== this.scale) return;
+    this.light = light;
   }
 
   private allocate(lw: number, lh: number): void {

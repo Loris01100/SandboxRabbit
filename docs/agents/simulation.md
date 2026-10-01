@@ -61,11 +61,15 @@ tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
    vide ou du gaz se trouve à moins de 15 cellules : au-delà, un fil d'une
    autre phase peut écrire. Une très longue colonne garde donc une rangée
    trouée toutes les 16 environ. Une cellule posée sur une cellule différée
-   est différée aussi (`held`).
+   est différée aussi (`held`). `swap()` efface la marque de la place
+   d'arrivée : une cellule différée qu'un liquide plus dense passe dessous a
+   bougé, et sa place d'avant porte ce qui l'a remplacée — qui, rejoué par
+   `release()`, faisait un pas de trop.
 4. `release()` : les cellules différées, triées dans l'ordre du balayage
    (celles du bas d'abord) et jouées seules, avec une graine à elles
    (`mix(tick ^ 0x27d4eb2f)`) : ni le nombre de fils ni l'ordre où ils les
-   ont posées (`waiting`, `CTL.held`) ne comptent.
+   ont posées (`waiting`, `CTL.held`) ne comptent. Une place dont `held` a
+   été effacé est sautée.
 5. `settle()` : les explosions mises de côté pendant le damier (`blast()`),
    jouées une à une dans l'ordre du balayage, au souffle de leur matière
    (`BLAST`). Une charge déjà emportée par une voisine ne saute plus.
@@ -397,12 +401,13 @@ réinitialiser à l'aveugle**, chaque matière en fait autre chose.
 | `SOURCE` | la matière émise (0 ou id inconnu : de l'eau) |
 | `CANDLE` | mèche allumée |
 | `METAL` | ticks de repos après une étincelle (`RECOVERY`) |
+| `RUST` | humidité (`WET` = 250 contre l'eau, `SEEP` de moins par voisine, sèche d'un cran par tick) |
 | `SWITCH` | 1 = fermé |
 | `URANIUM` | compteur d'emballement |
 | `MAGNET` | pôle (1 = repousse) |
 | `RABBIT` | satiété du cœur (0 au chargement d'un monde sans état vivant = repart pleine) ; les cellules du corps n'en ont pas |
 | `HERO` | bit 7 = tourné vers la gauche (où il creuse), bits 0-3 = élan de saut restant ; perdu, il repart debout vers la droite. Le corps n'en a pas |
-| `HERO_HEAD`, `HERO_BODY`, `HERO_LEGS` | la fiche du héros, une donnée par cellule (`HERO_SLOTS` de materials.ts) : tête = numéro (1-250, 0 = pas encore tiré), buste = dégâts (mort à `HERO_HARM`), bras gauche = âge au-delà de 18 ans, jambes = cellules creusées / posées (plafonnées à 250). Tout à zéro = héros neuf en pleine santé |
+| `HERO_HEAD`, `HERO_BODY`, `HERO_LEGS` | la fiche du héros, une donnée par cellule (`HERO_SLOTS` de materials.ts) : tête = numéro (1-250, 0 = pas encore tiré), buste = dégâts (mort à `HERO_HARM`), bras gauche = âge au-delà de 18 ans, bras droit = matière du sac (0 = vide), jambe gauche = cellules creusées (plafonnées à 250), jambe droite = cellules dans le sac (`BAG` = 250 au plus ; c'était le compteur des cellules posées, relu comme un sac de matière 0, donc vide). Tout à zéro = héros neuf en pleine santé |
 
 ## Familles de règles
 
@@ -481,32 +486,56 @@ mur, et une voisine qui n'est pas de l'air compte pour la cellule elle-même
     poudre part avec une chance divisée par sa densité ; poussée de côté mais
     bloquée, elle est soulevée en biais. Lecture à une cellule : sans risque
     en multi-fils.
-- **`breathe()`**, après la chaleur : `AIR_STEPS` sous-pas de diffusion
-  amortie (`FLOW`, `DAMP`) sur les blocs éveillés, chacun une passe partagée
-  entre les fils (`JOB.air`, puis `JOB.gust` au dernier). Au dernier, un bloc
-  sous `CALM_P` partout est remis à zéro (`hush`) et `JOB.hush` vide aussi
-  l'autre tampon ; les autres se tiennent éveillés et relèvent `CTL.gust`.
+- **L'air a de l'élan** : `windX[i]` sur la face entre i et sa voisine de
+  droite, `windY[i]` entre i et celle du dessous (positif vers la droite, vers
+  le bas), un `Float32Array` partagé chacun. Une onde **voyage** (un souffle
+  au bout d'un couloir y arrive en front, et rebondit), au lieu de s'étaler
+  comme la diffusion d'avant.
+- **`breathe()`**, après la chaleur : `AIR_STEPS` sous-pas sur les blocs
+  éveillés, chacun en deux passes partagées entre les fils :
+  - `JOB.wind` (`windChunk()`) : chaque face que tient le bloc prend `WIND_K`
+    (0,25 ; stable sous 0,5) fois la différence de pression de part et
+    d'autre, puis garde `DRAG` (0,97) de son élan. Une face qui touche autre
+    chose que de l'air, ou le bord, est nulle. Le bloc n'écrit que ses faces
+    et ne lit que `press`, que personne n'écrit pendant cette passe. Sauté
+    quand `still()` : pression nulle sur le bloc **et sa bordure**, élan nul
+    **sur le bloc seul** — l'élan de la bordure, un bloc voisin l'écrit
+    pendant cette même passe (le lire faisait diverger 1 et 4 fils) ;
+  - `JOB.air` (`JOB.gust` au dernier, `airChunk()`) : la pression de chaque
+    cellule prend ce que ses quatre faces apportent ou emportent, puis `DAMP`,
+    bornée à 0. Au dernier sous-pas, un bloc sous `CALM_P` en pression et
+    `CALM_V` (0,005) en élan est remis à zéro (`hush`) ; un bloc agité se
+    tient éveillé, **réveille ses quatre voisins** (l'onde y entre au tick
+    suivant au lieu de buter sur un bloc endormi) et relève `CTL.gust` ;
+  - `JOB.hush` vide l'autre tampon **et l'élan** des blocs calmés. Pas
+    `airChunk()` : ses voisins lisent encore cet élan pendant la passe.
+
   `CTL.gust` à 0 : toute la passe est sautée, un bac sans explosion ne paie rien.
 - **Invariant : un bloc endormi a une pression nulle dans les deux
-  tampons.** Il ne s'endort qu'une fois remis à zéro, et `puff()` le réveille.
-  Ses voisins le lisent donc sans équivalent de `pulled()`.
-- `hushed()` saute le calcul d'un bloc sans pression, bordure comprise : le
-  sous-pas y rendrait 0 au bit près, la pression n'étant jamais négative (pas
-  de -0). Sans lui, une salve dans le chantier coûtait 42 ms par tick.
+  tampons, et un élan nul.** Il ne s'endort qu'une fois remis à zéro, et
+  `puff()` le réveille. Ses voisins le lisent donc sans équivalent de
+  `pulled()`.
+- `hushed()` saute le calcul d'un bloc sans pression ni élan, bordure
+  comprise : le sous-pas y rendrait 0 au bit près, la pression n'étant
+  jamais négative (pas de -0). Sans lui, une salve dans le chantier coûtait
+  42 ms par tick.
 - **Le vent** : `blown()`, en tête de `moveGas()`, pousse le gaz d'une cellule
-  dans le sens du gradient, avec une chance `GUST` × gradient. Sous
+  dans le sens de l'élan de l'air (moyenne de ses faces, divisée par
+  `WIND_K` pour retrouver l'échelle d'un gradient), avec une chance `GUST` ×
+  cet élan. Sous
   `GUST_MIN`, ou si le tick a commencé sans pression (`gusty`), il ne lit ni
   ne tire rien : sans souffle, les gaz montent aux mêmes tirages qu'avant.
 - **La pression ne voyage pas** : ni codec, ni rejeu, ni salon. `wakeAll()`
-  la remet à zéro, donc tout départ (`put()` → `adopt()`), annulation,
+  la remet à zéro, élan compris, donc tout départ (`put()` → `adopt()`), annulation,
   gravité ou ambiante changée repart sans pression, chez l'hôte comme chez
   l'invité. Elle ne vit qu'une seconde : personne ne le voit.
 - Calcul en f64 rangé en f32, même ordre d'additions que la chaleur : le port
   Rust (`air()` de rust/src/lib.rs) le reproduit au bit près, voir
-  [docs/rust.md](../rust.md). Un changement de `airChunk()` ou `hushed()` se
-  reporte dans lib.rs.
-- `ponytail:` de `breathe()` : une diffusion, pas un fluide (ni vitesse ni
-  inertie), et ce qui fuit vers un bloc endormi est perdu pour le tick.
+  [docs/rust.md](../rust.md). Un changement de `windChunk()`, `airChunk()`,
+  `still()` ou `hushed()` se reporte dans lib.rs.
+- Ce n'est toujours pas un fluide complet : l'air n'a ni convection ni
+  transport, il ne porte ni la fumée ni la chaleur — seulement une onde qui
+  pousse les gaz et les poudres.
 - **La vue pression** (touche `b`) lit `press` par palier (`airLevel()` de
   render.ts, 1/8 d'unité, un octet par cellule dans les bandes) : voir
   [Rendu](#rendu).
@@ -522,8 +551,14 @@ mur, et une voisine qui n'est pas de l'air compte pour la cellule elle-même
   tire `RUST_FRESH` (1/2400) ou `RUST_SALT` (1/480) par tick et devient `RUST`,
   qui ne conduit pas. Le tirage n'a lieu **que** contre l'eau (un fil sec ne
   tire rien), et le métal mouillé appelle `wake(i)` : sinon un fil au fond
-  d'un lac étale s'endort et ne rouille jamais. Seule la surface mouillée
-  rouille (`ponytail:` d'`updateMetal()`).
+  d'un lac étale s'endort et ne rouille jamais.
+- **L'eau passe par la rouille** : `RUST` garde son humidité dans `life`
+  (`updateRust()`) — `WET` au contact de l'eau, sinon celle de sa voisine la
+  plus humide moins `SEEP` (25), et elle sèche d'un cran par tick. Le métal
+  qui touche une rouille humide rouille avec la chance `RUST_FRESH × humidité
+  / WET` : une poutre trempée est rongée jusqu'à dix cellules du bord, pas
+  seulement en surface. Humide, la rouille réveille son bloc et le métal
+  voisin (c'est elle qui agit) ; sèche, elle ne tire rien et dort.
 - `SWITCH` ne devient **jamais** une étincelle : il la relaie. Sinon il
   redeviendrait `METAL` à l'extinction et disparaîtrait.
 
@@ -570,7 +605,16 @@ tête : `airway()` et `stifling()`, partagés avec le héros), faim, chute, puis
 - Acide et retombées le tuent via `CREATURE`, le feu via `flammable`.
 - Coût : ~70 lectures par lapin et par tick (corps, parties, regard). Si des
   centaines de lapins pèsent au bench, `sniff()` et `intact()` d'abord.
-- La forme ne suit pas la gravité inversée (`ponytail:` dans le code).
+- **La forme suit la gravité** : `tall(shape)` rend le sens des `dy`
+  (`fall` pour le lapin, 1 pour le héros, que la page lit à des places
+  fixes) dans `spawn()`, `intact()`, `kill()`, `maim()`, `relocate()`,
+  `updatePart()`, comme la bouche, la naissance, `airway()` et `sniff()`.
+  Gravité inversée, il a les pattes au plafond. Le setter `gravity` retourne
+  ceux qui sont déjà là (`turnRabbits()`, entre deux ticks, avant de changer
+  `fall`) **dans leur boîte** : le cœur se décale d'une rangée, la satiété
+  suit. Retourné autour du cœur, un lapin posé avait les oreilles dans le sol
+  et mourait écrasé. Une case de la boîte prise par autre chose laisse le
+  corps incomplet : il meurt au tick suivant.
 
 ### Créatures : le héros
 
@@ -615,12 +659,19 @@ les autres attendent debout, mais vivent (chute, dégâts, âge).
   son escalier. La matière est filtrée par `placeable()` (materials.ts) dans
   `applyGesture`, seule porte d'entrée de `pilot` (rejeu compris) : le moteur
   ne la revérifie pas, 0 = rien à poser.
+- **Le sac** : ce qu'il creuse va au sac (`stash()`) s'il est vide ou porte
+  déjà cette matière, et qu'elle se pose (`PLACEABLE`), jusqu'à `BAG` = 250 ;
+  sinon elle est perdue. Il pose (`put()`) du sac d'abord, de la palette
+  quand il est vide. Le sac vit dans la fiche (`HERO_SLOTS.bag` et `.load`)
+  et, le temps du tour, dans `bagId` / `bagN` — des champs du moteur, mais
+  propres à chaque fil (le moteur d'un fil ne joue que ses héros), relus en
+  tête d'`updateHero()` et rangés à la fin.
 - **Sa fiche vit dans son corps** (`HERO_SLOTS`) : le `life` du cœur est
   plein (sens, saut) et rien ne se garde hors des cellules (plusieurs fils,
   salon). `relocate()` emporte le `life` de chaque case — le lapin n'y a que
   des zéros, son empreinte n'a pas bougé. Écrite en fin de tick, à la
-  position d'arrivée ; `dig()` et `lay()` rendent ce qu'ils ont fait pour les
-  compteurs.
+  position d'arrivée ; `dig()` rend ce qu'il a creusé pour le
+  compteur.
 - Son **nom** n'est pas dans la grille : le numéro en choisit un dans `NAMES`
   (gestures.ts), sauf nom donné par le geste `name`, rangé dans
   `engine.names` (que le moteur ne lit pas) et sauvé en 5ᵉ bloc du codec.
@@ -692,7 +743,7 @@ tick en 1920×1080 chargé (`npm run directions`).
   tests et à `npm run directions` ; le test du miroir (test/sandbox.ts)
   vérifie qu'un miroir se colorie comme le moteur.
 - **Seule exception : l'éclairage global** (*radiance cascades*, screen.ts),
-  en WebGL2, et par `FlatLight` (sim/flatlight.ts) dans le secours 2D, qui lui
+  en WebGL2, et par `FlatLight` (sim/flatlight.ts, calculé dans un Worker à lui) dans le secours 2D, qui lui
   ressemble sans en être une copie (voir [rendu.md](rendu.md#le-secours-2d)).
   Les deux ajoutent leur lumière par-dessus le coloriage commun, avec le même
   mélange (`LIGHT_HALO`, `LIGHT_GAIN` de render.ts).

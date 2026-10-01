@@ -73,12 +73,16 @@ export const PILOT = { left: 1, right: 2, up: 4, down: 8, dig: 16, place: 32 } a
 /**
  * Ce que le corps du héros garde dans `life`, une cellule par donnée, en
  * offsets [dx, dy] depuis son cœur : son numéro (0 = pas encore tiré), ses
- * dégâts, son âge au-delà de 18 ans, ce qu'il a creusé et posé (plafonnés à
- * 250). Tout à zéro est un héros valide — neuf, en pleine santé — : c'est ce
+ * dégâts, son âge au-delà de 18 ans, ce qu'il a creusé (plafonné à 250), et
+ * son sac — la matière qu'il porte (`bag`, 0 = rien) et combien (`load`, 250
+ * au plus). `load` est l'ancienne case « posées » : relue dans une grille
+ * d'avant le sac, elle compte un sac de matière 0, donc vide. Tout à zéro est un héros valide — neuf, en pleine santé — : c'est ce
  * que devient un héros venu d'une grille sans état vivant. La fiche (hero.ts)
  * les relit dans le miroir.
  */
-export const HERO_SLOTS = { name: [0, -2], harm: [0, -1], age: [-1, -1], dug: [-1, 1], laid: [1, 1] } as const;
+export const HERO_SLOTS = { name: [0, -2], harm: [0, -1], age: [-1, -1], bag: [1, -1], dug: [-1, 1], load: [1, 1] } as const;
+/** Cellules d'une même matière que le sac du héros tient au plus (`life` est un octet). */
+export const BAG = 250;
 /** Dégâts qui tuent le héros. */
 export const HERO_HARM = 200;
 

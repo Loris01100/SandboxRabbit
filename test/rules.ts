@@ -174,17 +174,21 @@ for (const [nom, id] of Object.entries(IDS)) {
  * **type** : ils reçoivent le moteur du Worker en argument, ils ne le créent
  * pas. Ils ne sont donc pas dans la liste.
  */
-const PAGE = ["main", "world", "screen", "room", "share", "theme", "view", "keys", "palette", "settings", "hero", "ui", "errors", "audio", "sound", "gallery", "lobby"];
+const PAGE = ["main", "world", "screen", "room", "share", "theme", "view", "keys", "palette", "settings", "hero", "ui", "errors", "audio", "sound", "gallery", "lobby", "board"];
 for (const nom of PAGE) {
   assert.ok(!code(`src/client/${nom}.ts`).includes("sim/engine.ts"),
     `${nom}.ts ne doit pas importer l'Engine : world.ts est la seule porte vers la simulation`);
 }
 
-/** Un seul fil de simulation, créé par world.ts (sim/worker.ts se relance lui-même en fils auxiliaires). */
+/**
+ * Un seul fil de simulation, créé par world.ts (sim/worker.ts se relance
+ * lui-même en fils auxiliaires). Un autre fil qui n'y touche pas reste permis :
+ * l'éclairage du secours 2D (sim/flatlight-worker.ts), que crée screen.ts.
+ */
 for (const nom of PAGE) {
   if (nom === "world") continue;
-  assert.ok(!code(`src/client/${nom}.ts`).includes("new Worker("),
-    `${nom}.ts ne doit pas créer de Worker : world.ts tient le seul fil de simulation`);
+  assert.ok(!/new Worker\(\s*new URL\(\s*["']\.\/sim\/worker\.ts/.test(code(`src/client/${nom}.ts`)),
+    `${nom}.ts ne doit pas créer le Worker de simulation : world.ts tient le seul fil de simulation`);
 }
 
 /**
@@ -192,7 +196,7 @@ for (const nom of PAGE) {
  * laisserait l'un des deux à moitié chargé (ses exports encore à
  * `undefined`). main.ts leur passe ce qu'il faut par un `init…()` à rappels.
  */
-for (const nom of ["room", "share", "theme", "view", "keys", "palette", "settings", "hero", "audio", "sound", "gallery", "lobby"]) {
+for (const nom of ["room", "share", "theme", "view", "keys", "palette", "settings", "hero", "audio", "sound", "gallery", "lobby", "board"]) {
   assert.ok(!/from "\.\/main/.test(code(`src/client/${nom}.ts`)),
     `${nom}.ts ne doit pas importer main.ts (cycle) : passer par un rappel d'init…()`);
 }

@@ -9,8 +9,10 @@
 import assert from "node:assert/strict";
 import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
 import { Renderer, land } from "../src/client/sim/render.ts";
-import { decode } from "../src/client/sim/codec.ts";
+import { decode, encode } from "../src/client/sim/codec.ts";
 import { count } from "../src/client/challenges.ts";
+import { verdict } from "../src/client/sim/verdict.ts";
+import { TRIAL_TICKS, fair } from "../src/client/replay.ts";
 import { EMPTY, FIRE, HERO, PILOT, SAND, STONE, TNT, WATER } from "../src/client/sim/materials.ts";
 
 const W = 80, H = 45;
@@ -519,6 +521,50 @@ function filmé(): { sim: Sandbox; news: News[] } {
   assert.ok(count(sim.engine, WATER) > 0, "le lac est bâti liquide");
   assert.equal(sim.engine.temp[sim.engine.index(160, 150)], 20, "à 20 °C");
   assert.equal(sim.engine.ambient, -60, "et l'ambiante du panneau revient aussitôt");
+}
+
+// Le classement des défis : la victoire d'un défi livré remonte avec la
+// partie depuis sa construction, et le juge (sim/verdict.ts) la rejoue dans
+// un moteur neuf — autre graine, autre fil — pour y croire.
+{
+  const gagne = (ambient: number, avant?: (sim: Sandbox) => void): Extract<News, { t: "won" }> | undefined => {
+    const { sim, news } = bac();
+    sim.order({ t: "size", w: 320, h: 180, keep: true });
+    sim.order({ t: "set", k: { ambient } });
+    sim.order({ t: "scene", name: "Débâcle" });
+    run(sim, 10);
+    avant?.(sim);
+    // La glace et la neige effacées d'un geste : Débâcle gagné.
+    sim.order({ t: "do", g: { t: "rect", x: 90, y: 90, x2: 230, y2: 150, id: EMPTY, over: true } });
+    run(sim, 40);
+    return last(news, "won");
+  };
+  const won = gagne(-10);
+  assert.ok(won?.film, "la victoire remonte avec sa partie");
+  const film = won.film;
+  assert.ok(fair(film) && film.ticks > 10, `une partie recevable, depuis la construction (${film.ticks} ticks)`);
+  assert.equal(film.scene.ambient, -10, "l'ambiante du panneau est dans la partie, le défi bâti à 20 °C");
+  assert.ok(verdict("Débâcle", film, film.ticks), "le juge la rejoue et la trouve gagnante");
+  assert.ok(!verdict("Débâcle", film, film.ticks - 1), "pas en moins de ticks qu'annoncé");
+  assert.ok(!verdict("Grand froid", film, film.ticks), "ni pour un autre défi");
+  assert.ok(!verdict("Débâcle", { ...film, beats: [] }, film.ticks), "sans le geste, elle ne gagne pas");
+  const ailleurs = bac();
+  ailleurs.sim.order({ t: "size", w: 320, h: 180, keep: true });
+  ailleurs.sim.order({ t: "scene", name: "Grand froid" });
+  const autre = ailleurs.sim.engine;
+  const triche = { ...film, grid: encode(autre.cells, autre.frozen, autre.life, autre.temp, autre.names) };
+  assert.ok(!verdict("Débâcle", triche, film.ticks), "une partie qui part d'une autre grille ne compte pas");
+  assert.ok(!fair({ ...film, ticks: TRIAL_TICKS + 1 }), "ni une partie de plus de cinq minutes");
+  assert.ok(!fair({ ...film, beats: [...film.beats, { at: 1, g: { t: "clip", x: 0, y: 0, w: 1, h: 1, cells: "", life: "" } }] }), "ni un morceau collé");
+
+  // Annuler pendant le défi pose une grille d'un coup : la victoire reste, hors classement.
+  const annulé = gagne(20, (sim) => {
+    sim.order({ t: "do", g: { t: "rect", x: 0, y: 0, x2: 3, y2: 3, id: SAND, over: true } });
+    sim.order({ t: "edit", do: "snapshot" });
+    sim.order({ t: "edit", do: "undo" });
+  });
+  assert.ok(annulé, "annuler n'empêche pas de gagner");
+  assert.equal(annulé.film, null, "mais la partie n'est pas recevable au classement");
 }
 
 console.log("ok — protocole du bac conforme");

@@ -20,24 +20,29 @@
  * touche pas la grille : il voyage à part (`cursor`), au plus toutes les
  * `POINT` ms, et ne peut pas faire diverger le lockstep.
  *
- * Deux joueurs ne portent pas le même pseudo (le salon ajoute « 2 », `unique()`
- * de relay.ts), et l'hôte peut mettre les invités en lecture seule : c'est lui
- * qui applique leurs gestes, c'est donc lui qui les refuse ; le message `lock`
- * ne fait que prévenir les invités.
+ * Deux joueurs ne portent pas le même pseudo (le salon ajoute « 2 »), et un
+ * pseudo reste trente jours à qui l'a porté : le navigateur garde une clé
+ * (`KEY`), le salon retient pour quelle clé il a vu ce nom (`claim()` de
+ * relay.ts) — un autre navigateur ne peut plus entrer sous le nom d'un
+ * absent. L'hôte peut mettre les invités en lecture seule : c'est lui qui
+ * applique leurs gestes, c'est donc lui qui les refuse ; le message `lock` ne
+ * fait que prévenir les invités.
  *
- * ponytail: un pseudo n'est pas une identité — rien ne l'authentifie, on peut
- * entrer sous le nom d'un absent ; à revoir avec des comptes, le jour où la
- * galerie en a. Et un invité voit son propre coup de pinceau après un
- * aller-retour : pas de prédiction locale (il faudrait peindre chez lui, puis
- * défaire quand la partie de l'hôte arrive) ; à revoir si l'aller-retour se
- * sent, avec des salons loin de leur Durable Object.
+ * Un invité ne peint pas chez lui : son geste part à l'hôte et revient dans la
+ * partie, un aller-retour plus tard. En attendant, un **fantôme** du coup
+ * (`ghost()`) s'affiche tout de suite par-dessus le bac — disque ou rectangle
+ * translucide de la couleur de la matière, hors du rendu —, et s'efface quand
+ * la partie de l'hôte apporte des gestes. Le peindre pour de bon, puis le
+ * défaire si l'hôte en décidait autrement, demanderait de rejouer la partie
+ * par-dessus : le fantôme dit « c'est parti » sans rien risquer.
  *
  * Ce module ne connaît ni le bouton Pause ni le sélecteur de taille : il les
  * demande par des rappels, sinon il faudrait importer main.ts et boucler.
  */
 import { HEIGHT, WIDTH, cellBox, listen, order } from "./world.ts";
 import type { Gesture } from "./gestures.ts";
-import { peerColor } from "./ui.ts";
+import { peerColor, read, write } from "./ui.ts";
+import { MATERIALS } from "./sim/materials.ts";
 
 /** Appelé quand on devient hôte (true) ou invité (false) : un invité ne pilote pas la pause. */
 let onRole: (host: boolean) => void = () => {};
@@ -60,11 +65,49 @@ export function initRoom(hooks: {
   onApply = hooks.apply;
 }
 
+/** La clé de ce navigateur, qui lui garde son pseudo d'une visite à l'autre (`claim()` de relay.ts). Tirée une fois. */
+const KEY = "sandbox-rabbit:cle-salon";
+function browserKey(): string {
+  let key = read(KEY);
+  if (!key) { key = crypto.randomUUID(); write(KEY, key); }
+  return key;
+}
+
+/** Un coup de pinceau envoyé à l'hôte et pas encore revenu : son aperçu, et quand il est parti. */
+interface Ghost { el: HTMLDivElement; x: number; y: number; w: number; h: number; round: boolean; at: number }
+const ghosts: Ghost[] = [];
+/** Un fantôme ne dure jamais plus que ça, en ms : un geste refusé (lecture seule, partie perdue) ne laisse pas de trace. */
+const GHOST = 1000;
+
+/** Le fantôme d'un geste qui peint, posé tout de suite par-dessus le bac. */
+function ghost(g: Gesture): void {
+  if (g.t !== "paint" && g.t !== "rect") return;
+  const m = MATERIALS[g.id];
+  if (!m) return;
+  const el = document.createElement("div");
+  el.className = "ghost";
+  el.style.background = `rgb(${m.color.join(",")})`; // CSSOM : la CSP refuse style=
+  peersEl.append(el);
+  if (g.t === "paint") ghosts.push({ el, x: g.x - g.r, y: g.y - g.r, w: 2 * g.r + 1, h: 2 * g.r + 1, round: true, at: performance.now() });
+  else {
+    const x = Math.min(g.x, g.x2), y = Math.min(g.y, g.y2);
+    ghosts.push({ el, x, y, w: Math.abs(g.x2 - g.x) + 1, h: Math.abs(g.y2 - g.y) + 1, round: false, at: performance.now() });
+  }
+}
+
+/** Efface les fantômes partis avant `before` (ms) : leurs gestes sont revenus dans la partie. */
+function settleGhosts(before: number): void {
+  for (let k = ghosts.length - 1; k >= 0; k--) {
+    if (ghosts[k].at < before) { ghosts[k].el.remove(); ghosts.splice(k, 1); }
+  }
+}
+
 /** Relaie un geste à l'hôte. Sans salon, ou quand on est l'hôte, ne fait rien. */
 export function relay(g: Gesture): void {
   if (socket?.readyState !== WebSocket.OPEN || host) return;
   if (locked) { statusEl.textContent = "L'hôte a mis le bac en lecture seule."; return; }
   socket.send(JSON.stringify({ type: "do", g }));
+  ghost(g);
 }
 
 /** JSON toléré : un message illisible est ignoré, pas propagé en exception. */
@@ -151,8 +194,15 @@ function drawRoster(): void {
  * image, zoom et caméra compris, comme le cadre du héros.
  */
 export function placeCursors(): void {
-  if (players.size === 0) return;
+  if (players.size === 0 && ghosts.length === 0) return;
   const c = cellBox(), stage = peersEl.getBoundingClientRect();
+  settleGhosts(performance.now() - GHOST);
+  for (const g of ghosts) {
+    g.el.classList.toggle("round", g.round);
+    g.el.style.transform = `translate(${c.left - stage.left + g.x * c.sx}px, ${c.top - stage.top + g.y * c.sy}px)`;
+    g.el.style.width = `${g.w * c.sx}px`;
+    g.el.style.height = `${g.h * c.sy}px`;
+  }
   for (const p of players.values()) {
     if (!p.el) continue;
     // Une grille d'une autre taille (le temps d'un nouveau départ) : on ne sait pas où il est.
@@ -248,6 +298,7 @@ function leaveRoom(): void {
   lockRow.hidden = true;
   pointed = "";
   players.clear();
+  ghosts.length = 0;
   peersEl.replaceChildren();
   drawRoster();
   order({ t: "host", on: false });
@@ -280,7 +331,7 @@ function join(name: string): void {
   quitting = false;
   // Le pseudo voyage dans l'URL : le salon le nettoie et le range avec le socket.
   const nick = encodeURIComponent(nickInput.value.trim());
-  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/room/${encodeURIComponent(name)}?nick=${nick}`);
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/room/${encodeURIComponent(name)}?nick=${nick}&key=${browserKey()}`);
   socket = ws;
   room = name;
   roomButton.textContent = "Quitter le salon";
@@ -324,6 +375,9 @@ function join(name: string): void {
     }
     if (msg.type === "turn" && !host && typeof msg.ticks === "number" && Array.isArray(msg.beats) && Array.isArray(msg.sums)) {
       order({ t: "turn", ticks: msg.ticks, beats: msg.beats, sums: msg.sums });
+      // Des gestes reviennent : ceux partis il y a plus de 40 ms y sont — le
+      // vrai coup prend la place de son fantôme.
+      if (msg.beats.length > 0) settleGhosts(performance.now() - 40);
     }
     if (msg.type === "do" && host && msg.g && !locked) onApply(msg.g);
     if (msg.type === "lock" && !host) {

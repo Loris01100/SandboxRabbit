@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PLACES, cursor, freeId, nick, roster, route, unique, type Player } from "./relay.ts";
+import { PLACES, claim, cursor, freeId, nick, roster, route, type Book, type Player } from "./relay.ts";
 
 /**
  * Salon d'un bac partagé. Le Durable Object **ne simule rien** : il relaie.
@@ -23,19 +23,35 @@ function player(ws: WebSocket): Player {
 }
 const isHost = (ws: WebSocket): boolean => player(ws).host;
 
+/** L'empreinte de la clé d'un navigateur (SHA-256, hexadécimal), vide sans clé utilisable. */
+async function fingerprint(key: string | null): Promise<string> {
+  if (!key || key.length > 100) return "";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export class Room extends DurableObject {
-  fetch(request: Request): Response {
+  async fetch(request: Request): Promise<Response> {
     const before = this.ctx.getWebSockets();
     if (before.length >= PLACES) {
       return new Response("salon complet", { status: 503 });
     }
+    // Le pseudo, retenu pour la clé du navigateur qui l'a porté (`claim()`) :
+    // un autre ne peut plus entrer sous le nom d'un absent. La clé ne se garde
+    // qu'en empreinte.
+    const url = new URL(request.url);
+    const key = await fingerprint(url.searchParams.get("key"));
+    const book = (await this.ctx.storage.get<Book>("names")) ?? {};
+    const taken = before.map((ws) => player(ws).name);
+    const kept = claim(book, nick(url.searchParams.get("nick")), key, Date.now(), taken);
+    await this.ctx.storage.put("names", kept.book);
     const [client, server] = Object.values(new WebSocketPair());
     // API « hibernation » : le DO peut dormir sans fermer les sockets.
     this.ctx.acceptWebSocket(server);
     const all = this.ctx.getWebSockets();
     const host = all.length === 1;
     const id = freeId(before.map((ws) => player(ws).id));
-    const name = unique(nick(new URL(request.url).searchParams.get("nick")), before.map((ws) => player(ws).name));
+    const name = kept.name;
     server.serializeAttachment({ host, id, name } satisfies Player);
     // Son numéro avec son rôle : la page s'en sert pour se reconnaître dans la liste.
     server.send(JSON.stringify({ type: "role", host, id }));

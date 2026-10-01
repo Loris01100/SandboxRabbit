@@ -1,4 +1,4 @@
-import { HERO_HARM, HERO_SLOTS, PILOT } from "./sim/materials.ts";
+import { HERO_HARM, HERO_SLOTS, MATERIALS, PILOT, type MaterialId } from "./sim/materials.ts";
 import { current } from "./palette.ts";
 import { bindings, held } from "./keys.ts";
 import { keyLabel, type Action } from "./ui.ts";
@@ -74,9 +74,8 @@ export let heroId = 0;
 /**
  * Remplit la fiche du héros suivi : son nom vient de la frame (les noms
  * donnés vivent dans le bac), le reste de son corps dans le miroir
- * (`HERO_SLOTS`). Le champ du nom n'est pas réécrit pendant qu'on y tape.
- * ponytail: ni métier ni inventaire — il pose la matière de la palette sans
- * compter ; à ajouter le jour où creuser ramasse.
+ * (`HERO_SLOTS`), sac compris. Le champ du nom n'est pas réécrit pendant
+ * qu'on y tape.
  */
 function card(name: string): void {
   const grid = seen();
@@ -91,7 +90,9 @@ function card(name: string): void {
   hpEl.value = hp;
   hpValueEl.value = String(hp);
   const most = (n: number) => (n >= 250 ? "250+" : String(n));
-  const facts = `${18 + at(HERO_SLOTS.age)} ans · ${Math.round(grid.temp[y * w + x])} °C · ${most(at(HERO_SLOTS.dug))} cellules creusées, ${most(at(HERO_SLOTS.laid))} posées`;
+  const load = at(HERO_SLOTS.load), bag = MATERIALS[at(HERO_SLOTS.bag) as MaterialId];
+  const carried = bag && at(HERO_SLOTS.bag) !== 0 && load > 0 ? `sac : ${load} × ${bag.name.toLowerCase()}` : "sac vide";
+  const facts = `${18 + at(HERO_SLOTS.age)} ans · ${Math.round(grid.temp[y * w + x])} °C · ${most(at(HERO_SLOTS.dug))} cellules creusées · ${carried}`;
   if (factsEl.textContent !== facts) factsEl.textContent = facts;
 }
 

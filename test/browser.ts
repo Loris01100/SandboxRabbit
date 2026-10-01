@@ -8,7 +8,9 @@
  *    erreur ne sort dans la console — c'est tout ce qui couvre main.ts, le
  *    câblage DOM et le Worker de simulation dans un vrai navigateur ;
  * 3. une exception lancée dans la page part vers `/api/error` (errors.ts) et
- *    le Worker l'accepte.
+ *    le Worker l'accepte ;
+ * 4. le juge du classement des défis (sim/judge.ts) rejoue, dans son fil, une
+ *    partie gagnée ici même.
  *
  * Le navigateur s'installe une fois par machine : `npx playwright install
  * chromium` (voir docs/navigateur.md).
@@ -17,6 +19,9 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { createServer } from "vite";
 import type { Report } from "./screen.ts";
+import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
+import { EMPTY } from "../src/client/sim/materials.ts";
+import { pack } from "../src/client/replay.ts";
 
 /**
  * Part des pixels où shader et `Renderer` peuvent différer d'une unité. GLSL
@@ -102,6 +107,32 @@ try {
   assert.match(sent.request().postData() ?? "", /^page : Error: essai de remontée/, "une exception de la page part vers /api/error");
   assert.equal(sent.status(), 204, "le Worker l'accepte");
 
+  // Le juge du classement, dans son fil : une vraie partie de Débâcle, gagnée
+  // dans un bac ici même puis compressée comme la page la publie (`pack()`),
+  // tient ; annoncée un tick plus courte, non.
+  const déjà = errors.length; // l'exception volontaire juste au-dessus
+  const nouvelles: News[] = [];
+  const bac = new Sandbox(320, 180, (n) => nouvelles.push(n));
+  bac.order({ t: "scene", name: "Débâcle" });
+  bac.order({ t: "do", g: { t: "rect", x: 90, y: 90, x2: 230, y2: 150, id: EMPTY, over: true } });
+  for (let n = 0; n < 40; n++) bac.frame(16);
+  const victoire = nouvelles.find((n): n is Extract<News, { t: "won" }> => n.t === "won");
+  assert.ok(victoire?.film, "la partie de Débâcle est gagnée, avec son rejeu");
+  const verdicts = await page.evaluate(async ({ film, ticks }) => {
+    const juge = new Worker(new URL("/src/client/sim/judge.ts", location.href), { type: "module" });
+    const réponses = new Map<string, (ok: boolean) => void>();
+    juge.onmessage = (e: MessageEvent<{ id: string; ok: boolean }>) => réponses.get(e.data.id)?.(e.data.ok);
+    const juger = (id: string, t: number) => new Promise<boolean>((done) => {
+      réponses.set(id, done);
+      juge.postMessage({ id, challenge: "Débâcle", ticks: t, film });
+    });
+    const dits = [await juger("vrai", ticks), await juger("trop court", ticks - 1)];
+    juge.terminate();
+    return dits;
+  }, { film: await pack(victoire.film), ticks: victoire.film.ticks });
+  assert.deepEqual(verdicts, [true, false], "le juge rejoue la partie dans le navigateur : la vraie tient, la fausse non");
+  assert.deepEqual(errors.slice(déjà), [], "le juge tourne sans erreur dans la console");
+
   // Le salon, à deux, sur le Durable Object que Vite fait tourner dans workerd :
   // pseudos, liste des joueurs, curseur de l'autre, promotion quand l'hôte part.
   // Un nom de salon neuf à chaque passage, pour ne croiser personne.
@@ -131,6 +162,13 @@ try {
   assert.equal(await bob.$eval(".peer", (e) => e.textContent), "Alice", "Bob voit le curseur d'Alice, à son nom");
   await alice.mouse.move(2, 2);
   await bob.waitForFunction(() => [...document.querySelectorAll<HTMLElement>(".peer")].every((e) => e.hidden), null, { timeout: 5_000 });
+  // Le coup de pinceau d'un invité : son fantôme tout de suite, le temps que
+  // la partie de l'hôte le ramène.
+  const cadreBob = (await bob.locator("#world").boundingBox())!;
+  const fantôme = bob.waitForSelector(".ghost", { state: "attached", timeout: 5_000 });
+  await bob.mouse.click(cadreBob.x + cadreBob.width / 3, cadreBob.y + cadreBob.height / 3);
+  assert.ok(await fantôme, "le coup de l'invité s'affiche tout de suite, en fantôme");
+  await bob.waitForFunction(() => document.querySelectorAll(".ghost").length === 0, null, { timeout: 5_000 });
   // Le verrou : seul l'hôte le voit, et l'invité en est prévenu.
   assert.equal(await bob.$eval("#room-lock-row", (e) => (e as HTMLElement).hidden), true, "un invité n'a pas le verrou");
   await alice.evaluate(() => { const c = document.querySelector<HTMLInputElement>("#room-lock")!; c.checked = true; c.dispatchEvent(new Event("change")); });
@@ -139,6 +177,12 @@ try {
   await bob.waitForFunction(() => document.querySelectorAll("#roster li").length === 1, null, { timeout: 10_000 });
   assert.deepEqual(await noms(bob), ["Bob <b> (hôte) (vous)"], "Alice partie : Bob mène, et son curseur à elle a disparu");
   assert.equal(await bob.$$eval(".peer", (l) => l.length), 0);
+  // Une autre « Alice » (un autre navigateur, une autre clé) : le nom reste à
+  // l'absente.
+  const usurpatrice = await joueur("Alice");
+  await usurpatrice.waitForFunction(() => document.querySelectorAll("#roster li").length === 2, null, { timeout: 15_000 });
+  assert.deepEqual(await noms(usurpatrice), ["Alice 2 (vous)", "Bob <b> (hôte)"], "le pseudo d'une absente lui reste (la nouvelle venue reprend le numéro 1)");
+  await usurpatrice.close();
   await bob.close();
   assert.deepEqual(ratés, [], "le salon tourne sans erreur");
 
@@ -153,6 +197,7 @@ try {
     p.on("console", (m) => { if (m.type() === "error") plat.push(m.text()); });
     // L'éclairage y est chargé à la première frame éclairée (sim/flatlight.ts).
     const lumière = p.waitForResponse((r) => r.url().includes("/flatlight.ts"), { timeout: 30_000 });
+    const fil = p.waitForResponse((r) => r.url().includes("flatlight-worker"), { timeout: 30_000 });
     await p.goto(base);
     await p.waitForFunction(() => document.querySelector<HTMLCanvasElement>("#world")!.width !== 300, null, { timeout: 30_000 });
     assert.ok((await lumière).ok(), "le module d'éclairage du secours se charge");
@@ -163,13 +208,14 @@ try {
     await p.keyboard.press("6");
     const cadre2 = (await p.locator("#world").boundingBox())!;
     await p.mouse.click(cadre2.x + cadre2.width / 2, cadre2.y + cadre2.height / 2);
+    assert.ok((await fil).ok(), "le calcul part dans son fil (sim/flatlight-worker.ts)");
     await p.waitForTimeout(500);
     assert.deepEqual(plat, [], "le secours 2D éclaire sans erreur");
   } finally {
     await sansGl.close();
   }
 
-  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, son démarré, contexte WebGL retrouvé, erreur remontée, salon à deux, secours 2D éclairé`);
+  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, son démarré, contexte WebGL retrouvé, erreur remontée, record jugé, salon à deux, secours 2D éclairé`);
 } finally {
   await browser.close();
   await server.close();

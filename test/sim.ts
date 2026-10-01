@@ -612,6 +612,22 @@ function count(e: Engine, id: MaterialId): number {
   assert.ok(douce > 0, `dans l'eau, il rouille (${douce} cellules en 600 ticks)`);
   assert.ok(salée > douce * 2, `l'eau salée le ronge bien plus vite (${salée} contre ${douce})`);
 
+  // L'eau passe par la rouille : une barre épaisse finit rongée sous sa surface.
+  const barre = engine();
+  barre.rect(0, H - 2, W - 1, H - 1, STONE);
+  barre.rect(10, H - 8, 49, H - 3, METAL); // six cellules d'épaisseur
+  barre.rect(0, H - 20, W - 1, H - 9, SALTWATER);
+  for (let t = 0; t < 4000; t++) barre.step();
+  let dessous = 0;
+  for (let x = 10; x < 50; x++) for (let y = H - 6; y <= H - 3; y++) if (barre.get(x, y) === RUST) dessous++;
+  assert.ok(dessous > 0, `la rouille gagne l'intérieur de la barre (${dessous} cellules sous les deux premières rangées)`);
+  // Sèche, la rouille ne gagne rien.
+  const sèche = engine();
+  sèche.rect(10, 20, 30, 20, METAL);
+  sèche.set(20, 20, RUST);
+  for (let t = 0; t < 600; t++) sèche.step();
+  assert.equal(count(sèche, RUST), 1, "à sec, la rouille ne se propage pas");
+
   // Un fil rouillé au milieu ne laisse plus passer l'étincelle.
   const e = engine();
   for (let x = 10; x < 40; x++) e.set(x, 20, METAL);
@@ -739,6 +755,24 @@ function count(e: Engine, id: MaterialId): number {
   for (let x = 20; x < 30; x++) e.set(x, 19, FALLOUT);
   for (let t = 0; t < 30; t++) e.step();
   assert.equal(count(e, PLANT), 0, "les retombées tuent la plante");
+}
+
+// Gravité inversée : le lapin se retourne avec elle, et tombe au plafond pattes
+// en premier — vivant, oreilles vers le bas.
+{
+  const e = new Engine(W, H, 11);
+  e.rect(0, 0, W - 1, 1, STONE);
+  e.rect(0, H - 2, W - 1, H - 1, STONE);
+  e.paint(30, H - 5, 1, RABBIT);
+  for (let t = 0; t < 20; t++) e.step();
+  assert.equal(count(e, RABBIT), 1, "le lapin est posé");
+  e.gravity = -1;
+  for (let t = 0; t < 120; t++) e.step();
+  assert.equal(count(e, RABBIT), 1, "retourné, il vit encore");
+  const cœur = e.cells.indexOf(RABBIT), x = cœur % W, y = (cœur / W) | 0;
+  assert.ok(y < H / 2, `il est tombé vers le plafond (cœur en y = ${y})`);
+  assert.equal(e.get(x, y + 2), RABBIT_BODY, "l'oreille est sous le cœur");
+  assert.equal(count(e, RABBIT_BODY) + count(e, RABBIT_EYE) + count(e, RABBIT_TAIL), 8, "le corps entier");
 }
 
 // Le lapin. Graines fixes : ses règles tirent beaucoup au sort, et un test qui
@@ -1247,6 +1281,21 @@ function top(e: Engine, id: MaterialId): number {
   for (let y = 0; y < 64; y++) for (let x = 64; x < 96; x++) derrière += mur.press[y * 96 + x];
   assert.equal(derrière, 0, "l'onde ne traverse pas un mur");
 
+  // L'air a de l'élan : dans un couloir, le souffle part en deux fronts qui
+  // s'éloignent du centre. Une simple diffusion y gardait son maximum.
+  const couloir = new Engine(160, 21, 5);
+  couloir.rect(0, 0, 159, 8, STONE);
+  couloir.rect(0, 12, 159, 20, STONE);
+  couloir.explode(80, 10, 3);
+  const pic = (): number => {
+    let best = 0, at = 80;
+    for (let x = 0; x < 160; x++) if (couloir.press[10 * 160 + x] > best) { best = couloir.press[10 * 160 + x]; at = x; }
+    return at;
+  };
+  const départ = pic();
+  for (let t = 0; t < 8; t++) couloir.step();
+  assert.ok(Math.abs(pic() - 80) > Math.abs(départ - 80) + 5, `l'onde voyage : son pic passe de ${départ} à ${pic()}`);
+
   /** Cellules de verre éclatées par un TNT à `d` cellules de la vitre, à l'air libre ou dans une pièce close. */
   const vitre = (d: number, close: boolean): number => {
     const e = new Engine(160, 90, 3);
@@ -1340,7 +1389,7 @@ function top(e: Engine, id: MaterialId): number {
   };
 
   const empreinte = fingerprint(run(1234));
-  assert.equal(empreinte, "ba5208ad", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
+  assert.equal(empreinte, "ce7a1a98", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
   assert.equal(fingerprint(run(1234)), empreinte, "et rejouable : deux fois la même graine, la même grille");
   assert.notEqual(fingerprint(run(9876)), empreinte, "une autre graine donne une autre partie");
 }
@@ -1696,6 +1745,24 @@ function top(e: Engine, id: MaterialId): number {
   assert.ok(fiche(nommé, HERO_SLOTS.dug) > 0, "il compte ce qu'il creuse");
   assert.ok(heroName(nommé, numéro).length > 0, "son nom d'origine vient de la liste");
 
+  // Creuser ramasse : le sable arraché va au sac, et poser puise dans le sac
+  // avant la palette (ici de la pierre).
+  const sac = plaine();
+  sac.rect(14, SOL - 6, 15, SOL - 1, SAND);
+  tenir(sac, PILOT.right | PILOT.dig, 120);
+  assert.equal(fiche(sac, HERO_SLOTS.bag), SAND, "il porte ce qu'il a creusé");
+  const porté = fiche(sac, HERO_SLOTS.load);
+  assert.ok(porté > 0, `et combien (${porté})`);
+  const sable = count(sac, SAND), pierre = count(sac, STONE);
+  applyGesture(sac, { t: "pilot", keys: PILOT.place | PILOT.up | (STONE << 8) });
+  for (let t = 0; t < 30 && fiche(sac, HERO_SLOTS.load) === porté; t++) sac.step();
+  assert.ok(fiche(sac, HERO_SLOTS.load) < porté, "le sac se vide quand il pose");
+  assert.ok(count(sac, SAND) > sable, "il pose le sable de son sac");
+  assert.equal(count(sac, STONE), pierre, "pas la pierre de la palette, tant que le sac n'est pas vide");
+  for (let t = 0; t < 60; t++) sac.step();
+  assert.equal(fiche(sac, HERO_SLOTS.load), 0, "vidé, le sac");
+  assert.ok(count(sac, STONE) > pierre, "puis il pose la pierre de la palette");
+
   // Deux héros ne partagent pas de numéro : `chosen` en est un, ils obéiraient
   // ensemble. Le tirage d'avant le prenait de la place du cœur, et deux héros
   // dont les index sont distants de 250 — ici une marche de quatre rangées —
@@ -1834,7 +1901,7 @@ for (let id = 0; id < 256; id++) {
   assert.ok(at(40, 45) > 0.05, `à côté de la lave, de la lumière (${at(40, 45).toFixed(3)})`);
   assert.ok(at(40, 45) > at(70, 45), "plus loin, moins");
   assert.ok(at(70, 45) > at(95, 45) * 4, `derrière le mur, l'ombre (${at(70, 45).toFixed(3)} devant, ${at(95, 45).toFixed(3)} derrière)`);
-  assert.ok(at(81, 45) > 0, "le mur, opaque, prend la lumière de son voisin éclairé");
+  assert.ok(at(80, 45) > 0, "le mur, opaque, prend la lumière de son voisin éclairé (sa face côté lave)");
   assert.equal(at(25, 45), 0, "la lave, qui brille, ne reçoit rien en plus");
 
   const noir = new Engine(W2, H2);

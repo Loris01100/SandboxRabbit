@@ -102,9 +102,9 @@ trop peu de changements d'état pour vérifier `convert()`.
 
 Il fait ensuite de même pour la pression, sur une **salve** : le chantier
 tassé 50 ticks, une nappe de fumée, et seize charges qui sautent au même
-tick, en 1920×1080 puis en 1917×1077. `breathe()` en JavaScript contre les
-deux versions Rust d'`air()`, comparées au bit près (les deux tampons, `stir`,
-`hush` et l'indicateur `CTL.gust`) sur 10 ticks. Il échoue si une version
+tick, en 1920×1080 puis en 1917×1077. `breathe()` en JavaScript contre
+`air()` en Rust, comparés au bit près (les deux tampons de pression, l'élan
+`windX` / `windY`, `stir`, `hush` et l'indicateur `CTL.gust`) sur 10 ticks. Il échoue si une version
 diffère, ou si la salve laisse trop peu de pression à comparer. Il ne garde aucun budget de
 temps : comme `npm run directions`, c'est un instrument de décision, pas un
 test. Il ne tourne pas en CI, qui n'a pas Rust.
@@ -189,22 +189,23 @@ Deux écarts avec engine.ts, sans effet sur le résultat, pour la vitesse :
 ### La pression
 
 `air()` suit `breathe()` d'engine.ts : trois sous-pas qui échangent les
-tampons (le résultat finit donc dans `next`), le raccourci `hushed()` pour un
-bloc sans pression, la remise à zéro des blocs calmés dans les deux tampons.
-Il reçoit la table `OPEN` d'engine.ts (1 = air), exportée pour test/rust.ts.
-Deux versions, toutes deux **au bit près** :
+tampons (le résultat finit donc dans `next`), chacun en deux passes —
+l'élan des faces (`wind_chunk()`, sautée quand `still()`), puis la pression
+(`air_chunk()`) —, le raccourci `hushed()` pour un bloc sans pression ni
+élan, le réveil des quatre voisins d'un bloc agité, et la remise à zéro des
+blocs calmés (les deux tampons et l'élan, comme `hushChunk()`). Il reçoit la
+table `OPEN` d'engine.ts (1 = air), exportée pour test/rust.ts. Une seule
+version, copie cellule par cellule en f64, **au bit près**.
 
-| Mode | Calcul |
-| --- | --- |
-| 0 | copie cellule par cellule d'`airChunk()`, f64 |
-| 1 | SIMD, deux cellules intérieures à la fois (f64×2). « Cette voisine est-elle de l'air ? » devient un masque (`v128_bitselect`) : il choisit des bits sans rien calculer, le résultat ne bouge pas. Les bords du bac restent au mode 0 |
+Le mode SIMD (f64×2, « cette voisine est-elle de l'air ? » en masque
+`v128_bitselect`) mesurait l'ancienne diffusion ; il n'a pas été refait pour
+l'élan de l'air, dont chaque cellule lit les faces de ses voisines écrites à
+la passe d'avant. Pas de version f32 : la chaleur a montré qu'elle diverge,
+et un salon mixte avec elle.
 
-Pas de version f32 : la chaleur a montré qu'elle diverge, et un salon mixte
-avec elle.
-
-Un changement de `airChunk()`, `hushed()` ou des constantes (`AIR_STEPS`,
-`FLOW`, `DAMP`, `CALM_P`) se reporte dans lib.rs : sinon `npm run rust`
-échoue.
+Un changement de `windChunk()`, `airChunk()`, `still()`, `hushed()` ou des
+constantes (`AIR_STEPS`, `WIND_K`, `DRAG`, `DAMP`, `CALM_P`, `CALM_V`) se
+reporte dans lib.rs : sinon `npm run rust` échoue.
 
 ## Résultats
 
@@ -325,6 +326,29 @@ Ce qu'on en tire :
   moins que les souffles eux-mêmes et le feu qu'ils sèment : la porter seule en
   Rust gagnerait environ 6 ms sur un tick de 67. Comme pour la chaleur, c'est
   le reste du tick qui décide.
+Ces mesures sont celles de la diffusion d'avant l'élan de l'air ; voir
+ci-dessous.
+
+### La pression avec élan (2 octobre 2026)
+
+L'air a désormais de l'élan sur ses faces (`windX`, `windY`, voir
+[simulation.md](agents/simulation.md#pression-et-vent)) : deux passes par
+sous-pas au lieu d'une, et deux tableaux de plus à lire. Même salve, mêmes
+conditions :
+
+| Scène | Tick JS | `breathe()` JS | Rust f64 |
+| --- | --- | --- | --- |
+| salve 1920×1080, 46 % des blocs éveillés | 74 ms | 23 à 24 ms (32 % du tick) | ×1,7 à 1,8 |
+| salve 1917×1077, 9 % des blocs éveillés | 15 ms | 6 ms (40 % du tick) | ×1,35 à 1,45 |
+
+- **Au bit près**, élan compris.
+- La pression coûte à peu près **deux fois** ce que coûtait la diffusion en
+  JavaScript (23 ms contre 11 à 13 dans la salve 1080p), pendant la seconde
+  qui suit les souffles ; toujours rien sans explosion. En Rust, elle
+  gagnerait une dizaine de millisecondes sur ce tick-là.
+- La piste en TypeScript ci-dessous tient toujours, et pèse davantage :
+  `hushed()` et `still()` relisent maintenant trois tableaux.
+
 - Avant d'aller plus loin en Rust, une piste en TypeScript : `hushed()` relit
   toute la bordure de chaque bloc éveillé à chaque sous-pas. Un drapeau « sans
   pression » par bloc, tenu en double tampon comme `press`, la remplacerait

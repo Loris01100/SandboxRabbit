@@ -137,18 +137,27 @@ Ce qui est vérifié :
    `POST /api/error` (src/client/errors.ts) et le Worker répond `204`. Vite
    affiche alors un `[Unhandled error] Error: essai de remontée` : c'est
    l'exception du test, pas une panne ;
-5. **le salon tourne à deux** : deux pages entrent dans un salon neuf (nom
+5. **le juge du classement rejoue un record** : une partie de Débâcle gagnée
+   dans un `Sandbox` côté Node, compressée par `pack()`, part au fil de
+   sim/judge.ts créé dans la page ; elle tient, et la même annoncée un tick
+   plus courte est refusée ;
+6. **le salon tourne à deux** : deux pages entrent dans un salon neuf (nom
    horodaté) sur le Durable Object que le plugin Cloudflare fait tourner dans
    workerd. Chacune voit la liste des joueurs avec les pseudos (un `<b>` reste
    du texte), l'une voit le curseur de l'autre puis le perd quand il sort du
-   bac ; l'hôte coche « Invités en lecture seule » (que l'invité n'a pas) et
+   bac ; un coup de pinceau de l'invité s'affiche aussitôt chez lui en
+   fantôme (`.ghost`), qui s'efface quand la partie le ramène ; l'hôte
+   coche « Invités en lecture seule » (que l'invité n'a pas) et
    l'invité en est prévenu ; quand l'hôte ferme sa page, l'autre est promue
-   et son curseur disparaît. Le salon lui-même (room.ts) n'est chargé qu'au
+   et son curseur disparaît ; une nouvelle page qui entre sous le pseudo de
+   l'absente, avec une autre clé de navigateur, devient « Alice 2 ». Le salon lui-même (room.ts) n'est chargé qu'au
    premier clic sur « Bac partagé » : le test passe donc aussi par là. La galerie, elle, n'y est pas : elle demanderait une D1 locale
    migrée (`wrangler d1 migrations apply --local`) sur la machine de test.
-6. **le secours 2D éclaire** : un second Chromium, lancé avec
+7. **le secours 2D éclaire** : un second Chromium, lancé avec
    `--disable-webgl --disable-webgl2`, charge la page : elle colorie par
-   `Renderer`, charge sim/flatlight.ts à la première frame éclairée, propose
+   `Renderer`, charge sim/flatlight.ts à la première frame éclairée et crée
+   le fil de l'éclairage (sim/flatlight-worker.ts — l'attente est armée
+   avant d'ouvrir la page, sinon le fil naît avant qu'on le guette), propose
    la case « Éclairage » et tourne sans erreur.
 
 Ce n'est pas dans `npm run check` : il faut Chromium installé. La CI le lance

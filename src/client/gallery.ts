@@ -17,8 +17,8 @@ const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 
 /**
  * Les mondes pour lesquels ce navigateur a voté (`J'aime`), du plus ancien au
- * plus récent : le bouton reste allumé et ne revote pas. Le Worker ne s'en
- * souvient pas (pas de comptes) : c'est une politesse, pas un verrou.
+ * plus récent : le bouton reste allumé et ne revote pas. Le verrou est au
+ * Worker (un vote par IP) : ceci n'éteint que le bouton.
  */
 const VOTES = "sandbox-rabbit:votes";
 /** Votes retenus au plus : ce qui dépasse oublie les plus anciens, sûrement déjà effacés par le ménage. */

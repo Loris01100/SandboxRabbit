@@ -274,6 +274,8 @@ assert.ok(conversions > 100, `trop peu de changements d'état comparés (${conve
 interface Windy {
   press: Float32Array;
   pressNext: Float32Array;
+  windX: Float32Array;
+  windY: Float32Array;
   hush: Uint8Array;
   awake: Uint8Array;
   stir: Uint8Array;
@@ -290,9 +292,10 @@ function volley(e: Engine): void {
   for (let x = 60; x < W; x += 120) e.explode(x, 60, 7);
 }
 
+// Le mode SIMD (f64×2) mesurait l'ancienne diffusion : il n'a pas été refait
+// pour l'élan de l'air (docs/rust.md). Reste la copie cellule par cellule.
 const AIR_MODES = [
   { mode: 0, name: "Rust, f64 (copie)" },
-  { mode: 1, name: "Rust SIMD f64×2" },
 ];
 const GUST = 8; // CTL.gust d'engine.ts
 
@@ -305,12 +308,13 @@ for (const [name, W, H] of [["salve", 1920, 1080], ["salve", 1917, 1077]] as con
     air(...args: number[]): number;
   };
   const at = {
-    cells: x.reserve(N), press: x.reserve(N * 4), next: x.reserve(N * 4), awake: x.reserve(chunks),
+    cells: x.reserve(N), press: x.reserve(N * 4), next: x.reserve(N * 4), windX: x.reserve(N * 4), windY: x.reserve(N * 4), awake: x.reserve(chunks),
     stir: x.reserve(chunks), hush: x.reserve(chunks), jobs: x.reserve(chunks * 4), open: x.reserve(256),
   };
   const b = x.memory.buffer;
   const v = {
     cells: new Uint8Array(b, at.cells, N), press: new Float32Array(b, at.press, N), next: new Float32Array(b, at.next, N),
+    windX: new Float32Array(b, at.windX, N), windY: new Float32Array(b, at.windY, N),
     awake: new Uint8Array(b, at.awake, chunks), stir: new Uint8Array(b, at.stir, chunks), hush: new Uint8Array(b, at.hush, chunks),
   };
   new Uint8Array(b, at.open, 256).set(OPEN);
@@ -320,22 +324,22 @@ for (const [name, W, H] of [["salve", 1920, 1080], ["salve", 1917, 1077]] as con
   engine.step();
   const e = engine as unknown as Windy & Inner;
   const take = () => ({
-    cells: e.cells.slice(), press: e.press.slice(), next: e.pressNext.slice(), hush: e.hush.slice(),
+    cells: e.cells.slice(), press: e.press.slice(), next: e.pressNext.slice(), windX: e.windX.slice(), windY: e.windY.slice(), hush: e.hush.slice(),
     awake: e.awake.slice(), stir: e.stir.slice(),
   });
   let start = take();
   const refs = { press: e.press, next: e.pressNext };
   const restore = () => {
     e.press = refs.press; e.pressNext = refs.next;
-    e.press.set(start.press); e.pressNext.set(start.next);
+    e.press.set(start.press); e.pressNext.set(start.next); e.windX.set(start.windX); e.windY.set(start.windY);
     e.hush.set(start.hush); e.stir.set(start.stir); e.awake.set(start.awake);
     Atomics.store(e.control, GUST, 1);
   };
   const load = () => {
-    v.cells.set(start.cells); v.press.set(start.press); v.next.set(start.next);
+    v.cells.set(start.cells); v.press.set(start.press); v.next.set(start.next); v.windX.set(start.windX); v.windY.set(start.windY);
     v.awake.set(start.awake); v.stir.set(start.stir); v.hush.set(start.hush);
   };
-  const run = (mode: number) => x.air(W, H, at.cells, at.press, at.next, at.awake, at.stir, at.hush, at.jobs, at.open, mode);
+  const run = (_mode: number) => x.air(W, H, at.cells, at.press, at.next, at.windX, at.windY, at.awake, at.stir, at.hush, at.jobs, at.open);
 
   let js = 0;
   for (let r = 0; r < RUNS; r++) {
@@ -381,12 +385,13 @@ ${name} (pression) — ${W}×${H}, ${(awake * 100).toFixed(0)} % des blocs évei
     restore();
     e.breathe();
     const gust = Atomics.load(e.control, GUST);
-    const expected = { press: e.press.slice(), next: e.pressNext.slice(), stir: e.stir.slice(), hush: e.hush.slice() };
+    const expected = { press: e.press.slice(), next: e.pressNext.slice(), windX: e.windX.slice(), windY: e.windY.slice(), stir: e.stir.slice(), hush: e.hush.slice() };
     for (const p of expected.press) if (p > 0) windy++;
     AIR_MODES.forEach(({ mode }, m) => {
       load();
       const g = run(mode);
       diff[m] += gap(expected.press, v.next).count + gap(expected.next, v.press).count
+        + gap(expected.windX, v.windX).count + gap(expected.windY, v.windY).count
         + gap(expected.stir, v.stir).count + gap(expected.hush, v.hush).count + (g === gust ? 0 : 1);
     });
     restore();

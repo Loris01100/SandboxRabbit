@@ -232,6 +232,28 @@ export class Player {
   }
 }
 
+/* ----------------------------------------------- classement des défis */
+
+/**
+ * Ticks au plus d'une partie de défi recevable au classement : cinq minutes à
+ * 60 ticks par seconde. Chaque visiteur rejoue chaque record pour le vérifier
+ * (sim/verdict.ts) : sans plafond, un rejeu d'une heure le tenait une minute.
+ * Le Worker garde le même plafond (`TRIAL_TICKS` d'app.ts).
+ */
+export const TRIAL_TICKS = 5 * 60 * 60;
+
+/**
+ * Une partie de défi recevable au classement : dans le bac des défis
+ * (320×180), sous `TRIAL_TICKS`, et jouée au pinceau — ni grille posée d'un
+ * coup (annuler, rétablir : un beat `grid`), ni morceau collé (`clip`).
+ * L'un comme l'autre peut poser n'importe quelle grille, celle d'un défi déjà
+ * gagné comprise : le rejeu ne prouverait plus rien.
+ */
+export function fair(rec: Recording): boolean {
+  if (rec.w !== 320 || rec.h !== 180 || rec.ticks < 1 || rec.ticks > TRIAL_TICKS) return false;
+  return rec.beats.every((b) => !("grid" in b) && !("g" in b && b.g.t === "clip"));
+}
+
 /* ------------------------------------------------------ export et import */
 
 /** Le plus grand bac du sélecteur : un rejeu plus grand ne vient pas d'ici. */
@@ -373,7 +395,7 @@ export async function unpack(text: string): Promise<Recording | null> {
       if (size > FILM_MAX) { await reader.cancel(); return null; }
       chunks.push(value);
     }
-    return parse(await new Blob(chunks as BlobPart[]).text());
+    return parse(await new Blob(chunks as ConstructorParameters<typeof Blob>[0]).text());
   } catch {
     return null;
   }

@@ -216,6 +216,8 @@ canvas {
 .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; box-shadow: inset 0 0 0 1px light-dark(#0003, #0006); }
 
 .hint { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.78rem; min-height: 1.2em; }
+.board { margin: 0.25rem 0; padding-left: 1.5rem; font-size: 0.8rem; }
+.board button { margin-left: 0.4rem; padding: 0 0.4rem; }
 
 /* Une grille commune : tous les libellés et toutes les valeurs sont alignés. */
 .row {
@@ -476,3 +478,8 @@ canvas:fullscreen { height: 100vh; width: auto; aspect-ratio: 16 / 9; }
 .gallery-bar { gap: 0.5rem; }
 .card .remix { color: var(--muted); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slot .like { position: absolute; top: 0.25rem; left: 0.25rem; padding: 0 0.35rem; font-size: 0.74rem; line-height: 1.4; }
+
+/* Le fantôme d'un coup de pinceau d'invité, le temps que la partie de l'hôte
+   le ramène (room.ts) : translucide, sa couleur passée en CSSOM. */
+.ghost { position: absolute; top: 0; left: 0; opacity: 0.5; }
+.ghost.round { border-radius: 50%; }

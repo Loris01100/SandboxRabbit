@@ -97,6 +97,15 @@ en tête avant d'y toucher.
 - **Demi-flottants si la carte sait y dessiner**
   (`EXT_color_buffer_float` → `RGBA16F`, sinon `RGBA8`) : en octets, un halo
   faible s'échelonne en paliers visibles.
+- **Correction bilinéaire** (*bilinear fix*) : une cascade qui a un dessus
+  ne lance pas un rayon par direction, mais **quatre** (`march()` dans
+  `CASCADE`), un vers chacune des quatre sondes du dessus qui l'entourent :
+  de son début d'anneau jusqu'au début d'anneau de cette sonde-là, puis ce
+  que celle-ci voit au-delà (ses quatre directions filles), le tout pondéré
+  en bilinéaire. Avec un seul rayon depuis sa propre sonde, elle héritait de
+  sondes décalées par rapport à lui : des anneaux autour d'une petite flamme,
+  et un mur fin vu de loin laissait passer la lumière. Quatre fois plus de
+  marche par texel, sur toutes les cascades sauf la plus lointaine.
 - **La dernière cascade n'a pas de dessus** : elle lit `none`, une cible 1×1
   noire. Jamais la texture où elle écrit — lire et écrire la même texture dans
   une passe est interdit.
@@ -142,12 +151,12 @@ miroir, puis un `putImageData` du rectangle changé.
 **Il éclaire aussi**, par `FlatLight`
 ([sim/flatlight.ts](../../src/client/sim/flatlight.ts)), qui **ressemble** au
 shader sans en être une copie — les *radiance cascades* demandent des milliers
-de rayons par texel, que le fil de la page ne peut pas se payer :
+de rayons par texel, qu'un processeur ne peut pas se payer à chaque frame :
 
 - **Mêmes entrées** : émission et opacité de `lighting()`, rougeoiement au-delà
   de `RED_HOT` (450 °C), moyennés par texel comme `SCENE`, puis une pyramide de
   niveaux réduits (les mipmaps).
-- **Autre chemin** : une seule grille de `FLAT_LIGHT` = 80 texels de large, quelle
+- **Autre chemin** : une seule grille de `FLAT_LIGHT` = 160 texels de large, quelle
   que soit la taille du bac ; par texel non opaque, `RAYS` = 16 rayons dont le
   pas grandit avec la distance (1 jusqu'à 8 texels, puis le quart de la
   distance) et qui lisent la pyramide **en bilinéaire** au niveau de leur pas —
@@ -161,18 +170,31 @@ de rayons par texel, que le fil de la page ne peut pas se payer :
   éclairé, un opaque qui brille ne reçoit rien) et **même mélange** que
   `FRAGMENT` : `LIGHT_HALO` et `LIGHT_GAIN`, désormais dans render.ts pour les
   deux chemins.
-- **Coût** : ~4,5 ms par éclairage, de 320×180 à 1920×1080 (la collecte ne lit
-  qu'une cellule sur `scale/4` par sens au-delà de 4 × 4 cellules par texel) ;
-  le mélange par rangée (`row()` : la lumière interpolée en vertical une fois,
+- **Dans un fil à lui** ([sim/flatlight-worker.ts](../../src/client/sim/flatlight-worker.ts)) :
+  la page ne fait que la collecte (`collect()` : la grille de lumière, niveau
+  0, ~1 ms) et l'envoie en transférant ses tampons ; le fil construit la
+  pyramide (`load()`), lance les rayons (`solve()`) et renvoie la lumière,
+  que la page adopte (`adopt()`) avant de repeindre tout le bac (`repaint()`
+  dans `flatScreen()`). **Un seul calcul à la fois** (`busy`) : entre deux,
+  la lumière d'avant tient. Si le fil ne peut pas naître, `compute()`
+  (= `collect()` puis `solve()`) tourne sur place (`alone`).
+- **Coût** : collecte ~0,3 à 0,9 ms dans la page, rayons ~50 ms dans le fil,
+  de 320×180 à 1920×1080 (la collecte ne lit qu'une cellule sur `scale/4` par
+  sens au-delà de 4 × 4 cellules par texel). À 80 texels de large, les
+  rayons coûtaient ~4,5 ms et tournaient dans la page ; dans un fil, on se
+  paie 160, où une ombre fine se voit. Sur place (`alone`), ces 50 ms
+  figeraient la page à chaque éclairage : cela n'arrive que si un Worker de
+  module ne peut pas naître, et sans Worker le bac ne tourne déjà pas. Le
+  mélange par rangée (`row()` : la lumière interpolée en vertical une fois,
   index et poids horizontaux précalculés) ajoute ~30 % au coloriage. Comme la
-  lumière n'est pas locale, un éclairage recolorie tout le bac : au plus toutes
-  les `relight()` ms, 50 jusqu'en 640×360, ~200 en 1920×1080 ; entre deux, seul
-  le rectangle changé est reposé, avec la lumière d'avant.
+  lumière n'est pas locale, un éclairage recolorie tout le bac : au plus
+  toutes les `relight()` ms, 50 jusqu'en 640×360, ~200 en 1920×1080 ; entre
+  deux, seul le rectangle changé est reposé, avec la lumière d'avant.
 - **Chargé à la demande** (`import()` dans `flatScreen()`, à la première frame
   éclairée) : seule une page sans WebGL2 en a besoin, et la page a un budget.
   D'ici là, le bac est peint sans lumière.
 - **Pas comparé** au shader par `npm run browser` : les deux ressemblent, ils
-  ne coïncident pas (`ponytail:` de `FlatLight`). test/sim.ts en garde les
+  ne coïncident pas. test/sim.ts en garde les
   traits (la lave éclaire, un mur fait de l'ombre, le noir reste noir) et
   test/browser.ts le fait tourner dans un Chromium sans WebGL. Pour juger
   l'aspect, comparer à l'œil : la même scène peinte des deux façons, la nuit.
@@ -188,5 +210,3 @@ de rayons par texel, que le fil de la page ne peut pas se payer :
   flottants, le GPU arrondissait autrement 2 % des paliers.
 - `preserveDrawingBuffer: true` n'est pas décoratif : le PNG et la vidéo de
   share.ts relisent le canvas par `drawImage()` après coup.
-- `ponytail:` les cascades sont « à la vanille », sans la correction
-  bilinéaire des rayons.

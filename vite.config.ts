@@ -20,7 +20,9 @@ const isolation = {
  */
 export default defineConfig({
   plugins: [cloudflare()],
-  build: { modulePreload: false },
+  // `SOURCEMAP=hidden` : les cartes de sources, sans le commentaire qui les
+  // annonce — seul `npm run pile` (test/pile.ts) les demande, et les efface.
+  build: { modulePreload: false, sourcemap: process.env.SOURCEMAP === "hidden" ? "hidden" : false },
   server: { headers: isolation },
   preview: { headers: isolation },
 });

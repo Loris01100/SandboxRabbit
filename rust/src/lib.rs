@@ -450,20 +450,21 @@ fn settle_chunk(g: &mut Grid, c: usize) {
 
 // ─── Pression de l'air ────────────────────────────────────────────────────
 //
-// `breathe()` d'engine.ts : `AIR_STEPS` sous-pas de diffusion entre cellules
-// d'air (vide ou gaz), amortis, sur les blocs éveillés ; au dernier, un bloc
-// sous `CALM_P` partout est remis à zéro dans les deux tampons. Même calcul
-// que JavaScript (f64, rangé en f32, même ordre d'additions) : au bit près,
-// dans les deux modes.
-// - 0 : cellule par cellule, la copie d'`airChunk()` ;
-// - 1 : SIMD, deux cellules intérieures à la fois (f64x2). Le choix « air ou
-//   mur » de chaque voisine devient un masque (`v128_bitselect`), exact lui
-//   aussi : il choisit des bits, il ne calcule rien.
+// `breathe()` d'engine.ts : `AIR_STEPS` sous-pas sur les blocs éveillés,
+// chacun en deux passes — l'élan des faces entre cellules d'air
+// (`windChunk()`), puis la pression de chaque cellule selon ce que ses faces
+// apportent ou emportent (`airChunk()`) ; au dernier, un bloc calme est remis à
+// zéro, un bloc agité réveille ses voisins, et `hushChunk()` vide l'autre
+// tampon et l'élan des blocs calmés. Même calcul que JavaScript (f64, rangé en
+// f32, même ordre d'additions) : au bit près. Le mode SIMD (f64×2) mesurait
+// l'ancienne diffusion ; il n'a pas été refait pour l'élan (voir docs/rust.md).
 
 const AIR_STEPS: usize = 3;
-const FLOW: f64 = 0.2;
+const WIND_K: f64 = 0.25;
+const DRAG: f64 = 0.97;
 const DAMP: f64 = 0.98;
 const CALM_P: f64 = 0.02;
+const CALM_V: f64 = 0.005;
 
 /// Ce que lit un sous-pas : la grille et la table `OPEN` d'engine.ts (1 = air).
 struct Air<'a> {
@@ -490,25 +491,28 @@ impl Air<'_> {
 /// `breathe()` sur un seul fil, CTL.gust supposé levé : l'appelant ne
 /// l'appelle que s'il y a de la pression. Le résultat est dans `next`, l'autre
 /// tampon dans `press` (trois sous-pas, donc un nombre impair d'échanges, comme
-/// JavaScript). Rend 1 si un bloc garde de la pression (le `CTL.gust` suivant).
+/// JavaScript). Rend 1 si un bloc reste agité (le `CTL.gust` suivant).
 ///
 /// # Safety
 /// Chaque pointeur désigne un tableau de la bonne taille réservé par `reserve`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn air(
     w: usize, h: usize,
-    cells: *const u8, press: *mut f32, next: *mut f32,
+    cells: *const u8, press: *mut f32, next: *mut f32, wind_x: *mut f32, wind_y: *mut f32,
     awake: *const u8, stir: *mut u8, hush: *mut u8, jobs: *mut u32,
-    open: *const u8, mode: u32,
+    open: *const u8,
 ) -> u32 {
     let n = w * h;
     let cols = w.div_ceil(CHUNK);
-    let chunks = cols * h.div_ceil(CHUNK);
-    let (a, p, q, awake, stir, hush, jobs) = unsafe {
+    let rows = h.div_ceil(CHUNK);
+    let chunks = cols * rows;
+    let (a, p, q, vx, vy, awake, stir, hush, jobs) = unsafe {
         (
             Air { w, h, cols, cells: core::slice::from_raw_parts(cells, n), open: &*(open as *const [u8; 256]) },
             core::slice::from_raw_parts_mut(press, n),
             core::slice::from_raw_parts_mut(next, n),
+            core::slice::from_raw_parts_mut(wind_x, n),
+            core::slice::from_raw_parts_mut(wind_y, n),
             core::slice::from_raw_parts(awake, chunks),
             core::slice::from_raw_parts_mut(stir, chunks),
             core::slice::from_raw_parts_mut(hush, chunks),
@@ -526,16 +530,20 @@ pub unsafe extern "C" fn air(
     for s in 0..AIR_STEPS {
         // Sous-pas pairs : `press` → `next` ; impairs : l'inverse.
         let (src, dst) = if s % 2 == 0 { (&*p, &mut *q) } else { (&*q, &mut *p) };
+        for &c in &jobs[..count] {
+            wind_chunk(&a, src, vx, vy, c as usize);
+        }
         let last = s == AIR_STEPS - 1;
         for &c in &jobs[..count] {
             let c = c as usize;
-            let loud = if hushed(&a, src, c) {
+            let loud = if hushed(&a, src, vx, vy, c) {
                 fill_chunk(&a, dst, c);
-                false
-            } else if mode == 1 {
-                air_f64x2(&a, src, dst, c)
+                if last {
+                    hush[c] = 1;
+                }
+                continue;
             } else {
-                air_scalar(&a, src, dst, c)
+                air_chunk(&a, src, dst, vx, vy, c)
             };
             if !last {
                 continue;
@@ -543,6 +551,11 @@ pub unsafe extern "C" fn air(
             if loud {
                 hush[c] = 0;
                 stir[c] = 1;
+                let (cx, cy) = (c % cols, c / cols);
+                if cx > 0 { stir[c - 1] = 1; }
+                if cx < cols - 1 { stir[c + 1] = 1; }
+                if cy > 0 { stir[c - cols] = 1; }
+                if cy < rows - 1 { stir[c + cols] = 1; }
                 gust = 1;
             } else {
                 hush[c] = 1;
@@ -550,25 +563,36 @@ pub unsafe extern "C" fn air(
             }
         }
     }
-    // Le dernier sous-pas a écrit dans `next` : un bloc calmé vide aussi `press`.
+    // `hushChunk()` : un bloc calmé vide aussi `press` et son élan.
     for &c in &jobs[..count] {
-        if hush[c as usize] != 0 {
-            fill_chunk(&a, p, c as usize);
+        let c = c as usize;
+        if hush[c] != 0 {
+            fill_chunk(&a, p, c);
+            fill_chunk(&a, vx, c);
+            fill_chunk(&a, vy, c);
         }
     }
     gust
 }
 
-/// `hushed()` d'engine.ts : le bloc et sa bordure sans pression, le sous-pas y
-/// rendrait 0 partout. Sans ce raccourci, JavaScript (qui l'a) gagnait.
-fn hushed(a: &Air, src: &[f32], c: usize) -> bool {
+/// `hushed()` d'engine.ts : pression et élan nuls sur le bloc et sa bordure.
+fn hushed(a: &Air, src: &[f32], vx: &[f32], vy: &[f32], c: usize) -> bool {
+    let (x0, y0, x1, y1) = a.bounds(c);
+    let (ya, yb) = (y0.saturating_sub(1), (y1 + 1).min(a.h));
+    let (xa, xb) = (x0.saturating_sub(1), (x1 + 1).min(a.w));
+    (ya..yb).all(|y| (y * a.w + xa..y * a.w + xb).all(|i| src[i] == 0.0 && vx[i] == 0.0 && vy[i] == 0.0))
+}
+
+/// `still()` d'engine.ts : pression nulle sur le bloc et sa bordure, élan nul sur le bloc seul.
+fn still(a: &Air, src: &[f32], vx: &[f32], vy: &[f32], c: usize) -> bool {
     let (x0, y0, x1, y1) = a.bounds(c);
     let (ya, yb) = (y0.saturating_sub(1), (y1 + 1).min(a.h));
     let (xa, xb) = (x0.saturating_sub(1), (x1 + 1).min(a.w));
     (ya..yb).all(|y| src[y * a.w + xa..y * a.w + xb].iter().all(|&p| p == 0.0))
+        && (y0..y1).all(|y| (y * a.w + x0..y * a.w + x1).all(|i| vx[i] == 0.0 && vy[i] == 0.0))
 }
 
-/// Remet à zéro la pression du bloc `c`.
+/// Remet à zéro le bloc `c` d'un tampon.
 fn fill_chunk(a: &Air, buf: &mut [f32], c: usize) {
     let (x0, y0, x1, y1) = a.bounds(c);
     for y in y0..y1 {
@@ -576,76 +600,54 @@ fn fill_chunk(a: &Air, buf: &mut [f32], c: usize) {
     }
 }
 
-/// Une cellule, bords compris : `airChunk()` d'engine.ts. Rend `true` si sa pression reste au-dessus de `CALM_P`.
-#[inline(always)]
-fn air_one(a: &Air, src: &[f32], dst: &mut [f32], x: usize, y: usize) -> bool {
-    let (w, h) = (a.w, a.h);
-    let i = y * w + x;
-    if !a.open(i) {
-        dst[i] = 0.0;
-        return false;
+/// `windChunk()` d'engine.ts : l'élan des faces que tient le bloc (à droite et en dessous de ses cellules).
+fn wind_chunk(a: &Air, p: &[f32], vx: &mut [f32], vy: &mut [f32], c: usize) {
+    if still(a, p, vx, vy, c) {
+        return;
     }
-    let v = src[i] as f64;
-    let up = if y > 0 && a.open(i - w) { src[i - w] as f64 } else { v };
-    let down = if y < h - 1 && a.open(i + w) { src[i + w] as f64 } else { v };
-    let left = if x > 0 && a.open(i - 1) { src[i - 1] as f64 } else { v };
-    let right = if x < w - 1 && a.open(i + 1) { src[i + 1] as f64 } else { v };
-    let next = (v + FLOW * (up + down + left + right - 4.0 * v)) * DAMP;
-    dst[i] = next as f32;
-    next >= CALM_P
+    let (x0, y0, x1, y1) = a.bounds(c);
+    let (w, h) = (a.w, a.h);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let i = y * w + x;
+            if !a.open(i) {
+                vx[i] = 0.0;
+                vy[i] = 0.0;
+                continue;
+            }
+            vx[i] = if x < w - 1 && a.open(i + 1) {
+                ((vx[i] as f64 + WIND_K * (p[i] as f64 - p[i + 1] as f64)) * DRAG) as f32
+            } else {
+                0.0
+            };
+            vy[i] = if y < h - 1 && a.open(i + w) {
+                ((vy[i] as f64 + WIND_K * (p[i] as f64 - p[i + w] as f64)) * DRAG) as f32
+            } else {
+                0.0
+            };
+        }
+    }
 }
 
-/// Mode 0 : le bloc cellule par cellule.
-fn air_scalar(a: &Air, src: &[f32], dst: &mut [f32], c: usize) -> bool {
+/// `airChunk()` d'engine.ts : la pression selon ce que les faces apportent ou emportent. Rend `true` si le bloc reste agité.
+fn air_chunk(a: &Air, src: &[f32], dst: &mut [f32], vx: &[f32], vy: &[f32], c: usize) -> bool {
     let (x0, y0, x1, y1) = a.bounds(c);
+    let w = a.w;
     let mut loud = false;
     for y in y0..y1 {
         for x in x0..x1 {
-            loud |= air_one(a, src, dst, x, y);
-        }
-    }
-    loud
-}
-
-/// Masque SIMD de deux cellules : tous les bits à 1 pour une cellule d'air.
-#[inline(always)]
-fn mask2(a: &Air, i: usize) -> v128 {
-    // SAFETY (appelants) : i + 1 < w * h.
-    let (l, r) = unsafe {
-        (a.open[*a.cells.get_unchecked(i) as usize], a.open[*a.cells.get_unchecked(i + 1) as usize])
-    };
-    i64x2(-(l as i64), -(r as i64))
-}
-
-/// Mode 1 : deux cellules intérieures à la fois en f64x2. Les bords du bac restent à `air_one()`.
-fn air_f64x2(a: &Air, src: &[f32], dst: &mut [f32], c: usize) -> bool {
-    let (x0, y0, x1, y1) = a.bounds(c);
-    let (w, h) = (a.w, a.h);
-    let (flow, damp, four, zero, calm) =
-        (f64x2_splat(FLOW), f64x2_splat(DAMP), f64x2_splat(4.0), f64x2_splat(0.0), f64x2_splat(CALM_P));
-    let mut loud = false;
-    for y in y0..y1 {
-        let inner = y > 0 && y < h - 1;
-        let mut x = x0;
-        while x < x1 {
-            if !inner || x == 0 || x + 2 > x1 || x + 1 >= w - 1 {
-                loud |= air_one(a, src, dst, x, y);
-                x += 1;
+            let i = y * w + x;
+            if !a.open(i) {
+                dst[i] = 0.0;
                 continue;
             }
-            let i = y * w + x;
-            let v = load2(src, i);
-            // Une voisine qui n'est pas de l'air compte pour la cellule elle-même.
-            let up = v128_bitselect(load2(src, i - w), v, mask2(a, i - w));
-            let down = v128_bitselect(load2(src, i + w), v, mask2(a, i + w));
-            let left = v128_bitselect(load2(src, i - 1), v, mask2(a, i - 1));
-            let right = v128_bitselect(load2(src, i + 1), v, mask2(a, i + 1));
-            let sum = f64x2_add(f64x2_add(f64x2_add(up, down), left), right);
-            let next = f64x2_mul(f64x2_add(v, f64x2_mul(flow, f64x2_sub(sum, f64x2_mul(four, v)))), damp);
-            let next = v128_bitselect(next, zero, mask2(a, i));
-            unsafe { v128_store64_lane::<0>(f32x4_demote_f64x2_zero(next), dst.as_mut_ptr().add(i) as *mut u64) };
-            loud |= v128_any_true(f64x2_ge(next, calm));
-            x += 2;
+            let in_x = if x > 0 { vx[i - 1] as f64 } else { 0.0 };
+            let in_y = if y > 0 { vy[i - w] as f64 } else { 0.0 };
+            let next = (src[i] as f64 + in_x - vx[i] as f64 + in_y - vy[i] as f64) * DAMP;
+            dst[i] = if next > 0.0 { next as f32 } else { 0.0 };
+            if next >= CALM_P || (vx[i] as f64).abs() >= CALM_V || (vy[i] as f64).abs() >= CALM_V {
+                loud = true;
+            }
         }
     }
     loud
