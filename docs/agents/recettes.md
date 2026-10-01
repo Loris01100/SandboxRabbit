@@ -7,8 +7,10 @@ a bougé).
 ## Ajouter une matière
 
 1. Une constante d'id dans [materials.ts](../../src/client/sim/materials.ts),
-   à la suite (la dernière est `RABBIT_TAIL = 50`). **Ne jamais renuméroter** : les
-   ids sont écrits dans les mondes sauvegardés.
+   à la suite (la dernière est `HERO_LEGS = 54`). **Ne jamais renuméroter** : les
+   ids sont écrits dans les mondes sauvegardés. Reporter l'id dans la table
+   gelée `IDS` de [test/rules.ts](../../test/rules.ts), qui le réclame — c'est
+   elle qui interdit la renumérotation.
 2. Son entrée dans `MATERIALS` : `id`, `name`, `kind`, `density`, `color`,
    `noise`, `hint` (en français), plus au besoin `flammable`, `life` (≤ 250),
    `spread`, `heat`, `spawn`, `boil`, `freeze`.
@@ -39,7 +41,8 @@ a bougé).
    d'après son `kind` : un solide ou une poudre fait de l'ombre, un liquide
    atténue, un gaz laisse passer.
 7. Une ligne dans le tableau « Ce qui se passe quand on mélange » du
-   [README](../../README.md), et mettre à jour le compte de matières en tête.
+   [README](../../README.md), et, en tête, le compte de matières **et** son nom
+   dans l'énumération : test/rules.ts compare cette liste à la palette.
 
 Un changement d'état seul (fondre, geler, prendre) = `boil` / `freeze`, aucune
 ligne dans le moteur. Voir le ciment ou le verre fondu.

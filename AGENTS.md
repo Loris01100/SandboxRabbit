@@ -21,7 +21,7 @@ README, commentaires du code, messages d'`assert` et UI sont **en français**.
 npm install
 npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, D1 local (migrations : --local)
 npm run typecheck  # QUATRE projets tsc : client (DOM), Worker, tests (Node + DOM), test/api.ts (Node + Worker)
-npm run check      # asserts : test/sim.ts, test/libm.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts (Node exécute le TS)
+npm run check      # asserts : test/sim.ts, test/libm.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts, test/rules.ts (Node exécute le TS)
 npm run browser    # Chromium (Playwright) : shader WebGL2 = Renderer, page qui charge sans erreur (docs/navigateur.md)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
 npm run stress     # pires cas : bac plein de chaque matière, explosions, pression, lave, aimants, bandes 1920×1080 ; chacun sous un plafond
@@ -96,8 +96,10 @@ test/                    scripts d'assert (+ bench.ts, stress.ts, loc.ts) ; brow
 
 ## Règles à ne pas enfreindre
 
-Chacune est expliquée dans le guide indiqué. La plupart ne sont gardées par
-aucun test précis.
+Chacune est expliquée dans le guide indiqué. Celles qui se vérifient en lisant
+un fichier sont gardées par [test/rules.ts](test/rules.ts) — tirage
+reproductible, ids de matière gelés, CSP, cloisonnement de la page,
+`localStorage`, `SELECT *` ; les autres ne sont gardées par aucun test précis.
 
 **Simulation** ([simulation.md](docs/agents/simulation.md))
 

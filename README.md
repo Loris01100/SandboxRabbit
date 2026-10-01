@@ -3,13 +3,13 @@
 Un bac à sable cellulaire (« falling sand ») qui tourne entièrement dans le
 navigateur, servi par un Worker Cloudflare qui héberge aussi l'API.
 
-Quarante-huit matières, rangées en familles repliables (terrain, liquides,
+47 matières plus deux outils, rangés en familles repliables (terrain, liquides,
 inflammable, explosifs, froid, vivant, électricité, gaz, outils) : `sable / eau /
 pierre / bois / huile / goudron / alcool / acide / lave / plante / lapin / héros / feu / glace /
 neige / azote liquide / sel / eau salée / poudre / TNT / nitroglycérine / C4 /
 mine / thermite / uranium / grisou / retombées / pétrole / graine / nanites / verre / verre fondu / mercure /
 cire / cire fondue / bougie / boue / braise / métal / pile / interrupteur / étincelle /
-ciment / limaille / aimant / source / fumée / vapeur`, pinceau réglable, vue thermique, pause & pas à pas, galerie de
+ciment / limaille / aimant / source / gomme / fumée / vapeur`, pinceau réglable, vue thermique, pause & pas à pas, galerie de
 mondes partagés, bac multijoueur.
 
 ### Ce qui se passe quand on mélange
@@ -78,7 +78,7 @@ mondes partagés, bac multijoueur.
 | Défis partagés | Un monde sauvegardé avec un objectif (« au moins / moins de N cellules de X ») devient un défi jouable depuis la galerie, marqué 🎯. L'objectif tient en une chaîne `ge:12:600` validée côté Worker ; deux comparaisons suffisent — « plus aucun X » s'écrit « moins de 1 ». Aucun code à écrire pour ajouter un défi de plus. |
 | Bac partagé | Un salon = un Durable Object qui **relaie et ne simule pas**, en **lockstep** : chacun simule chez soi, à 60 images par seconde. Le moteur est déterministe (un seul tirage au sort, semé) : il suffit que tous partent de la même grille et appliquent les mêmes gestes aux mêmes ticks. Le premier connecté est l'hôte et mène la partie : il envoie un départ (la grille entière, ~2 à 9 Ko) quand quelqu'un arrive, puis vingt fois par seconde la suite — les gestes, les réglages changés et le tick atteint, une cinquantaine d'octets. C'est le rejeu, en direct. Les invités lui envoient leurs coups de pinceau et rejouent la partie un peu derrière lui ; une empreinte de la grille par seconde attrape une divergence, et l'invité redemande alors un départ. Si l'hôte s'en va, le plus ancien restant prend la main, sans que le bac saute. Huit places par salon, messages plafonnés à la taille d'un monde, et le salon ne relaie que ce que chacun a le droit de dire : un invité ne peut ni destituer l'hôte, ni imposer sa grille aux autres. Pause, Pas à pas, vider, annuler et charger restent à l'hôte. Une connexion qui tombe est retentée une fois, une seconde plus tard, sans retaper le nom du salon. |
 | Galerie triée | Un `<select>` bascule entre « plus récents » et « plus vus ». Le tri se fait sur la liste déjà en main (plafonnée à 100 mondes), pas d'aller-retour au Worker. Charger un monde passe par `GET /api/worlds/:id`, seul endroit qui incrémente `views`, sous limite de débit : une boucle de chargements ne hisse pas un monde en tête. |
-| Accessibilité | Les flèches parcourent les grilles de matières (sinon quarante-sept tabulations), la barre de statut et le but des défis sont des `role="status"` — les changements sont annoncés au lecteur d'écran. |
+| Accessibilité | Les flèches parcourent les grilles de matières (sinon 49 tabulations), la barre de statut et le but des défis sont des `role="status"` — les changements sont annoncés au lecteur d'écran. |
 | En-têtes | Le Worker pose une CSP stricte (aucun script ni style en ligne — la pastille de couleur d'une matière est montée en CSSOM exprès), `nosniff`, `referrer-policy`, et COOP / COEP — la page isolée, condition de la mémoire partagée du moteur multi-fils — sur toute réponse, et un `cache-control` d'un an sur les fichiers hashés contre `no-cache` sur le HTML. Vérifié dans test/api.ts avec un faux binding ASSETS. |
 | Réglages retenus | Matière, pinceau, outil, vitesse, vent, ambiante, taille de grille, zoom et les cases du panneau (symétrie, ne pas remplacer, gomme sélective, vue thermique, vue pression), la météo et l'heure sont relus dans `localStorage` au chargement suivant. |
 | Bac repris | La scène est écrite dans `localStorage` quand l'onglet passe en arrière-plan (`visibilitychange`, le seul événement fiable sur mobile) et rechargée au retour. Un lien partagé passe devant, la cuvette de départ n'arrive qu'à défaut. L'état vivant part avec la grille : un incendie laissé en plan repart chaud. La largeur de la grille est rangée avec elle, comme dans un lien : un défi joué en 320 revient en 320, même si le réglage de taille disait 480. |

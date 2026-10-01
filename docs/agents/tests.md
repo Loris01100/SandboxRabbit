@@ -5,7 +5,7 @@
 | Commande | Ce qu'elle vérifie |
 | --- | --- |
 | `npm run typecheck` | **quatre** projets tsc : `tsconfig.json` (client, lib DOM), `tsconfig.worker.json` (Worker, types générés, pas de DOM), `tsconfig.test.json` (tout `test/` sauf api.ts : types Node + DOM) et `tsconfig.test-worker.json` (test/api.ts : types Node + Worker). Node exécute les tests **sans** vérifier leurs types : sans ces deux derniers, un champ disparu n'y était vu qu'à l'exécution, et jamais dans test/gpu.ts, qui ne tourne pas en CI |
-| `npm run check` | les cinq scripts d'`assert`, dans l'ordre : sim, ui, api, sandbox, pool |
+| `npm run check` | les sept scripts d'`assert`, dans l'ordre : sim, libm, ui, api, sandbox, pool, rules |
 | `npm run browser` | dans Chromium sans fenêtre (Playwright) : le shader WebGL2 contre `Renderer` à une unité près, et la page du jeu qui charge sans erreur. Demande `npx playwright install chromium` une fois par machine ; tout est dans [docs/navigateur.md](../navigateur.md) |
 | `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
 | `npm run stress` | les pires cas, chacun sous un plafond, sur un seul fil ([test/stress.ts](../../test/stress.ts)) : un bac 320×180 plein de **chaque** matière (≤ 800 ns par cellule et par tick ; les plus chères font 110 à 160, l'aimant en faisait 4000), TNT en chaîne, souffle en plein air, mer de lave sous la pluie, aimants sur la limaille, et les bandes d'un bac 1920×1080 tout changé (préparation côté bac, tampon rendu comme le fait la page, et pose côté page : ~2 ms chacune, plafond 12 ; 11 et 15 ms avant le tampon unique recyclé et le miroir brut). Plafonds à ~5 fois la mesure de référence ; `STRESS_SLACK=2` les double. ~10 s |
@@ -26,6 +26,39 @@ TypeScript directement.
 | [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles ; salon en lockstep, dont les messages mal formés d'un pair (geste d'invité, `turn` et départ de l'hôte) | `Sandbox` avec un rappel `send` qui empile |
 | [test/browser.ts](../../test/browser.ts) (hors `check`) | les deux copies du coloriage (shader de screen.ts, `Renderer`) sur la page [test/screen.html](../../test/screen.html) ; la page du jeu : première frame, console sans erreur ; une exception de la page arrive sur `/api/error` (`204`) | un serveur Vite (`createServer`, port libre) et Chromium via `playwright` |
 | [test/pool.ts](../../test/pool.ts) | le moteur sur plusieurs fils : 400 ticks d'une partie chargée (monde généré, feu, explosifs, uranium, héros piloté) sur 1 fil et sur 4, **identiques au bit près**, pression comprise (le test vérifie qu'elle a bien soufflé) ; rebranchement sur un autre moteur | `Engine`, `Pool`, fils `worker_threads` ([test/helper.ts](../../test/helper.ts)) |
+| [test/rules.ts](../../test/rules.ts) | les « Règles à ne pas enfreindre » d'[AGENTS.md](../../AGENTS.md) qui se lisent dans la source : aucun `Math.random()` hors la graine du constructeur, ids de matière gelés, index.html sans `style=` ni `<script>` en ligne (CSP), la page qui n'importe ni l'`Engine` ni main.ts et ne crée pas de `Worker`, `localStorage` réservé à ui.ts, pas de `SELECT *`, pas de `cloudflare:workers` dans app.ts, et le README qui liste exactement la palette | la source des fichiers, lue ; `materials.ts` pour la palette |
+
+## Les règles lues dans la source
+
+[test/rules.ts](../../test/rules.ts) garde les « Règles à ne pas enfreindre »
+d'[AGENTS.md](../../AGENTS.md) qui n'ont pas de test de comportement **et ne
+peuvent pas en avoir** : les enfreindre ne casse rien sous le V8 de la CI, ça
+casse un salon entre Chrome et Firefox (un `Math.random()` dans une règle), un
+monde déjà déposé dans la galerie (un id de matière renuméroté), la page d'un
+joueur qui bloque les cookies (un `localStorage` nu) ou servie par le Worker
+(la CSP contre `style=`). Il lit donc les fichiers, comme le fait déjà sim.ts
+pour les fonctions `Math` approchées.
+
+Y a sa place une règle **vérifiable en lisant un fichier**, dont l'infraction
+serait silencieuse. Le comportement du moteur, du panneau et de l'API reste à
+sim.ts, ui.ts et api.ts.
+
+Chaque assert a été vérifié en cassant exprès la règle qu'il garde : un test de
+source qui ne mord pas ne se voit pas, il passe. Casser la règle avant de
+croire l'assert.
+
+Les sources sont lues **sans leurs commentaires** (`code()`), sinon le
+commentaire d'`engine.rand()` — « un `Math.random()` de plus dans ce fichier
+rouvrirait le trou » — compterait comme une infraction, et interdire une
+tournure obligerait à ne plus l'écrire même pour l'expliquer. C'est la
+différence avec l'audit `Math` de sim.ts, qui lit la source brute (d'où « un
+commentaire qui cite `Math.hypot` le ferait échouer »).
+
+Le dernier bloc compare le README à la palette : la liste des matières en tête
+du README s'était décalée d'une entrée (quarante-huit annoncées pour
+quarante-sept, la gomme absente de l'énumération, et « quarante-sept
+tabulations » pour quarante-neuf boutons). Personne ne relit une énumération de
+cinquante noms ; le compte et la liste viennent maintenant de `PALETTE`.
 
 ## Choisir une direction
 
@@ -132,7 +165,8 @@ sim/libm.ts, et refuse toute fonction `Math` approchée (`hypot`, `sin`,
 `exp`…) : leur résultat peut différer d'un bit entre navigateurs, ce qu'aucun
 test de comportement ne voit sous un seul V8. Ce qu'il faut à la place est
 dans sim/libm.ts. Un commentaire qui cite `Math.hypot` le ferait échouer :
-écrire `hypot()`.
+écrire `hypot()`. Les autres règles lues dans la source sont dans
+[test/rules.ts](../../test/rules.ts), décrit plus haut.
 
 Les tests à tirage sensible prennent une graine fixe (`new Engine(W, H, 1234)`)
 plutôt qu'`engine()` : le TNT, au hasard, échouait une fois sur 4 000.
@@ -227,3 +261,8 @@ le reste : `npm run dev`
 (http://localhost:5173, Vite + Worker dans workerd, store mémoire) et vérifier
 dans le navigateur. Le salon partagé se teste avec deux onglets sur le même nom
 de salon.
+
+De ces modules-là, test/rules.ts ne vérifie **que** la forme : qu'ils
+n'importent pas l'`Engine` ni main.ts, qu'ils ne créent pas de `Worker` et
+qu'ils ne touchent pas `localStorage` en direct. Ce qu'ils font, personne ne le
+vérifie à votre place.
