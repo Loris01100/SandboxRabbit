@@ -131,6 +131,10 @@ try {
   assert.equal(await bob.$eval(".peer", (e) => e.textContent), "Alice", "Bob voit le curseur d'Alice, à son nom");
   await alice.mouse.move(2, 2);
   await bob.waitForFunction(() => [...document.querySelectorAll<HTMLElement>(".peer")].every((e) => e.hidden), null, { timeout: 5_000 });
+  // Le verrou : seul l'hôte le voit, et l'invité en est prévenu.
+  assert.equal(await bob.$eval("#room-lock-row", (e) => (e as HTMLElement).hidden), true, "un invité n'a pas le verrou");
+  await alice.evaluate(() => { const c = document.querySelector<HTMLInputElement>("#room-lock")!; c.checked = true; c.dispatchEvent(new Event("change")); });
+  await bob.waitForFunction(() => /lecture seule/.test(document.querySelector("#status")!.textContent ?? ""), null, { timeout: 5_000 });
   await alice.close();
   await bob.waitForFunction(() => document.querySelectorAll("#roster li").length === 1, null, { timeout: 10_000 });
   assert.deepEqual(await noms(bob), ["Bob <b> (hôte) (vous)"], "Alice partie : Bob mène, et son curseur à elle a disparu");

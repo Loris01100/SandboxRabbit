@@ -70,7 +70,7 @@ export type Hum = { fire: number; lava: number; rain: number };
 export type News =
   | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number, string] | null; heard: Heard | null }
   | { t: "stats"; filled: number; hum: Hum }
-  | { t: "grid"; full: string }
+  | { t: "grid"; full: string; w: number }
   | { t: "start"; rec: Recording }
   | ({ t: "turn" } & Turn)
   | { t: "desync" }
@@ -337,7 +337,7 @@ export class Sandbox {
     if (this.touched && this.sinceGrid >= GRID * Math.max(1, this.engine.cells.length / GRID_CELLS)) {
       this.sinceGrid = 0;
       this.touched = false;
-      this.send({ t: "grid", full: this.encoded() });
+      this.send({ t: "grid", full: this.encoded(), w: this.engine.width });
     }
 
     this.sinceTurn += ms;

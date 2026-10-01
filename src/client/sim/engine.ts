@@ -303,9 +303,22 @@ for (let id = 0; id < 256; id++) if ((KIND[id] === KINDS.powder || KIND[id] === 
 const PART_SHIFT = 5;
 const PART = 1 << PART_SHIFT;
 
+/**
+ * Le souffle de chaque explosif, lu par `settle()` au moment de le jouer :
+ * rayon, + 256 avec les retombées (`nuke()`). Il dépend de la matière, pas de
+ * qui demande — l'étincelle fait sauter le TNT au même rayon que la flamme —,
+ * et c'est ce qui permet de ne garder qu'une demande par cellule (`blast()`).
+ */
+const BLAST = new Uint16Array(256);
+BLAST[TNT] = 7;
+BLAST[NITRO] = 5;
+BLAST[C4] = 9;
+BLAST[MINE] = 6;
+BLAST[SODIUM] = SPLASH;
+BLAST[URANIUM] = NUKE | 256;
 /** 1 = matière qui peut demander une explosion (`blast`) : si elle n'est plus là au moment de la jouer, l'explosion n'a plus lieu. */
 const EXPLOSIVE = new Uint8Array(256);
-for (const id of [TNT, NITRO, C4, MINE, URANIUM, SODIUM]) EXPLOSIVE[id] = 1;
+for (let id = 0; id < 256; id++) EXPLOSIVE[id] = BLAST[id] > 0 ? 1 : 0;
 
 /** Les travaux que `run()` répartit entre les fils, exécutés par `job()`. */
 export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, air: 5, gust: 6, hush: 7, stop: 9 } as const;
@@ -323,7 +336,7 @@ const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pi
 export interface Memory {
   width: number;
   height: number;
-  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "pressA" | "pressB" | "hush" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "held" | "waiting" | "jobs" | "control" | "params", ArrayBufferLike>;
+  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "pressA" | "pressB" | "hush" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "asked" | "held" | "waiting" | "jobs" | "control" | "params", ArrayBufferLike>;
 }
 
 /** Le constructeur de tampon à employer : partagé si la plateforme le permet (Node, page isolée). */
@@ -471,6 +484,8 @@ export class Engine {
   readonly jobs: Int32Array;
   /** Explosions différées du tick : (cellule, rayon | 256 si nucléaire), jouées par `settle()`. */
   private readonly later: Int32Array;
+  /** 1 = cellule dont l'explosion est déjà demandée à ce tick ; `settle()` remet à zéro celles qu'il a lues. */
+  private readonly asked: Uint8Array;
   /** 1 = cellule différée à ce tick par `hold()` ; remis à 0 par `release()`. */
   private readonly held: Uint8Array;
   /** Les cellules différées du tick, dans l'ordre où les fils les ont posées ; `release()` les trie. */
@@ -576,7 +591,8 @@ export class Engine {
       pressA: new Shareable(n * 4), pressB: new Shareable(n * 4), hush: new Shareable(chunks),
       clock: new Shareable(n), frozen: new Shareable(n), noise: new Shareable(n),
       awake: new Shareable(chunks), stir: new Shareable(chunks),
-      later: new Shareable(Math.max(64, n >> 2) * 8), jobs: new Shareable(chunks * 4),
+      // Une demande d'explosion par cellule au plus (`blast()`) : la file tient toujours.
+      later: new Shareable(Math.max(64, n) * 4), asked: new Shareable(n), jobs: new Shareable(chunks * 4),
       // Au pire, toutes les cellules des rangées paires de blocs : la moitié du bac, plus une rangée de blocs.
       held: new Shareable(n), waiting: new Shareable(((n >> 1) + PART * width) * 4),
       control: new Shareable(9 * 4), params: new Shareable(11 * 8),
@@ -599,6 +615,7 @@ export class Engine {
     this.awake = new Uint8Array(b.awake);
     this.stir = new Uint8Array(b.stir);
     this.later = new Int32Array(b.later);
+    this.asked = new Uint8Array(b.asked);
     this.held = new Uint8Array(b.held);
     this.waiting = new Int32Array(b.waiting);
     this.jobs = new Int32Array(b.jobs);
@@ -1243,56 +1260,57 @@ export class Engine {
   }
 
   /**
-   * Met une explosion de côté : elle porte jusqu'à `r × 2,5` cellules, bien
+   * Met une explosion de côté : elle porte jusqu'à `rayon × 2,5` cellules, bien
    * au-delà de ce que le damier garantit (`PART`). Elle sera jouée par
    * `settle()` à la fin de la phase, dans l'ordre des cellules — le même
-   * quel que soit le fil qui l'a demandée. `nuke` : avec les retombées.
+   * quel que soit le fil qui l'a demandée —, au souffle de sa matière (`BLAST`).
+   * Une seule demande par cellule et par tick : elles porteraient toutes le
+   * même souffle, et la file (une place par cellule) ne peut plus déborder.
    */
-  private blast(x: number, y: number, r: number, nuke = false): void {
-    const k = Atomics.add(this.control, CTL.later, 1);
-    if (2 * k + 1 >= this.later.length) return;
-    this.later[2 * k] = y * this.width + x;
-    this.later[2 * k + 1] = r | (nuke ? 256 : 0);
+  private blast(x: number, y: number): void {
+    const i = y * this.width + x;
+    if (Atomics.exchange(this.asked, i, 1) === 1) return;
+    this.later[Atomics.add(this.control, CTL.later, 1)] = i;
   }
 
   /**
    * Joue les explosions mises de côté pendant le damier, dans l'ordre du
-   * balayage — sens de la gravité, x alterné —, puis par rayon : un ordre qui
-   * ne dépend ni des fils ni de leur vitesse. Trié par simple numéro de
-   * cellule, le tas d'uranium sautait par le haut et projetait ses grains
-   * dans le sol ; par le bas, comme avant, il souffle vers le vide.
+   * balayage — sens de la gravité, x alterné : un ordre qui ne dépend ni des
+   * fils ni de leur vitesse. Trié par simple numéro de cellule, le tas
+   * d'uranium sautait par le haut et projetait ses grains dans le sol ; par le
+   * bas, comme avant, il souffle vers le vide.
    * Une charge que l'explosion d'une voisine a déjà emportée ne saute plus —
    * sans ça, les trente-six cellules d'un tas d'uranium arrivées ensemble à
    * l'emballement sautaient chacune, et chaque souffle relançait l'uranium
    * projeté par le précédent au lieu de l'avoir emporté.
    *
-   * ponytail: au-delà de `later` (un quart de la grille), les explosions en
-   * trop sont perdues, et lesquelles dépend des fils. Il faudrait un quart du
-   * bac qui saute au même tick.
+   * La file a une place par cellule et chaque cellule n'y entre qu'une fois
+   * (`blast()`) : aucune demande n'est perdue. Avant, plafonnée au quart de la
+   * grille, elle perdait les demandes en trop — et lesquelles dépendait des fils.
    */
   private settle(): void {
-    const count = Math.min(Atomics.load(this.control, CTL.later), this.later.length >> 1);
+    const count = Atomics.load(this.control, CTL.later);
     if (count === 0) return;
-    const { width: w, height: h } = this;
+    const { width: w, height: h, later, asked } = this;
     const down = this.fall === 1, leftToRight = this.parity === 0;
     const order = new Float64Array(count);
     for (let k = 0; k < count; k++) {
-      const at = this.later[2 * k], x = at % w, y = (at / w) | 0;
-      const rank = (down ? h - 1 - y : y) * w + (leftToRight ? x : w - 1 - x);
-      order[k] = rank * 512 + this.later[2 * k + 1];
+      const at = later[k], x = at % w, y = (at / w) | 0;
+      asked[at] = 0;
+      order[k] = (down ? h - 1 - y : y) * w + (leftToRight ? x : w - 1 - x);
     }
     order.sort();
     for (let k = 0; k < count; k++) {
-      const rank = Math.floor(order[k] / 512), code = order[k] - rank * 512;
+      const rank = order[k];
       const ry = Math.floor(rank / w), rx = rank - ry * w;
       const y = down ? h - 1 - ry : ry, x = leftToRight ? rx : w - 1 - rx;
-      const at = y * w + x;
-      if (!EXPLOSIVE[this.cells[at]]) continue;
-      const r = code & 256 ? NUKE : code, heard = this.heard;
+      const code = BLAST[this.cells[y * w + x]];
+      if (code === 0) continue;
+      const r = code & 255, heard = this.heard;
       heard.booms++;
       if (r > heard.loudest) { heard.loudest = r; heard.at = x; }
       if (code & 256) this.nuke(x, y);
-      else this.explode(x, y, code);
+      else this.explode(x, y, r);
     }
   }
 
@@ -1595,7 +1613,7 @@ export class Engine {
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
-      if (n === FIRE || n === LAVA) { this.blast(x, y, 7); return; }
+      if (n === FIRE || n === LAVA) { this.blast(x, y); return; }
     }
   }
 
@@ -1608,7 +1626,7 @@ export class Engine {
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
       const n = this.get(nx, ny);
-      if (n === FIRE || n === LAVA) { this.blast(x, y, 5); return; }
+      if (n === FIRE || n === LAVA) { this.blast(x, y); return; }
     }
     const down = y + this.gravity;
     if (this.tryMove(i, x, down, NITRO)) {
@@ -1616,7 +1634,7 @@ export class Engine {
       if (this.life[j] < SHOCK) this.life[j]++;
       return;
     }
-    if (this.life[i] >= SHOCK) { this.blast(x, y, 5); return; }
+    if (this.life[i] >= SHOCK) { this.blast(x, y); return; }
     this.life[i] = 0; // elle s'est arrêtée : le compteur repart de zéro
     this.updateLiquid(i, x, y, NITRO);
   }
@@ -1627,10 +1645,10 @@ export class Engine {
    * parte en entier sans dépendre des flammes.
    */
   private updateC4(i: number, x: number, y: number): void {
-    if (this.life[i] === 1) { this.blast(x, y, 9); return; }
+    if (this.life[i] === 1) { this.blast(x, y); return; }
     for (let k = 0; k < 4; k++) {
       const nx = x + NX[k], ny = y + NY[k];
-      if (this.get(nx, ny) === SPARK) { this.blast(x, y, 9); return; }
+      if (this.get(nx, ny) === SPARK) { this.blast(x, y); return; }
     }
   }
 
@@ -1645,7 +1663,7 @@ export class Engine {
   private updateSodium(i: number, x: number, y: number): void {
     for (let k = 0; k < 4; k++) {
       const n = this.get(x + NX[k], y + NY[k]);
-      if (n === WATER || n === SALTWATER) { this.blast(x, y, SPLASH); return; }
+      if (n === WATER || n === SALTWATER) { this.blast(x, y); return; }
     }
     this.updatePowder(i, x, y, SODIUM);
   }
@@ -1655,7 +1673,7 @@ export class Engine {
     const above = y - this.gravity;
     if (!this.inBounds(x, above)) return;
     const kind = MATERIALS[this.cells[this.index(x, above)]].kind;
-    if (kind === "powder" || kind === "liquid") this.blast(x, y, 6);
+    if (kind === "powder" || kind === "liquid") this.blast(x, y);
   }
 
   /**
@@ -1696,7 +1714,7 @@ export class Engine {
       if (this.get(nx, ny) === URANIUM) mass++;
     }
     if (mass >= CRITICAL) {
-      if (++this.life[i] >= MELTDOWN) { this.blast(x, y, NUKE, true); return; }
+      if (++this.life[i] >= MELTDOWN) { this.blast(x, y); return; }
     } else if (this.life[i] > 0) this.life[i]--;
     this.temp[i] = Math.max(this.temp[i], 60 + this.life[i] * 6);
     this.updatePowder(i, x, y, URANIUM);
@@ -2005,7 +2023,7 @@ export class Engine {
       const nx = x + NX[k], ny = y + NY[k];
       if (!this.inBounds(nx, ny)) continue;
       const n = this.cells[this.index(nx, ny)];
-      if (n === TNT) this.blast(nx, ny, 7);
+      if (n === TNT) this.blast(nx, ny);
       else if (n !== C4) this.charge(nx, ny); // le C4 se déclenche seul en voyant l'étincelle
     }
     this.ignite(x, y, 3);

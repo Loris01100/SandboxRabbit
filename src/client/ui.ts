@@ -339,3 +339,14 @@ export function matches(name: string, query: string): boolean {
 export function peerColor(id: number): string {
   return `hsl(${Math.round((id * 137.5) % 360)} 85% 60%)`;
 }
+
+/**
+ * La valeur retenue d'un réglage (blob `:reglages`) : sous son `id`, sinon
+ * sous l'un de ses anciens noms (`renamed[id]`, du plus récent au plus
+ * ancien). `undefined` s'il n'a jamais été retenu.
+ */
+export function savedValue(saved: Record<string, unknown>, id: string, renamed: Record<string, readonly string[]>): unknown {
+  if (saved[id] !== undefined) return saved[id];
+  for (const old of renamed[id] ?? []) if (saved[old] !== undefined) return saved[old];
+  return undefined;
+}

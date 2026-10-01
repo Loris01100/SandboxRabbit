@@ -79,7 +79,7 @@ mondes partagés, bac multijoueur.
 | Taille de grille | 320×180, 480×270, 640×360, 1280×720 ou 1920×1080, tous en 16/9 — les deux dernières tiennent grâce aux blocs de veille. Quand trop de matière bouge à la fois (un lac entier qui s'étale en 1920×1080), le bac ralentit au lieu de ramer : une frame ne s'accorde que 12 ms de simulation et oublie le reste de son retard, le pinceau et l'affichage restent fluides. `Engine` et `Renderer` sont recréés, les réglages du monde reportés. Les défis, écrits en dur pour 320×180, y ramènent d'eux-mêmes. |
 | Ménage nocturne | Un Cron Trigger (4 h du matin) ne garde que les mondes que la galerie montre : les 50 plus récents, les 50 plus vus et les 50 plus aimés. Une rafale de sauvegardes ne chasse donc pas un monde que les joueurs chargent. |
 | Défis partagés | Un monde sauvegardé avec un objectif (« au moins / moins de N cellules de X ») devient un défi jouable depuis la galerie, marqué 🎯. L'objectif tient en une chaîne `ge:12:600` validée côté Worker ; deux comparaisons suffisent — « plus aucun X » s'écrit « moins de 1 ». Aucun code à écrire pour ajouter un défi de plus. |
-| Pseudos & curseurs | Dans un salon, chacun entre avec son pseudo (Paramètres › Général) et une couleur ; la liste des joueurs s'affiche sous la barre de statut, hôte marqué, et le curseur de chacun se voit chez les autres, avec son nom. Le curseur voyage à part de la partie (au plus 12 fois par seconde) : il ne touche pas la grille. |
+| Pseudos & curseurs | Dans un salon, chacun entre avec son pseudo (Paramètres › Général) et une couleur ; la liste des joueurs s'affiche sous la barre de statut, hôte marqué, et le curseur de chacun se voit chez les autres, avec son nom. Le curseur voyage à part de la partie (au plus 12 fois par seconde) : il ne touche pas la grille. Deux joueurs ne portent pas le même pseudo (le second devient « Alice 2 »), et l'hôte peut mettre les invités en lecture seule. |
 | Bac partagé | Un salon = un Durable Object qui **relaie et ne simule pas**, en **lockstep** : chacun simule chez soi, à 60 images par seconde. Le moteur est déterministe (un seul tirage au sort, semé) : il suffit que tous partent de la même grille et appliquent les mêmes gestes aux mêmes ticks. Le premier connecté est l'hôte et mène la partie : il envoie un départ (la grille entière, ~2 à 9 Ko) quand quelqu'un arrive, puis vingt fois par seconde la suite — les gestes, les réglages changés et le tick atteint, une cinquantaine d'octets. C'est le rejeu, en direct. Les invités lui envoient leurs coups de pinceau et rejouent la partie un peu derrière lui ; une empreinte de la grille par seconde attrape une divergence, et l'invité redemande alors un départ. Si l'hôte s'en va, le plus ancien restant prend la main, sans que le bac saute. Huit places par salon, messages plafonnés à la taille d'un monde, et le salon ne relaie que ce que chacun a le droit de dire : un invité ne peut ni destituer l'hôte, ni imposer sa grille aux autres. Pause, Pas à pas, vider, annuler et charger restent à l'hôte. Une connexion qui tombe est retentée une fois, une seconde plus tard, sans retaper le nom du salon. |
 | Galerie triée | Un `<select>` bascule entre « plus récents », « plus vus » et « plus aimés », et un champ cherche par nom (chaque mot, accents et casse ignorés : « debacle » trouve « Débâcle »). Tri et recherche se font sur la liste déjà en main (150 mondes au plus), sans aller-retour au Worker ; la galerie elle-même n'est chargée qu'à sa première ouverture. Charger un monde passe par `GET /api/worlds/:id`, seul endroit qui incrémente `views`, sous limite de débit : une boucle de chargements ne hisse pas un monde en tête. |
 | Accessibilité | Les flèches parcourent les grilles de matières (sinon 51 tabulations), la barre de statut et le but des défis sont des `role="status"` — les changements sont annoncés au lecteur d'écran. |
@@ -148,6 +148,7 @@ npm run check      # auto-vérifications : simulation, panneau, API, protocole d
 npm run browser    # dans Chromium : shader WebGL2 = rendu JS, page qui charge (npx playwright install chromium la première fois)
 npm run bench      # coût du tick sur cinq tailles de grille ; échoue au-delà de 4 ms en 320×180
 npm run stress     # pires cas (bac plein de chaque matière, explosions, lave, aimants…) sous leurs plafonds
+npm run drift      # bench et stress de origin/main contre ici, sur la même machine ; échoue au-delà de +30 %
 npm run directions # que rapporteraient plusieurs cœurs ? (la carte graphique : test/gpu.html sous npm run dev)
 npm run rust       # que rapporterait Rust ? thermal() en Rust/WASM contre le moteur JS (installer Rust : docs/rust.md)
 npm run loc        # taille du projet par poste
@@ -227,9 +228,9 @@ Deux pistes distinctes, à ne pas confondre :
   classement qui croirait le temps annoncé se tricherait d'une requête.
 
 **Dette connue** : les `ponytail:` du code (gravité
-inversée du lapin, éclairage du secours qui ressemble sans coïncider, salon sans authentification ni
-prédiction locale, records locaux, héros sans métier ni inventaire, onde de pression sans inertie, piles
-d'erreur minifiées…). La skill `ponytail-debt` en fait la liste
+inversée du lapin, éclairage du secours sur une grille grossière, salon sans authentification ni
+prédiction locale, records locaux, héros sans métier ni inventaire, onde de pression sans inertie, rouille
+de surface, votes sans dédoublonnage, piles d'erreur minifiées…). La skill `ponytail-debt` en fait la liste
 complète ; ailleurs, `grep -rn -A6 --exclude-dir=target "ponytail:" src test rust migrations .github index.html wrangler.jsonc`.
 
 ## Contribuer

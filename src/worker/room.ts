@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PLACES, cursor, freeId, nick, roster, route, type Player } from "./relay.ts";
+import { PLACES, cursor, freeId, nick, roster, route, unique, type Player } from "./relay.ts";
 
 /**
  * Salon d'un bac partagé. Le Durable Object **ne simule rien** : il relaie.
@@ -35,7 +35,7 @@ export class Room extends DurableObject {
     const all = this.ctx.getWebSockets();
     const host = all.length === 1;
     const id = freeId(before.map((ws) => player(ws).id));
-    const name = nick(new URL(request.url).searchParams.get("nick"));
+    const name = unique(nick(new URL(request.url).searchParams.get("nick")), before.map((ws) => player(ws).name));
     server.serializeAttachment({ host, id, name } satisfies Player);
     // Son numéro avec son rôle : la page s'en sert pour se reconnaître dans la liste.
     server.send(JSON.stringify({ type: "role", host, id }));

@@ -20,10 +20,17 @@
  * touche pas la grille : il voyage à part (`cursor`), au plus toutes les
  * `POINT` ms, et ne peut pas faire diverger le lockstep.
  *
- * ponytail: un pseudo n'est pas une identité — rien ne l'authentifie, deux
- * joueurs peuvent porter le même, et il n'y a pas de verrou : qui entre peint.
- * Et un invité voit son propre coup de pinceau après un aller-retour : pas de
- * prédiction locale.
+ * Deux joueurs ne portent pas le même pseudo (le salon ajoute « 2 », `unique()`
+ * de relay.ts), et l'hôte peut mettre les invités en lecture seule : c'est lui
+ * qui applique leurs gestes, c'est donc lui qui les refuse ; le message `lock`
+ * ne fait que prévenir les invités.
+ *
+ * ponytail: un pseudo n'est pas une identité — rien ne l'authentifie, on peut
+ * entrer sous le nom d'un absent ; à revoir avec des comptes, le jour où la
+ * galerie en a. Et un invité voit son propre coup de pinceau après un
+ * aller-retour : pas de prédiction locale (il faudrait peindre chez lui, puis
+ * défaire quand la partie de l'hôte arrive) ; à revoir si l'aller-retour se
+ * sent, avec des salons loin de leur Durable Object.
  *
  * Ce module ne connaît ni le bouton Pause ni le sélecteur de taille : il les
  * demande par des rappels, sinon il faudrait importer main.ts et boucler.
@@ -55,7 +62,9 @@ export function initRoom(hooks: {
 
 /** Relaie un geste à l'hôte. Sans salon, ou quand on est l'hôte, ne fait rien. */
 export function relay(g: Gesture): void {
-  if (socket?.readyState === WebSocket.OPEN && !host) socket.send(JSON.stringify({ type: "do", g }));
+  if (socket?.readyState !== WebSocket.OPEN || host) return;
+  if (locked) { statusEl.textContent = "L'hôte a mis le bac en lecture seule."; return; }
+  socket.send(JSON.stringify({ type: "do", g }));
 }
 
 /** JSON toléré : un message illisible est ignoré, pas propagé en exception. */
@@ -74,6 +83,17 @@ const roomButton = document.querySelector<HTMLButtonElement>("#room")!;
 const nickInput = document.querySelector<HTMLInputElement>("#nick")!;
 const rosterEl = document.querySelector<HTMLUListElement>("#roster")!;
 const peersEl = document.querySelector<HTMLDivElement>("#peers")!;
+const lockRow = document.querySelector<HTMLLabelElement>("#room-lock-row")!;
+const lockInput = document.querySelector<HTMLInputElement>("#room-lock")!;
+/** Hôte : les gestes des invités sont refusés. Invité : l'hôte l'a décidé, nos gestes ne partent plus. */
+let locked = false;
+
+lockInput.addEventListener("change", () => {
+  if (!host) return;
+  locked = lockInput.checked;
+  send(JSON.stringify({ type: "lock", on: locked }));
+  statusEl.textContent = locked ? "Les invités regardent sans peindre." : "Les invités peuvent de nouveau peindre.";
+});
 
 /** Un joueur du salon tel que la page le montre ; `x`, `y` : la cellule sous son curseur (-1 : hors du bac). */
 interface Peer { name: string; host: boolean; x: number; y: number; el: HTMLDivElement | null }
@@ -207,6 +227,8 @@ listen((news) => {
   if (news.t === "start" && host) {
     lastStart = Date.now();
     send(JSON.stringify({ type: "start", rec: news.rec }));
+    // Avec chaque départ : un arrivant apprend ainsi si le bac est verrouillé.
+    send(JSON.stringify({ type: "lock", on: locked }));
   }
   if (news.t === "turn" && host) {
     send(JSON.stringify({ type: "turn", ticks: news.ticks, beats: news.beats, sums: news.sums }));
@@ -221,6 +243,9 @@ function leaveRoom(): void {
   host = false;
   peers = 1;
   me = 0;
+  locked = false;
+  lockInput.checked = false;
+  lockRow.hidden = true;
   pointed = "";
   players.clear();
   peersEl.replaceChildren();
@@ -237,12 +262,13 @@ let retry = 0;
 /** Le joueur a demandé à partir : la fermeture qui suit n'est pas une coupure. */
 let quitting = false;
 
-roomButton.addEventListener("click", () => {
+/** Le bouton « Bac partagé » : entrer (on demande le nom du salon) ou quitter. Câblé par lobby.ts. */
+export function toggleRoom(): void {
   clearTimeout(retry);
   if (socket) { quitting = true; socket.close(); return; }
   const name = prompt("Nom du salon ?", "public");
   if (name) join(name);
-});
+}
 
 /**
  * Entre dans le salon. Une connexion établie qui tombe (Wi-Fi qui saute,
@@ -267,6 +293,10 @@ function join(name: string): void {
     if (msg.type === "role") {
       host = msg.host === true;
       if (typeof msg.id === "number") { me = msg.id; drawRoster(); }
+      // Promu, on repart sans verrou : celui de l'ancien hôte est parti avec lui.
+      locked = false;
+      lockInput.checked = false;
+      lockRow.hidden = !host;
       onRole(host);
       statusEl.textContent = host
         ? `Salon « ${room} » — vous menez la partie.`
@@ -295,7 +325,11 @@ function join(name: string): void {
     if (msg.type === "turn" && !host && typeof msg.ticks === "number" && Array.isArray(msg.beats) && Array.isArray(msg.sums)) {
       order({ t: "turn", ticks: msg.ticks, beats: msg.beats, sums: msg.sums });
     }
-    if (msg.type === "do" && host && msg.g) onApply(msg.g);
+    if (msg.type === "do" && host && msg.g && !locked) onApply(msg.g);
+    if (msg.type === "lock" && !host) {
+      locked = msg.on === true;
+      statusEl.textContent = locked ? "L'hôte a mis le bac en lecture seule." : "L'hôte vous rend la main : vous pouvez peindre.";
+    }
     if (msg.type === "sync" && host && !resync) {
       resync = window.setTimeout(restart, Math.max(0, lastStart + RESYNC - Date.now()));
     }

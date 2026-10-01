@@ -2,7 +2,7 @@ import { MATERIALS, type MaterialId } from "./sim/materials.ts";
 import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
 import { current, paletteEl, select } from "./palette.ts";
 import { soundMix, soundOn, soundVolume } from "./audio.ts";
-import { stored, write } from "./ui.ts";
+import { savedValue, stored, write } from "./ui.ts";
 import { wholePixels, zoomInput } from "./view.ts";
 import { WIDTH, airView, hour, light, lightDetail, limitFps, resize, screen, set } from "./world.ts";
 
@@ -141,8 +141,16 @@ const nickInput = document.querySelector<HTMLInputElement>("#nick")!;
 
 // Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
 // que de dupliquer les handlers ci-dessus.
-// ponytail: un blob JSON sans version — un réglage renommé repart au défaut.
 const SETTINGS = "sandbox-rabbit:reglages";
+
+/**
+ * Les anciens noms d'un réglage renommé : `{ "nouvel-id": ["ancien-id"] }`, du
+ * plus récent au plus ancien. Le blob range chaque réglage sous l'`id` de son
+ * contrôle : sans cette table, changer un `id` dans index.html faisait
+ * repartir le réglage au défaut chez tous ceux qui l'avaient changé. Vide tant
+ * qu'aucun n'a été renommé ; voir recettes.md, « Ajouter un contrôle au panneau ».
+ */
+const RENAMED: Record<string, readonly string[]> = {};
 
 /**
  * Les réglages retenus, désignés par leur `id` — les clés du blob sont donc
@@ -180,7 +188,8 @@ export function restore(): void {
   if (!saved) return;
   if (MATERIALS[saved.current as MaterialId]) select(saved.current as MaterialId);
   for (const el of SAVED) {
-    const value = typeof saved[el.id] === "boolean" && !isCheck(el) ? Number(saved[el.id]) : saved[el.id];
+    const kept = savedValue(saved, el.id, RENAMED);
+    const value = typeof kept === "boolean" && !isCheck(el) ? Number(kept) : kept;
     if (value === undefined) continue; // réglage absent d'une version précédente
     if (isCheck(el)) {
       el.checked = Boolean(value);

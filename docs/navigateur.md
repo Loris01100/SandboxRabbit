@@ -141,8 +141,10 @@ Ce qui est vérifié :
    horodaté) sur le Durable Object que le plugin Cloudflare fait tourner dans
    workerd. Chacune voit la liste des joueurs avec les pseudos (un `<b>` reste
    du texte), l'une voit le curseur de l'autre puis le perd quand il sort du
-   bac, et quand l'hôte ferme sa page l'autre est promue et son curseur
-   disparaît. La galerie, elle, n'y est pas : elle demanderait une D1 locale
+   bac ; l'hôte coche « Invités en lecture seule » (que l'invité n'a pas) et
+   l'invité en est prévenu ; quand l'hôte ferme sa page, l'autre est promue
+   et son curseur disparaît. Le salon lui-même (room.ts) n'est chargé qu'au
+   premier clic sur « Bac partagé » : le test passe donc aussi par là. La galerie, elle, n'y est pas : elle demanderait une D1 locale
    migrée (`wrangler d1 migrations apply --local`) sur la machine de test.
 6. **le secours 2D éclaire** : un second Chromium, lancé avec
    `--disable-webgl --disable-webgl2`, charge la page : elle colorie par

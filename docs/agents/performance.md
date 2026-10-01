@@ -15,6 +15,7 @@ les mesures de Rust/WASM dans [rust.md](../rust.md).
 | La question | La commande |
 | --- | --- |
 | « Est-ce que le tick s'est effondré ? » | `npm run bench` — cinq tailles, budget sur 320×180 |
+| « Est-ce plus lent que `main` ? » | `npm run drift` — bench et stress de la base contre ici, sur la même machine ; une dérive de 20 % que les budgets absolus laissent passer |
 | « Est-ce que cette matière, cette règle coûte cher dans le pire cas ? » | `npm run stress` — un bac plein de **chaque** matière, explosions, pression, lave, aimants, et les bandes d'un 1920×1080 tout changé |
 | « Où part le temps d'un tick ? » | `node --cpu-prof`, voir plus bas |
 | « Qu'est-ce que rapporterait le multi-cœur, le GPU, un portage ? » | `npm run directions` (et `test/gpu.html` sous `npm run dev` pour WebGPU) — voir [tests.md § Choisir une direction](tests.md#choisir-une-direction) |
@@ -76,6 +77,7 @@ parallèle**. Le reste (micro-optimisations, portage) vient après.
 | Son chargé au premier geste (`import()` d'audio.ts) et polyfill `modulepreload` retiré (vite.config.ts) | page 84 122 → 82 792 octets (son compris ; 81 014 sans) | [architecture.md](architecture.md#côté-page--qui-fait-quoi) |
 | Galerie chargée à sa première ouverture (gallery.ts par `import()` de share.ts) | page 87 997 → 84 457 octets, pseudos, curseurs, remix et votes compris | [architecture.md](architecture.md#galerie-et-mondes-défis) |
 | Éclairage du secours 2D (`FlatLight`) : calendrier des pas précalculé, lecture bilinéaire en ligne, texels opaques sautés, collecte sous-échantillonnée, mélange par rangée | lumière 13,6 → 4,5 ms (320×180), 22,9 → 4,4 ms (1920×1080) ; coloriage éclairé 1920×1080 73 → 32 ms (27 sans lumière) | [rendu.md](rendu.md#le-secours-2d) |
+| Salon chargé au premier clic (room.ts par `import()` de lobby.ts) | page 86 221 → 81 754 octets | [architecture.md](architecture.md#salon-partagé-bac-multijoueur) |
 | `FlatLight` chargé à la demande (sim/flatlight.ts) | page 89 186 → 85 274 octets | [rendu.md](rendu.md#le-secours-2d) |
 | Plafond de fils porté de 7 à 14 | bac plein de nanites en 1080p : 28 ms à 7 fils → 19 à 15 (16 cœurs) | `helpers()` de sim/worker.ts |
 

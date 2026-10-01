@@ -28,11 +28,12 @@ interface Level { width: number; height: number; emit: Float32Array; alpha: Floa
  * opaques sautés : ~4,5 ms par éclairage, de 320×180 à 1920×1080, d'où
  * l'espacement de `relight()` (screen.ts).
  *
- * ponytail: seize directions seulement — loin d'une petite flamme, ses rayons
- * s'écartent et la lumière se dessine en étoile pâle ; et une seule grille de
- * 80 texels, plus grossière que celle du shader (480). Les deux chemins se
- * ressemblent, ils ne coïncident pas : `npm run browser` ne compare pas
- * l'éclairage.
+ * ponytail: une grille de 80 texels, six fois plus grossière que celle du
+ * shader (480) : une ombre fine (un pilier de 3 cellules en 320×180) s'y
+ * dilue, et les deux chemins se ressemblent sans coïncider — `npm run
+ * browser` ne compare pas l'éclairage. Doubler la grille quadruple le coût
+ * (~18 ms) : à revoir si une ombre fine manque dans un bac sans WebGL2, ou si
+ * le calcul part dans un Worker.
  */
 export class FlatLight {
   /** Cellules par côté de texel. */
@@ -44,11 +45,17 @@ export class FlatLight {
   light = new Float32Array(0);
   private levels: Level[] = [];
   private readonly table = lighting();
-  /** Directions des rayons : cosinus puis sinus. */
-  private readonly dirs = Array.from({ length: RAYS }, (_, d) => {
-    const a = ((d + 0.5) * 2 * Math.PI) / RAYS;
+  /**
+   * Quatre jeux de directions, chacun tourné d'un quart de pas d'angle
+   * (cosinus puis sinus), alternés en damier 2 × 2 de texels : l'interpolation
+   * bilinéaire du mélange en mêle alors 64 pour le prix de 16. Avec un seul
+   * jeu, les « trous » entre rayons s'alignaient d'un texel à l'autre, et loin
+   * d'une petite flamme la lumière se dessinait en étoile.
+   */
+  private readonly dirs = Array.from({ length: 4 }, (_, k) => Array.from({ length: RAYS }, (_, d) => {
+    const a = ((d + (k + 0.5) / 4) * 2 * Math.PI) / RAYS;
     return [Math.cos(a), Math.sin(a)] as const;
-  });
+  }));
 
   /** Recalcule toute la lumière de `grid`. */
   compute(grid: Grid): void {
@@ -59,6 +66,7 @@ export class FlatLight {
     this.gather(grid);
     for (let k = 1; k < this.levels.length; k++) this.reduce(this.levels[k - 1], this.levels[k]);
     this.march();
+    this.smooth();
     this.finish();
   }
 
@@ -155,8 +163,9 @@ export class FlatLight {
         // Opaque : `finish()` remplace sa lumière (celle du voisin, ou rien s'il brille).
         if (opaque[y * lw + x] >= 0.5) { light[t3] = light[t3 + 1] = light[t3 + 2] = 0; continue; }
         let sr = 0, sg = 0, sb = 0;
+        const set = dirs[(x & 1) | ((y & 1) << 1)];
         for (let d = 0; d < RAYS; d++) {
-          const dx = dirs[d][0], dy = dirs[d][1];
+          const dx = set[d][0], dy = set[d][1];
           let through = 1;
           for (let k = 0; k < mid.length; k++) {
             const px = x + 0.5 + dx * mid[k], py = y + 0.5 + dy * mid[k];
@@ -185,6 +194,38 @@ export class FlatLight {
           }
         }
         light[t3] = sr / RAYS; light[t3 + 1] = sg / RAYS; light[t3 + 2] = sb / RAYS;
+      }
+    }
+  }
+
+  /**
+   * Un flou 3 × 3 (1-2-1) sur la lumière, entre texels non opaques seulement :
+   * les jeux de rayons alternés (`dirs`) laissent un grain d'un texel à
+   * l'autre, que l'interpolation seule ne gommait pas. Un opaque n'y entre ni
+   * n'en sort — la lumière ne passe pas un mur par le flou.
+   */
+  private smooth(): void {
+    const { width: lw, height: lh, light } = this;
+    const alpha = this.levels[0].alpha;
+    const src = light.slice();
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        const t = y * lw + x;
+        if (alpha[t] >= 0.5) continue;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= lh) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= lw) continue;
+            const u = yy * lw + xx;
+            if (alpha[u] >= 0.5) continue;
+            const wgt = (dx === 0 ? 2 : 1) * (dy === 0 ? 2 : 1);
+            r += src[u * 3] * wgt; g += src[u * 3 + 1] * wgt; b += src[u * 3 + 2] * wgt; n += wgt;
+          }
+        }
+        light[t * 3] = r / n; light[t * 3 + 1] = g / n; light[t * 3 + 2] = b / n;
       }
     }
   }

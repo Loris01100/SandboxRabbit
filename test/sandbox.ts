@@ -294,6 +294,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.equal(sim.engine.gravity, -1, "et la gravité");
   run(sim, 20);
   assert.ok(last(news, "grid")!.full.length > 0, "la copie de secours part quand le bac a changé");
+  assert.equal(last(news, "grid")!.w, W, "avec la largeur du bac qui l'a faite : rangée sous une autre, elle revenait cisaillée");
 }
 
 /** Sauvegarde et lien demandent une grille fraîche : l'ordre `grid` rend celle de l'instant, décodable en la même matière. */

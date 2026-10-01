@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import app from "../src/worker/app.ts";
-import { PLACES, cursor, freeId, nick, roster, route } from "../src/worker/relay.ts";
+import { PLACES, cursor, freeId, nick, roster, route, unique } from "../src/worker/relay.ts";
 import { createStore, type World } from "../src/worker/store.ts";
 
 const env = {} as never;
@@ -158,11 +158,17 @@ const body = async <T,>(res: Response | Promise<Response>): Promise<T> => (await
   assert.equal(nick("x".repeat(100)).length, 24, "24 caractères au plus");
   assert.equal(nick("🐇".repeat(30)), "🐇".repeat(24), "comptés en caractères, pas en moitiés d'emoji");
   assert.equal(nick(null), "");
+  assert.equal(unique("Alice", ["Bob"]), "Alice");
+  assert.equal(unique("Alice", ["Alice", "Alice 2"]), "Alice 3", "deux joueurs ne portent pas le même pseudo");
+  assert.equal(unique("x".repeat(24), ["x".repeat(24)]), "x".repeat(22) + " 2", "le suffixe tient dans les 24 caractères");
+  assert.equal(unique("", [""]), "", "sans pseudo : « Joueur N », déjà distinct par son numéro");
   assert.equal(freeId([]), 1);
   assert.equal(freeId([1, 2, 4]), 3, "le plus petit numéro libre, recyclé");
   assert.equal(freeId(Array.from({ length: PLACES }, (_, i) => i + 1)), 0);
 
   const msg = (o: unknown): string => JSON.stringify(o);
+  assert.equal(route(msg({ type: "lock", on: true }), true), "guests", "l'hôte prévient les invités du verrou");
+  assert.equal(route(msg({ type: "lock", on: false }), false), null, "un invité ne se déverrouille pas lui-même");
   assert.deepEqual(JSON.parse(cursor(msg({ type: "cursor", x: 10, y: 20, id: 7 }), 3)!), { type: "cursor", id: 3, x: 10, y: 20 },
     "le numéro est celui que le salon connaît, pas celui que l'émetteur prétend");
   assert.ok(cursor(msg({ type: "cursor", x: -1, y: -1 }), 1), "hors du bac : -1, -1");

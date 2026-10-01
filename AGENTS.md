@@ -25,6 +25,7 @@ npm run check      # asserts : test/sim.ts, test/libm.ts, test/ui.ts, test/api.t
 npm run browser    # Chromium (Playwright) : shader WebGL2 = Renderer, page qui charge sans erreur (docs/navigateur.md)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
 npm run stress     # pires cas : bac plein de chaque matière, explosions, pression, lave, aimants, bandes 1920×1080 ; chacun sous un plafond
+npm run drift      # bench et stress de origin/main (ou DRIFT_BASE) contre ici, même machine ; échoue au-delà de +30 %
 npm run directions # mesure de décision : 1 cœur, N cœurs, projection (GPU : test/gpu.html sous npm run dev)
 npm run rust       # prototype Rust/WASM de thermal() et de la pression contre le moteur JS, libm.ts contre la crate libm (demande Rust : docs/rust.md)
 npm run build      # typecheck puis vite build
@@ -74,6 +75,7 @@ src/client/
   ui.ts                  logique pure du panneau + read/write/forget (localStorage)
   room.ts share.ts theme.ts   salon (pseudos, curseurs), sauvegarde/exports, jour-nuit (reçoivent leurs dépendances par init…())
   gallery.ts             la galerie (recherche, tri, J'aime, remix), chargée à sa première ouverture par share.ts
+  lobby.ts               porte du salon : charge room.ts au premier clic sur « Bac partagé »
   audio.ts sound.ts      son : porte (charge sound.ts au premier geste) et synthèse Web Audio ; Heard / Hum de sandbox.ts
   errors.ts              exceptions de la page et du Worker de simulation → POST /api/error ; reporter() (pur)
   sim/
@@ -94,7 +96,7 @@ src/worker/
   relay.ts               qui a le droit de dire quoi dans un salon      (pur)
 migrations/              schéma D1, un fichier numéroté par changement
 rust/                    prototype : thermal() et la pression en Rust → WASM, et la crate libm, référence de libm.ts ; mesurés par test/rust.ts (pas branchés sur le bac)
-test/                    scripts d'assert (+ bench.ts, stress.ts, loc.ts) ; browser.ts + screen.html : tests dans Chromium
+test/                    scripts d'assert (+ bench.ts, stress.ts, drift.ts, loc.ts) ; browser.ts + screen.html : tests dans Chromium
 ```
 
 ## Règles à ne pas enfreindre
@@ -134,7 +136,7 @@ reproductible, ids de matière gelés, CSP, cloisonnement de la page,
 - Ne pas toucher à l'ordre du balayage, à `clock`, ni à l'ordre bord → centre
   d'`explode()`.
 - Un nouvel explosif = un nouveau **déclencheur**. Une règle ne fait jamais
-  sauter directement : `blast()`, et la matière dans `EXPLOSIVE`.
+  sauter directement : `blast(x, y)`, et la matière dans `BLAST` (son rayon).
 - Multi-fils : **une règle ne lit ni n'écrit à plus de 15 cellules** de sa
   cellule (le damier ne protège pas au-delà) ; plus loin, on diffère comme
   `blast()`. Jamais d'état partagé tiré ou modifié pendant le damier. Le
@@ -157,7 +159,7 @@ reproductible, ids de matière gelés, CSP, cloisonnement de la page,
   sandbox.ts, sinon le rejeu diverge. S'il la remplace, il arrête d'abord le
   rejeu (`this.play(false)`).
 - `localStorage` uniquement via `read` / `write` / `forget` de ui.ts.
-- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts`, `palette.ts`, `settings.ts`, `hero.ts`, `audio.ts`, `sound.ts`, `gallery.ts` n'importent pas main.ts (cycle).
+- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts`, `palette.ts`, `settings.ts`, `hero.ts`, `audio.ts`, `sound.ts`, `gallery.ts`, `lobby.ts` n'importent pas main.ts (cycle).
 - Une frame ne porte que les bandes changées : world.ts les recopie toutes
   dans son miroir, n'en saute jamais une. Un réglage qui change l'aspect sans
   écriture (comme `heatmap`) fait tout recolorier.

@@ -73,7 +73,9 @@ ligne dans le moteur. Voir le ciment ou le verre fondu.
 
 Lui trouver un **déclencheur** qui n'existe pas encore (voir
 [simulation.md](simulation.md#explosifs--un-déclencheur-chacun)), réutiliser
-`explode()` pour le souffle. S'il doit survivre à une chaîne, le préserver sur
+`explode()` pour le souffle : sa règle appelle `this.blast(x, y)`, et son rayon
+va dans la table `BLAST` d'engine.ts (+ 256 pour des retombées) — sans sa ligne,
+sa demande est ignorée. S'il doit survivre à une chaîne, le préserver sur
 le pourtour d'`explode()` comme `TNT` et `C4`.
 
 ## Ajouter un défi
@@ -139,6 +141,10 @@ Rappel : ce qui transite est cloné (clone structuré), pas partagé.
 3. S'il change la simulation : `set({…})` de world.ts et un champ dans
    `Knobs`. S'il doit être retenu : l'ajouter à `SAVED` (settings.ts), qui
    l'écrit dans le blob `sandbox-rabbit:reglages` et le rejoue à `restore()`.
+   Le blob range chaque réglage sous l'`id` de son contrôle : **renommer cet
+   `id`**, c'est ajouter `"nouvel-id": ["ancien-id"]` à `RENAMED`
+   (settings.ts), sinon le réglage repart au défaut chez tous ceux qui
+   l'avaient changé.
 4. Pas de `style=` ni de `<script>` en ligne (CSP) : passer par
    [style.css](../../src/client/style.css) ou le CSSOM.
 5. Toute logique pure (calcul, parsing) va dans

@@ -28,7 +28,9 @@ export function route(message: string | ArrayBuffer, fromHost: boolean): "guests
   } catch {
     return null;
   }
-  if (fromHost) return type === "start" || type === "turn" ? "guests" : null;
+  // `lock` : l'hôte met les invités en lecture seule (ou les en sort) — c'est
+  // lui qui refuse leurs gestes, le message ne fait que les prévenir.
+  if (fromHost) return type === "start" || type === "turn" || type === "lock" ? "guests" : null;
   return type === "do" || type === "sync" ? "host" : null;
 }
 
@@ -47,6 +49,21 @@ const NICK = 24;
 export function nick(raw: unknown): string {
   if (typeof raw !== "string") return "";
   return [...raw.replace(/[\p{Cc}\p{Cf}]/gu, "").replace(/\s+/g, " ").trim()].slice(0, NICK).join("");
+}
+
+/**
+ * Un pseudo distinct de ceux déjà pris dans le salon : « Alice », puis
+ * « Alice 2 », « Alice 3 »… (coupé pour tenir dans 24 caractères). Sans ça deux
+ * joueurs portaient le même nom, et la liste ne disait plus qui était qui.
+ * Vide reste vide : la page affiche « Joueur N », déjà distinct par son numéro.
+ */
+export function unique(name: string, taken: string[]): string {
+  if (!name || !taken.includes(name)) return name;
+  for (let n = 2; ; n++) {
+    const tail = ` ${n}`;
+    const candidate = [...name].slice(0, NICK - tail.length).join("").trimEnd() + tail;
+    if (!taken.includes(candidate)) return candidate;
+  }
 }
 
 /** Le plus petit numéro de joueur libre, de 1 à `PLACES` : il donne sa couleur au curseur, et se recycle quand un joueur part. */

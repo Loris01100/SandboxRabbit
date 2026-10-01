@@ -67,8 +67,8 @@ tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
    (`mix(tick ^ 0x27d4eb2f)`) : ni le nombre de fils ni l'ordre où ils les
    ont posées (`waiting`, `CTL.held`) ne comptent.
 5. `settle()` : les explosions mises de côté pendant le damier (`blast()`),
-   jouées une à une dans l'ordre du balayage. Une charge déjà emportée par
-   une voisine ne saute plus (`EXPLOSIVE`).
+   jouées une à une dans l'ordre du balayage, au souffle de leur matière
+   (`BLAST`). Une charge déjà emportée par une voisine ne saute plus.
 6. `thermal()`, en trois passes par bloc de veille éveillé ou écrit : les
    sources (`heat`) tirent leur cellule vers leur température
    (`heatChunk`), puis diffusion (`CONDUCTION`), retour vers `ambient`
@@ -133,7 +133,8 @@ a sept par tick.
   seulement : `gen` (génération de passe, c'est là qu'on attend), `job` (le genre
   de travail, `JOB`), `count` (combien), `next` (prochain travail à prendre),
   `done` (fils qui ont fini), `later` et `held` (compteurs des explosions et des
-  cellules différées), `hero` (le cœur du héros piloté), `gust` (« il y a de la
+  cellules différées — la file `later` a une place par cellule, et `asked`, un
+  octet par cellule, n'y laisse entrer chaque cellule qu'une fois par tick), `hero` (le cœur du héros piloté), `gust` (« il y a de la
   pression quelque part »).
 - **`params`** (`Float64Array`, cases de `PARAM`) : ce que le coordinateur
   **publie** avant le tick (`publish()`) et qu'un fil **relit** avant chaque
@@ -422,10 +423,18 @@ explosif = ajouter un déclencheur, sinon c'est du TNT repeint.
 | `THERMITE` | l'anti-explosif : perce au lieu de souffler |
 
 - Une règle ne fait jamais sauter directement : elle **demande** l'explosion
-  (`blast(x, y, r)`, `blast(…, NUKE, true)` pour le nucléaire), jouée à la fin
-  du damier par `settle()`. Un souffle porte bien au-delà des 15 cellules que
-  le damier garantit (voir [Plusieurs fils](#plusieurs-fils)). Un nouvel
-  explosif ajoute sa matière à `EXPLOSIVE`, sinon sa demande est ignorée.
+  (`blast(x, y)`), jouée à la fin du damier par `settle()`. Un souffle porte
+  bien au-delà des 15 cellules que le damier garantit (voir
+  [Plusieurs fils](#plusieurs-fils)).
+- Le souffle dépend de la **matière**, pas de qui le demande : `BLAST` (rayon,
+  + 256 avec les retombées de `nuke()`) — l'étincelle fait sauter le TNT au
+  même rayon que la flamme. Un nouvel explosif y ajoute sa ligne, sinon sa
+  demande est ignorée (`EXPLOSIVE` en est dérivée). C'est ce qui permet de
+  ne garder qu'**une demande par cellule et par tick** (`asked`, remis à zéro
+  par `settle()`) : la file `later` a une place par cellule et ne peut plus
+  déborder. Plafonnée au quart de la grille, elle perdait les demandes en trop
+  quand un quart du bac sautait au même tick — et lesquelles dépendait des
+  fils. test/sim.ts en fait sauter la moitié.
 - `explode()` **projette** (`hurl()`) au lieu d'effacer, et traite le disque
   **du bord vers le centre** (sinon les cellules partent vers des places pas
   encore libérées). `hurl()` ne dépose que sur du vide : la matière est

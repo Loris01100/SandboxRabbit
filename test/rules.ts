@@ -27,12 +27,64 @@ const lire = (fichier: string): string => readFileSync(new URL(fichier, racine),
  * compterait comme une infraction, et interdire une tournure obligerait à ne
  * plus l'écrire même pour l'expliquer.
  *
- * ponytail: découpe à la main, sans analyse syntaxique — un `//` dans une
- * chaîne (une URL) couperait la fin de sa ligne, et l'infraction qui s'y
- * cacherait passerait. Aucun fichier lu ici n'en contient.
+ * Un petit découpeur plutôt que deux expressions régulières : il sait ce
+ * qu'est une chaîne, un gabarit et une expression régulière littérale. Avant,
+ * un `//` dans une chaîne (une URL) coupait la fin de sa ligne, et
+ * l'infraction qui s'y serait cachée passait. Les chaînes restent : les
+ * règles y cherchent des imports (`"sim/engine.ts"`).
  */
-const code = (fichier: string): string =>
-  lire(fichier).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+function sansCommentaires(src: string): string {
+  let out = "";
+  let i = 0;
+  // Un `/` ouvre une expression régulière après ce qui ne peut pas finir une valeur.
+  const avantRegex = (): boolean => {
+    const avant = out.trimEnd();
+    return avant === "" || /[(,=:[!&|?{};+\-*%<>~^]$/.test(avant) || /\b(return|typeof|case|of|in)$/.test(avant);
+  };
+  while (i < src.length) {
+    const c = src[i], d = src[i + 1];
+    if (c === "/" && d === "/") {
+      const fin = src.indexOf("\n", i);
+      i = fin < 0 ? src.length : fin;
+    } else if (c === "/" && d === "*") {
+      const fin = src.indexOf("*/", i + 2);
+      i = fin < 0 ? src.length : fin + 2;
+      out += " ";
+    } else if (c === '"' || c === "'" || c === "`") {
+      const début = i++;
+      while (i < src.length && src[i] !== c) i += src[i] === "\\" ? 2 : 1;
+      out += src.slice(début, ++i);
+    } else if (c === "/" && avantRegex()) {
+      const début = i++;
+      let classe = false;
+      while (i < src.length && (classe || src[i] !== "/") && src[i] !== "\n") {
+        if (src[i] === "\\") i++;
+        else if (src[i] === "[") classe = true;
+        else if (src[i] === "]") classe = false;
+        i++;
+      }
+      out += src.slice(début, ++i);
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
+// Le découpeur lui-même : une URL, une expression régulière pleine de / et de
+// guillemets, un gabarit, et trois commentaires qui doivent partir.
+{
+  const essai = sansCommentaires([
+    'const u = "http://x/Math.random()"; // Math.random()',
+    "const r = /\\/\\/['\"]/g; /* Math.random() */ const t = `//${1}`;",
+  ].join("\n"));
+  assert.ok(essai.includes('"http://x/Math.random()"'), "un // dans une chaîne n'ouvre pas de commentaire");
+  assert.equal(essai.split("Math.random").length - 1, 1, "les deux commentaires partent, la chaîne reste");
+  assert.ok(essai.includes("/\\/\\/['\"]/g;") && essai.includes("`//${1}`"), "ni une expression régulière ni un gabarit ne sont coupés");
+}
+
+const code = (fichier: string): string => sansCommentaires(lire(fichier));
 
 /** Les `.ts` d'un dossier du dépôt, pour qu'un module neuf tombe sous la règle sans qu'on y pense. */
 const modules = (dossier: string): string[] =>
@@ -122,7 +174,7 @@ for (const [nom, id] of Object.entries(IDS)) {
  * **type** : ils reçoivent le moteur du Worker en argument, ils ne le créent
  * pas. Ils ne sont donc pas dans la liste.
  */
-const PAGE = ["main", "world", "screen", "room", "share", "theme", "view", "keys", "palette", "settings", "hero", "ui", "errors", "audio", "sound", "gallery"];
+const PAGE = ["main", "world", "screen", "room", "share", "theme", "view", "keys", "palette", "settings", "hero", "ui", "errors", "audio", "sound", "gallery", "lobby"];
 for (const nom of PAGE) {
   assert.ok(!code(`src/client/${nom}.ts`).includes("sim/engine.ts"),
     `${nom}.ts ne doit pas importer l'Engine : world.ts est la seule porte vers la simulation`);
@@ -140,7 +192,7 @@ for (const nom of PAGE) {
  * laisserait l'un des deux à moitié chargé (ses exports encore à
  * `undefined`). main.ts leur passe ce qu'il faut par un `init…()` à rappels.
  */
-for (const nom of ["room", "share", "theme", "view", "keys", "palette", "settings", "hero", "audio", "sound", "gallery"]) {
+for (const nom of ["room", "share", "theme", "view", "keys", "palette", "settings", "hero", "audio", "sound", "gallery", "lobby"]) {
   assert.ok(!/from "\.\/main/.test(code(`src/client/${nom}.ts`)),
     `${nom}.ts ne doit pas importer main.ts (cycle) : passer par un rappel d'init…()`);
 }

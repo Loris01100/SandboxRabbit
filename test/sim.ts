@@ -626,6 +626,18 @@ function count(e: Engine, id: MaterialId): number {
   assert.notEqual(e.get(45, 20), TNT, "réparé, le fil conduit de nouveau");
 }
 
+// Plus d'un quart du bac qui saute au même tick : la file des explosions avait
+// un quart de la grille de places, et perdait le reste (lesquelles, selon les
+// fils). Une place par cellule et une demande par cellule : toutes sautent.
+{
+  const e = engine();
+  e.rect(0, 0, W - 1, 19, C4); // la moitié du bac
+  for (let i = 0; i < W * 20; i++) e.life[i] = 1; // amorcées : elles demandent toutes à ce tick
+  e.wakeAll();
+  e.step();
+  assert.ok(e.heard.booms > (W * H) / 4, `toutes jouées, au-delà du quart du bac (${e.heard.booms} sur ${W * 20})`);
+}
+
 // Grisou : la nappe entière s'enflamme, pas seulement la cellule touchée.
 {
   const e = engine();

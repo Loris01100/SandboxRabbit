@@ -127,7 +127,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | --- | --- | --- |
 | `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,press,noise?}`, `temp` et `press` en `Float32Array` bruts, toutes vues d'**un seul** tampon **transféré** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y, nom]` ou `null` (la caméra le suit ; le reste de sa fiche, la page le lit dans son miroir), `heard` : ce que la frame a fait d'audible (`Engine.heard` relevé puis remis à zéro : explosions, plus gros rayon et sa colonne, éclairs) ou `null` |
 | `stats` | 2 × / s | nombre de cellules pleines ; `hum` : flammes (feu, braise), lave et niveau de météo, tout à zéro en pause — le fond sonore |
-| `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`, `latestGrid()`), pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
+| `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`) et la largeur du bac qui l'a faite (`w`) — `latestGrid()` rend les deux —, pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askGrid()` / `askClip()` / `askFilm()` |
 | `say` | à la demande | message pour la barre de statut |
 | `won` | à la demande | le défi en cours est réussi (vérifié toutes les 500 ms dans le Worker) |
@@ -140,9 +140,11 @@ Questions-réponses : `askLoad()` et `askClip()` numérotent leur ordre (`ask`) 
 attendent la `reply` qui porte le même numéro. C'est le seul moyen d'`await`
 quelque chose du bac depuis la page.
 
-`latestGrid()` rend la dernière nouvelle `grid` reçue : sauvegarder ou ranger
-le bac en `localStorage` n'attend donc jamais le Worker (important quand
-l'onglet part en arrière-plan).
+`latestGrid()` rend la dernière nouvelle `grid` reçue, avec sa largeur :
+sauvegarder ou ranger le bac en `localStorage` n'attend donc jamais le Worker
+(important quand l'onglet part en arrière-plan). La largeur est celle de la
+grille, pas `WIDTH` : juste après un redimensionnement, la copie est encore
+celle de l'ancien bac, et la ranger sous la nouvelle largeur la cisaillait.
 
 ## Le chemin d'un coup de pinceau
 
@@ -235,12 +237,22 @@ de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixel
   l'émetteur — un joueur ne déplace pas le curseur d'un autre. Le joueur
   (`{host, id, name}`) vit dans la pièce jointe du socket
   (`serializeAttachment`). 8 places (`PLACES`).
+- **Chargé à la demande** : room.ts n'arrive qu'au premier clic sur « Bac
+  partagé » (`import()` de [lobby.ts](../../src/client/lobby.ts), la porte que
+  main.ts appelle — `relay()`, `pointAt()`, `placeCursors()` ne font rien
+  avant).
+- **Verrou** : l'hôte peut cocher « Invités en lecture seule » (`#room-lock`,
+  visible chez lui seul). C'est lui qui applique les gestes des invités, c'est
+  donc lui qui les refuse ; le message `lock` (hôte → invités, avec chaque
+  départ pour qu'un arrivant le sache) ne fait que les prévenir, et leurs
+  gestes ne partent plus. Un hôte promu repart sans verrou.
 - **Pseudos** : le joueur l'annonce dans l'URL (`/api/room/:id?nick=…`, champ
   « Pseudo » de Paramètres › Général, retenu dans `:reglages`) ; le DO le
-  nettoie (`nick()` : sans caractère de contrôle, 24 caractères) et donne un
+  nettoie (`nick()` : sans caractère de contrôle, 24 caractères), le
+  distingue de ceux déjà pris (`unique()` : « Alice 2 »), et donne un
   numéro de 1 à 8 (`freeId()`, recyclé au départ), d'où la couleur
-  (`peerColor()` d'ui.ts). Rien ne l'authentifie : deux joueurs peuvent porter
-  le même (voir le `ponytail:` de room.ts). Pseudo vide : « Joueur N ».
+  (`peerColor()` d'ui.ts). Rien ne l'authentifie : on peut entrer sous le nom
+  d'un absent (voir le `ponytail:` de room.ts). Pseudo vide : « Joueur N ».
 - **Curseurs** : main.ts passe la cellule survolée à `pointAt()` de room.ts
   avec la sonde ; il part au plus toutes les `POINT` = 80 ms, seulement s'il a
   changé et qu'on n'est pas seul. Chez les autres, un `.peer` (point et nom)
@@ -282,6 +294,7 @@ de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixel
 | `role` | DO → client | `{host: boolean, id}` : `id`, son numéro dans le salon (1 à 8) |
 | `peers` | DO → tous | `{n}` : nombre de connectés ; l'hôte renvoie un `start` quand il monte, se tait à 1 |
 | `roster` | DO → tous | `{players: [{id, name, host}]}` après chaque `peers`, et de nouveau après une promotion : la liste sous la barre de statut, un curseur par autre joueur |
+| `lock` | hôte → invités | `{on}` : les invités sont en lecture seule (ou ne le sont plus) ; renvoyé avec chaque `start` |
 | `cursor` | chacun → DO → tous les autres | `{x, y}` en cellules entières (-1, -1 : hors du bac) ; le DO le renvoie avec `id`, celui de l'émetteur |
 | `start` | hôte → invités | `{rec: Recording}` : grille complète (état vivant), `clock`, `seed`, `scan`, réglages |
 | `turn` | hôte → invités | `{ticks, beats, sums}` toutes les 50 ms tant que le bac avance ou qu'il y a des gestes |
@@ -449,7 +462,8 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | [replay.ts](../../src/client/replay.ts) | `Recorder` / `Player` | **oui** |
 | [challenges.ts](../../src/client/challenges.ts) | défis et décors bâtis en code | **oui** |
 | [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
-| [room.ts](../../src/client/room.ts) | salon côté navigateur : lockstep, pseudo (`#nick`), liste des joueurs (`#roster`), curseurs des autres (`pointAt()`, `placeCursors()`, calque `#peers`) | non |
+| [lobby.ts](../../src/client/lobby.ts) | porte du salon : charge room.ts au premier clic sur « Bac partagé », et relaie d'ici là les appels de main.ts dans le vide | non |
+| [room.ts](../../src/client/room.ts) | salon côté navigateur, chargé à la demande : lockstep, pseudo (`#nick`), liste des joueurs (`#roster`), curseurs des autres (`pointAt()`, `placeCursors()`, calque `#peers`), verrou de l'hôte (`#room-lock`) | non |
 | [share.ts](../../src/client/share.ts) | sauvegarde (avec `parent` : l'origine d'un remix, `setOrigin()` / `forgetOrigin()`), jetons des mondes déposés, PNG, vidéo, lien ; export / import du rejeu ; charge gallery.ts au premier clic sur « Galerie » | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
 | [gallery.ts](../../src/client/gallery.ts) | la galerie, chargée à sa première ouverture (`import()`, hors du budget de la page) : vignettes, recherche par nom, tri (récents, vus, aimés), « J'aime », remix, suppression des siens | non (la recherche, `matches()` d'ui.ts : **oui**) |
 | [theme.ts](../../src/client/theme.ts) | thème Système / Jour / Nuit, onglet Général de la fenêtre Paramètres (onglets câblés dans keys.ts) | non |
@@ -498,7 +512,7 @@ kilo-octets de lien ne se déplient pas en gigaoctets. Le rejeu validé part au
 bac par `watch()` (rappel passé à `initShare()`) : ordre `reel`, puis lecture
 comme au bouton « Rejouer », taille du bac ajustée (`fit()`).
 
-Les modules périphériques (`room`, `share`, `gallery`, `theme`, `view`, `keys`, `palette`, `settings`, `hero`, `audio`, `sound`) ne doivent **pas**
+Les modules périphériques (`room`, `lobby`, `share`, `gallery`, `theme`, `view`, `keys`, `palette`, `settings`, `hero`, `audio`, `sound`) ne doivent **pas**
 importer main.ts (cycle) : main.ts leur passe ce dont ils ont besoin par un
 `init…()` à rappels.
 

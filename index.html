@@ -240,6 +240,11 @@
             <button id="gallery-open" type="button">Galerie</button>
           </div>
           <p id="status" class="hint" role="status"></p>
+          <!-- L'hôte d'un salon seulement (room.ts) : les gestes des invités refusés. -->
+          <label class="check" id="room-lock-row" hidden title="Les invités regardent sans pouvoir peindre ; décocher leur rend la main.">
+            <input id="room-lock" type="checkbox" />
+            <span>Invités en lecture seule</span>
+          </label>
           <!-- Les joueurs du salon, remplie par room.ts : vide hors salon. -->
           <ul id="roster" class="roster" aria-label="Joueurs du salon" hidden></ul>
         </details>

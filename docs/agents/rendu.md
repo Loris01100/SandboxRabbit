@@ -153,6 +153,10 @@ de rayons par texel, que le fil de la page ne peut pas se payer :
   distance) et qui lisent la pyramide **en bilinéaire** au niveau de leur pas —
   lue au plus proche, la lumière se dessinait en pavés. Même absorption que
   `CASCADE` : `(1 − opacité)^pas`, la part arrêtée renvoie sa couleur.
+- **Pas d'étoile** : quatre jeux de directions, tournés d'un quart de pas
+  d'angle, alternent en damier 2 × 2 (64 directions mêlées pour le prix de
+  16), puis un flou 3 × 3 entre texels non opaques gomme le grain. Avec un seul
+  jeu, loin d'une petite flamme, la lumière se dessinait en étoile.
 - **Même fin** que `FLUENCE` (un opaque prend la lumière de son voisin le plus
   éclairé, un opaque qui brille ne reçoit rien) et **même mélange** que
   `FRAGMENT` : `LIGHT_HALO` et `LIGHT_GAIN`, désormais dans render.ts pour les

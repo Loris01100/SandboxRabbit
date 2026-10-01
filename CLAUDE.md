@@ -34,7 +34,9 @@ Restent en `ask`, donc toujours confirmées à la main, même dans un mode qui
 accepte les éditions : `npm run deploy` et `wrangler deploy` (AGENTS.md : sur
 demande explicite seulement), `git commit` / `push` / `reset` / `checkout`,
 `rm`, et `npm install <paquet>` — la CI tient deux budgets (84 et 80 Kio), une
-dépendance de plus se discute avant de s'installer.
+dépendance de plus se discute avant de s'installer. `npm run drift` n'est pas
+non plus dans la liste : il crée puis supprime une copie de travail git et y
+fait tourner le code d'une autre branche.
 
 ### Hooks
 

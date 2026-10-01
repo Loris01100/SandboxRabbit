@@ -10,8 +10,8 @@ import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInp
 import { hear, initSound, setHum } from "./audio.ts";
 import { FILM_LINK, captureFrame, forgetOrigin, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
-import { initRoom, placeCursors, pointAt, relay } from "./room.ts";
-import { WIDTH, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, set, type ClipData } from "./world.ts";
+import { initRoom, placeCursors, pointAt, relay } from "./lobby.ts";
+import { WIDTH, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, seen, set, type ClipData } from "./world.ts";
 import { STEER, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
@@ -23,8 +23,18 @@ import "./theme.ts"; // jour / nuit : se branche tout seul
  */
 let running = true;
 let gravity: 1 | -1 = 1;
-/** Dernière matière et température sous le curseur, telles que le bac les a vues. */
-let probed: [MaterialId, number] | null = null;
+/**
+ * La matière sous le point `p`, lue dans le miroir de la grille (world.ts) :
+ * à jour à la dernière frame partout, pas seulement là où le curseur est passé.
+ * La sonde (`probe` de la frame) ne vaut que pour la case survolée juste avant :
+ * au doigt, sans survol, la première tape sur un interrupteur en reposait un
+ * au lieu de le basculer.
+ */
+function under(p: { x: number; y: number }): MaterialId | null {
+  const grid = seen();
+  if (!grid || p.x < 0 || p.y < 0 || p.x >= grid.width || p.y >= grid.height) return null;
+  return grid.cells[p.y * grid.width + p.x] as MaterialId;
+}
 /** Un rejeu occupe le bac : le pinceau et l'enregistrement se taisent. */
 let playing = false;
 /** Taille de la dernière partie enregistrée, ou null : le bac garde le film. */
@@ -283,7 +293,7 @@ canvas.addEventListener("pointerdown", (e) => {
   // Pipette : Alt+clic reprend la matière sous le curseur, sans rien modifier.
   // Pipette : la matière vue par la dernière frame, pas une lecture du moteur
   // (il est sur l'autre fil). C'est la cellule sous le curseur, donc la bonne.
-  if (e.altKey) { if (probed) select(probed[0]); return; }
+  if (e.altKey) { const id = under(p); if (id !== null) select(id); return; }
   if (e.button === 2) { snapshot(); gesture({ t: "fill", x: p.x, y: p.y, id: current }); return; }
   canvas.setPointerCapture(e.pointerId);
   // Les deux outils qui se tracent en glissant. « Copier » ne modifie rien, et
@@ -297,11 +307,7 @@ canvas.addEventListener("pointerdown", (e) => {
   }
   snapshot();
   // Cliquer un interrupteur (ou un aimant) déjà posé le bascule au lieu d'en reposer un.
-  // ponytail: `probed` date de la dernière frame. À la souris elle est juste
-  // (le curseur y est passé avant le clic) ; au doigt, une première tape peut
-  // reposer un interrupteur au lieu de le basculer — geste sans effet, la
-  // seconde bascule.
-  const at = probed?.[0];
+  const at = under(p);
   if ((current === SWITCH && at === SWITCH) || (current === MAGNET && at === MAGNET)) {
     gesture({ t: "toggle", x: p.x, y: p.y });
     return;
@@ -533,7 +539,12 @@ let startedAt = 0;
 /** Le bouton du dernier défi lancé : la touche « recommencer » le reclique. */
 let lastChallenge: HTMLButtonElement | null = null;
 
-// Meilleur temps par défi, en secondes. ponytail: local à la machine, pas de classement.
+// Meilleur temps par défi, en secondes.
+// ponytail: local à la machine, pas de classement. Un classement qui croirait le
+// temps annoncé se tricherait d'une requête, et le vérifier demande au Worker de
+// rejouer la partie (~9 s de calcul pour 5 min, hors de l'offre gratuite) : voir
+// « Classement vérifié des défis » dans les Pistes du README. À revoir si le
+// Worker passe à l'offre payante.
 const RECORDS = "sandbox-rabbit:records";
 const records = stored<Record<string, number>>(RECORDS, {});
 const best = (name: string): string => (records[name] === undefined ? "" : ` (record : ${records[name]} s)`);
@@ -636,11 +647,10 @@ addEventListener("visibilitychange", () => {
   // grille) : rien à demander, personne ne répondrait — la page s'en va.
   const grid = latestGrid();
   // Sa largeur avec, comme dans un lien : sans elle, un défi (320) rangé
-  // depuis un bac réglé en 480 revenait cisaillé à la visite suivante.
-  // ponytail: WIDTH suit un redimensionnement tout de suite, la grille un
-  // quart de seconde plus tard — quitter dans cet intervalle range l'ancienne
-  // grille sous la nouvelle largeur.
-  if (grid) write(BAC, `${WIDTH}~${grid}`);
+  // depuis un bac réglé en 480 revenait cisaillé à la visite suivante. Celle
+  // de la grille elle-même, pas `WIDTH` : juste après un redimensionnement,
+  // la copie est encore celle de l'ancien bac.
+  if (grid) write(BAC, `${grid.width}~${grid.data}`);
 });
 
 /* -------------------------------------------------------------------- rejeu */
@@ -752,7 +762,6 @@ function win(): void {
 listen((news) => {
   switch (news.t) {
     case "frame": {
-      probed = news.probe;
       probeEl.textContent = news.probe
         ? `${MATERIALS[news.probe[0]].name} · ${Math.round(news.probe[1])} °C`
         : "–";

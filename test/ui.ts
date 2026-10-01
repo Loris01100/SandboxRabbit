@@ -3,7 +3,7 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, matches, peerColor, framePeriod, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor, wholeScale } from "../src/client/ui.ts";
+import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, matches, peerColor, savedValue, framePeriod, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor, wholeScale } from "../src/client/ui.ts";
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 import { REPORT, reporter } from "../src/client/errors.ts";
@@ -199,6 +199,16 @@ import { readFileSync } from "node:fs";
   assert.ok(matches("n'importe quoi", "  "), "rien de tapé : tout passe");
   const teintes = new Set(Array.from({ length: 8 }, (_, i) => peerColor(i + 1)));
   assert.equal(teintes.size, 8, "huit joueurs, huit couleurs");
+}
+
+// Un réglage renommé garde la valeur retenue sous son ancien nom.
+{
+  const renamed = { "light-quality": ["light-detail"], speed: ["vitesse", "rate"] };
+  assert.equal(savedValue({ "light-detail": "240" }, "light-quality", renamed), "240", "relu sous l'ancien nom");
+  assert.equal(savedValue({ "light-detail": "240", "light-quality": "120" }, "light-quality", renamed), "120", "le nouveau nom passe devant");
+  assert.equal(savedValue({ rate: 2, vitesse: 3 }, "speed", renamed), 3, "du plus récent au plus ancien");
+  assert.equal(savedValue({ x: 1 }, "brush", renamed), undefined, "jamais retenu : défaut");
+  assert.equal(savedValue({ mirror: false }, "mirror", {}), false, "false est une valeur, pas une absence");
 }
 
 console.log("ok — panneau conforme");

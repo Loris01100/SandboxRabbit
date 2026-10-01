@@ -110,10 +110,13 @@ export function listen(fn: (news: News) => void): void {
  * quand il a changé — toutes les 250 ms en 640×360, plus rarement au-delà.
  * Elle sert à ranger le bac dans la mémoire locale quand la page part en
  * arrière-plan, sans attendre le Worker : aucune promesse n'y serait tenue.
- * Sauvegarder et partager demandent une grille fraîche (`askGrid`).
+ * Sauvegarder et partager demandent une grille fraîche (`askGrid`). Elle
+ * porte la largeur du bac qui l'a faite : `WIDTH` suit un redimensionnement
+ * tout de suite, la copie un quart de seconde plus tard, et ranger l'une sous
+ * l'autre cisaillait le bac à la visite suivante.
  */
-let latest = "";
-export const latestGrid = (): string => latest;
+let latest: { width: number; data: string } | null = null;
+export const latestGrid = (): { width: number; data: string } | null => latest;
 
 /** Les questions dont on attend une réponse : un numéro, une promesse. */
 let asked = 0;
@@ -288,7 +291,7 @@ export function lightDetail(width: number): void {
 sim.addEventListener("message", (e: MessageEvent<News>) => {
   const news = e.data;
   if (news.t === "frame") blit(news);
-  if (news.t === "grid") latest = news.full;
+  if (news.t === "grid") latest = { width: news.w, data: news.full };
   if (news.t === "reply") {
     waiting.get(news.ask)?.(news.value);
     waiting.delete(news.ask);

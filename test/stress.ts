@@ -15,9 +15,12 @@
  * référence, le runner partagé varie du simple au triple), ils attrapent un
  * effondrement, pas une dérive. `STRESS_SLACK=2 npm run stress` les double.
  *
- * ponytail: des plafonds absolus, calés sur une machine. Comparer à la mesure
- * de `main` demanderait de la stocker quelque part — comme bench.ts.
+ * Des plafonds absolus, calés sur une machine : ils attrapent un
+ * effondrement. Une dérive, c'est `npm run drift` (test/drift.ts) qui la voit,
+ * en mesurant la branche de base sur la même machine. `STRESS_JSON=fichier`
+ * écrit ici les mesures pour lui.
  */
+import { writeFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { Tracker, land, recycle, type Mirror } from "../src/client/sim/render.ts";
 import { FILINGS, FIRE, LAVA, MAGNET, MATERIALS, NANITE, STONE, TNT, WATER, type MaterialId } from "../src/client/sim/materials.ts";
@@ -136,6 +139,10 @@ perCell.forEach(([id, ns], rank) => {
   }
   check("bandes 1920×1080 : préparation (fil du bac)", take / 8, 12, "ms");
   check("bandes 1920×1080 : pose (page)", put / 8, 12, "ms");
+}
+
+if (process.env.STRESS_JSON) {
+  writeFileSync(process.env.STRESS_JSON, JSON.stringify(Object.fromEntries(results.map((r) => [r.name, { value: r.value, unit: r.unit }]))));
 }
 
 console.log("mesure".padEnd(48) + "valeur".padStart(10) + "plafond".padStart(10));
