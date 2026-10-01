@@ -73,6 +73,7 @@ src/client/
   sight.ts               ce que voit le héros : rayons → colonne de pixels  (pur)
   ui.ts                  logique pure du panneau + read/write/forget (localStorage)
   room.ts share.ts theme.ts   salon, galerie/exports, jour-nuit (reçoivent leurs dépendances par init…())
+  audio.ts sound.ts      son : porte (charge sound.ts au premier geste) et synthèse Web Audio ; Heard / Hum de sandbox.ts
   errors.ts              exceptions de la page et du Worker de simulation → POST /api/error ; reporter() (pur)
   sim/
     worker.ts            entrée du Web Worker, cadence ~60 Hz ; se relance en fils auxiliaires
@@ -154,7 +155,7 @@ reproductible, ids de matière gelés, CSP, cloisonnement de la page,
   sandbox.ts, sinon le rejeu diverge. S'il la remplace, il arrête d'abord le
   rejeu (`this.play(false)`).
 - `localStorage` uniquement via `read` / `write` / `forget` de ui.ts.
-- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts`, `palette.ts`, `settings.ts`, `hero.ts` n'importent pas main.ts (cycle).
+- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts`, `palette.ts`, `settings.ts`, `hero.ts`, `audio.ts`, `sound.ts` n'importent pas main.ts (cycle).
 - Une frame ne porte que les bandes changées : world.ts les recopie toutes
   dans son miroir, n'en saute jamais une. Un réglage qui change l'aspect sans
   écriture (comme `heatmap`) fait tout recolorier.
@@ -206,7 +207,7 @@ reproductible, ids de matière gelés, CSP, cloisonnement de la page,
   (skill `ponytail-debt`) ; le README la résume sous « Dette connue ».
 - Pas de framework UI, DOM impératif, éléments récupérés par
   `querySelector<…>("#id")!`. Pas de dépendance client sans raison forte : la
-  CI tient deux budgets de 80 Kio, la page (JS + CSS) et le moteur (Worker).
+  CI tient deux budgets, 84 Kio pour la page (JS + CSS) et 80 Kio pour le moteur (Worker).
 - Ce qui est testable (pur) va dans un module sans DOM (`ui.ts`,
   `gestures.ts`…) avec son test, plutôt que de grossir main.ts.
 - TypeScript strict, `noUnusedLocals` / `noUnusedParameters` : préfixer par `_`

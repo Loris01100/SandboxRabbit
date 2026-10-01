@@ -163,7 +163,7 @@ export function panAfterZoom(client: number, edge: number, size: number, pan: nu
 export const ACTIONS = [
   "pause", "mat1", "mat2", "mat3", "mat4", "mat5", "mat6", "mat7", "mat8", "mat9", "eraser",
   "brushDown", "brushUp", "gravity", "freeze", "heat", "air", "undo", "redo", "paste", "zoomIn", "zoomOut", "help",
-  "step", "terrain", "surprise", "full", "clear", "retry", "save", "gallery",
+  "step", "terrain", "surprise", "full", "clear", "mute", "retry", "save", "gallery",
   "left", "right", "up", "down", "dig", "place", "view", "nextHero",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
@@ -174,7 +174,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   pause: " ", mat1: "1", mat2: "2", mat3: "3", mat4: "4", mat5: "5", mat6: "6", mat7: "7", mat8: "8", mat9: "9", eraser: "0",
   brushDown: "[", brushUp: "]", gravity: "g", freeze: "f", heat: "h", air: "b", undo: "Ctrl+z", redo: "Ctrl+y", paste: "Ctrl+v",
   zoomIn: "+", zoomOut: "-", help: "?",
-  step: ".", terrain: "n", surprise: "u", full: "p", clear: "Ctrl+Delete", retry: "t", save: "Ctrl+s", gallery: "o",
+  step: ".", terrain: "n", surprise: "u", full: "p", clear: "Ctrl+Delete", mute: "m", retry: "t", save: "Ctrl+s", gallery: "o",
   left: "q", right: "d", up: "z", down: "s", dig: "e", place: "r", view: "v", nextHero: "c",
 };
 
@@ -267,7 +267,7 @@ export const KEY_GROUPS: { name: string; actions: Action[]; mouse: [string, stri
       ["Clic", "Sur un interrupteur ou un aimant posé : le basculer"],
     ],
   },
-  { name: "Simulation", actions: ["pause", "step", "terrain", "surprise", "full", "clear", "help"], mouse: [] },
+  { name: "Simulation", actions: ["pause", "step", "terrain", "surprise", "full", "clear", "mute", "help"], mouse: [] },
   { name: "Physique du monde", actions: ["gravity", "heat", "air"], mouse: [] },
   { name: "Défis", actions: ["retry"], mouse: [] },
   { name: "Mondes", actions: ["save", "gallery"], mouse: [] },
@@ -304,6 +304,7 @@ export const ACTION_NAMES: Record<Action, string> = {
   surprise: "Un décor tiré au sort",
   full: "Plein écran",
   clear: "Vider le bac",
+  mute: "Couper ou rendre le son",
   retry: "Recommencer le dernier défi lancé",
   save: "Sauvegarder le monde dans la galerie",
   gallery: "Ouvrir la galerie",

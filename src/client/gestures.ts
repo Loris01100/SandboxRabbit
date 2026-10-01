@@ -128,6 +128,8 @@ export function weather(engine: Engine, level: number): void {
  */
 function bolt(engine: Engine, x: number, y: number): void {
   const g = engine.gravity;
+  engine.heard.bolts++;
+  engine.heard.boltAt = x;
   for (; engine.inBounds(x, y); y += g) {
     if (!open(engine, x, y) && !(falling(engine, x, y) && open(engine, x, y + g))) break;
     engine.set(x, y, FIRE);

@@ -14,7 +14,7 @@ import { Engine } from "./engine.ts";
 import { Tracker, type Patch } from "./render.ts";
 import type { Pool } from "./pool.ts";
 import { encode } from "./codec.ts";
-import { HERO, HERO_SLOTS, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
+import { EMBER, FIRE, HERO, HERO_SLOTS, LAVA, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../gestures.ts";
 import { Player, Recorder, isGesture, put, vet, vetBeats, type Beat, type Recording } from "../replay.ts";
 import { CHALLENGES, SCENES, count } from "../challenges.ts";
@@ -61,9 +61,15 @@ export type Order =
   | { t: "follow"; rec: Recording | null }
   | ({ t: "turn" } & Turn);
 
+/** Ce que la frame a fait d'audible (`Engine.heard`) : explosions et éclairs. */
+export type Heard = { booms: number; loudest: number; at: number; bolts: number; boltAt: number };
+
+/** Ce qui fait un fond sonore, relevé avec les stats : flammes, lave, météo (0 sec à 3 gros orage). Tout à zéro en pause. */
+export type Hum = { fire: number; lava: number; rain: number };
+
 export type News =
-  | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number, string] | null }
-  | { t: "stats"; filled: number }
+  | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number, string] | null; heard: Heard | null }
+  | { t: "stats"; filled: number; hum: Hum }
   | { t: "grid"; full: string }
   | { t: "start"; rec: Recording }
   | ({ t: "turn" } & Turn)
@@ -85,6 +91,10 @@ const UNDO_BYTES = 64 * 1024 * 1024;
 type Snapshot = { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array };
 
 const STATS = 500;
+/** Ce que compte le fond sonore : 1 ce qui crépite (flamme, braise), 2 ce qui gronde (lave). */
+const HUM = new Uint8Array(256);
+HUM[FIRE] = HUM[EMBER] = 1;
+HUM[LAVA] = 2;
 /**
  * Période de la copie de secours (`grid`), en ms, pour 640×360 ou moins ;
  * elle s'allonge avec la taille (`GRID_CELLS`) : l'encodage coûte 13 ms en
@@ -296,15 +306,29 @@ export class Sandbox {
     const hero: [number, number, string] | null = heart >= 0 && this.engine.cells[heart] === HERO
       ? [heart % w, (heart / w) | 0, heroName(this.engine, this.engine.life[heart + HERO_SLOTS.name[1] * w + HERO_SLOTS.name[0]])]
       : null;
-    this.send({ t: "frame", patches, w, h, ambient: this.engine.ambient, probe, hero });
+    // Relevé puis vidé à chaque frame : la page joue ce qui vient d'arriver,
+    // pas ce qui s'est accumulé pendant une pause.
+    const noise = this.engine.heard;
+    const heard = noise.booms + noise.bolts > 0 ? { ...noise } : null;
+    noise.booms = noise.loudest = noise.at = noise.bolts = noise.boltAt = 0;
+    this.send({ t: "frame", patches, w, h, ambient: this.engine.ambient, probe, hero, heard });
 
     this.sinceStats += ms;
     if (this.sinceStats >= STATS) {
       this.sinceStats = 0;
       const { cells } = this.engine;
-      let filled = 0;
-      for (let i = 0; i < cells.length; i++) if (cells[i] !== 0) filled++;
-      this.send({ t: "stats", filled });
+      let filled = 0, fire = 0, lava = 0;
+      for (let i = 0; i < cells.length; i++) {
+        const id = cells[i];
+        if (id === 0) continue;
+        filled++;
+        const hum = HUM[id];
+        if (hum === 1) fire++;
+        else if (hum === 2) lava++;
+      }
+      // En pause, plus rien ne crépite : le fond sonore se tait avec le bac.
+      const on = this.knobs.running;
+      this.send({ t: "stats", filled, hum: on ? { fire, lava, rain: this.knobs.weather } : { fire: 0, lava: 0, rain: 0 } });
       if (this.won?.(this.engine)) { this.won = null; this.send({ t: "won" }); }
     }
 

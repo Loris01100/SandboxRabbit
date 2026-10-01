@@ -27,6 +27,12 @@ Scalaires : `gravity` (±1), `wind` (-1..1), `ambient` (°C, réglage de scène 
 ensuite), `seed` et `scan` (état du xorshift, sens du balayage). `gravity` et
 `ambient` sont des accesseurs : les changer réveille tout le bac.
 
+`heard` (`{ booms, loudest, at, bolts, boltAt }`) : ce que le bac a fait
+d'audible, rempli par `settle()` (sur le fil du bac seul, jamais pendant le
+damier) et par l'éclair de la météo (gestures.ts) ; sandbox.ts le relève dans
+chaque frame et le remet à zéro. **Aucune règle ne le lit** : il ne pèse ni sur
+l'empreinte ni sur le salon — ne jamais en faire dépendre la simulation.
+
 Blocs de veille (privés, un octet par bloc de 16×16) : `stir` (bloc écrit ou
 tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
 `was` (`awake` du tick d'avant). Voir [Blocs de veille](#blocs-de-veille).

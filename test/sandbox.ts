@@ -117,6 +117,32 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.ok(écarts < page.pixels.length / 1000, `le miroir se colorie comme le moteur, à l'arrondi des températures près (${écarts} canaux écartés)`);
 }
 
+/**
+ * Le son : une explosion est signalée dans la frame qui l'a jouée, et dans
+ * celle-là seulement (la page la jouerait sinon à chaque image) ; le feu
+ * nourrit le fond sonore des stats, qui se tait en pause.
+ */
+{
+  const { sim, news } = bac();
+  sim.order({ t: "do", g: { t: "paint", x: 40, y: 30, r: 2, id: TNT, d: 1, over: true } });
+  sim.order({ t: "do", g: { t: "paint", x: 40, y: 27, r: 1, id: FIRE, d: 1, over: true } });
+  run(sim, 60);
+  const frames = news.filter((n): n is Frame => n.t === "frame");
+  const bruyantes = frames.filter((f) => f.heard && f.heard.booms > 0);
+  assert.ok(bruyantes.length > 0, "l'explosion du TNT s'entend");
+  assert.ok(bruyantes.length < frames.length, "et seulement dans les frames qui l'ont jouée");
+  const coup = bruyantes[0].heard!;
+  assert.ok(coup.loudest > 0 && Math.abs(coup.at - 40) <= 3, `le plus gros rayon et sa colonne (${coup.loudest} en ${coup.at})`);
+  assert.equal(sim.engine.heard.booms, 0, "relevé, le compte repart de zéro");
+
+  sim.order({ t: "do", g: { t: "paint", x: 20, y: 10, r: 4, id: FIRE, d: 1, over: true } });
+  run(sim, 32);
+  assert.ok(last(news, "stats")!.hum.fire > 0, "le feu nourrit le fond sonore");
+  sim.order({ t: "set", k: { running: false } });
+  run(sim, 32);
+  assert.deepEqual(last(news, "stats")!.hum, { fire: 0, lava: 0, rain: 0 }, "en pause, tout se tait");
+}
+
 // La sonde suit le curseur, et se tait quand il sort du bac.
 {
   const { sim, news } = bac();

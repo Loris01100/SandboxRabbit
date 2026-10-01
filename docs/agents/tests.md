@@ -6,7 +6,7 @@
 | --- | --- |
 | `npm run typecheck` | **quatre** projets tsc : `tsconfig.json` (client, lib DOM), `tsconfig.worker.json` (Worker, types générés, pas de DOM), `tsconfig.test.json` (tout `test/` sauf api.ts : types Node + DOM) et `tsconfig.test-worker.json` (test/api.ts : types Node + Worker). Node exécute les tests **sans** vérifier leurs types : sans ces deux derniers, un champ disparu n'y était vu qu'à l'exécution, et jamais dans test/gpu.ts, qui ne tourne pas en CI |
 | `npm run check` | les sept scripts d'`assert`, dans l'ordre : sim, libm, ui, api, sandbox, pool, rules |
-| `npm run browser` | dans Chromium sans fenêtre (Playwright) : le shader WebGL2 contre `Renderer` à une unité près, la page du jeu qui charge sans erreur et survit à une perte du contexte WebGL. Demande `npx playwright install chromium` une fois par machine ; tout est dans [docs/navigateur.md](../navigateur.md) |
+| `npm run browser` | dans Chromium sans fenêtre (Playwright) : le shader WebGL2 contre `Renderer` à une unité près, la page du jeu qui charge sans erreur, démarre le son au premier geste et survit à une perte du contexte WebGL. Demande `npx playwright install chromium` une fois par machine ; tout est dans [docs/navigateur.md](../navigateur.md) |
 | `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
 | `npm run stress` | les pires cas, chacun sous un plafond, sur un seul fil ([test/stress.ts](../../test/stress.ts)) : un bac 320×180 plein de **chaque** matière (≤ 800 ns par cellule et par tick ; les plus chères font 110 à 160, l'aimant en faisait 4000), TNT en chaîne, souffle en plein air, mer de lave sous la pluie, aimants sur la limaille, et les bandes d'un bac 1920×1080 tout changé (préparation côté bac, tampon rendu comme le fait la page, et pose côté page : ~2 ms chacune, plafond 12 ; 11 et 15 ms avant le tampon unique recyclé et le miroir brut). Plafonds à ~5 fois la mesure de référence ; `STRESS_SLACK=2` les double. ~10 s |
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
@@ -21,10 +21,10 @@ TypeScript directement.
 | --- | --- | --- |
 | [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), blocs de veille (dont la mer de lave qui doit s'endormir), pression et vent (un souffle chasse la fumée, la pierre n'en prend pas, l'onde ne traverse pas un mur, elle retombe à zéro exactement et le bac se rendort, `wakeAll()` l'efface ; une vitre proche éclate, une lointaine tient, une pièce close en casse plus ; l'onde arrache le sable d'un tas), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
 | [test/libm.ts](../../test/libm.ts) | les fonctions mathématiques déterministes : à au plus un ulp de `Math` sous V8 sur des centaines de milliers d'arguments (voisins des multiples de π/4 compris), un cas de référence de la crate `libm` au bit près, cas particuliers (±0, infinis, NaN, débordements) et la limite assumée de sin / cos. Leur **déterminisme** (mêmes bits que la crate) est vérifié par `npm run rust` | `sim/libm.ts` |
-| [test/ui.ts](../../test/ui.ts) | logique pure du panneau, touches réassignables ; ce que voit le héros ; rapports d'erreur (une fois chacun, cinq au plus, plafond) | `ui.ts`, `sight.ts`, `reporter()` d'`errors.ts` |
+| [test/ui.ts](../../test/ui.ts) | logique pure du panneau, touches réassignables ; ce que voit le héros ; rapports d'erreur (une fois chacun, cinq au plus, plafond) ; réglages purs du son (volumes, forme d'une explosion, stéréo) | `ui.ts`, `sight.ts`, `reporter()` d'`errors.ts`, fonctions pures de `sound.ts` |
 | [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, vues sous débit, ménage (récents + plus vus), routage des messages du salon ; `/api/error` (ce qui est journalisé, `console.error` capturé ; vide, trop lourd, débit) | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
-| [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles ; salon en lockstep, dont les messages mal formés d'un pair (geste d'invité, `turn` et départ de l'hôte) | `Sandbox` avec un rappel `send` qui empile |
-| [test/browser.ts](../../test/browser.ts) (hors `check`) | les deux copies du coloriage (shader de screen.ts, `Renderer`) sur la page [test/screen.html](../../test/screen.html) ; la page du jeu : première frame, console sans erreur, bac reposé après une perte du contexte WebGL ; une exception de la page arrive sur `/api/error` (`204`) | un serveur Vite (`createServer`, port libre) et Chromium via `playwright` |
+| [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles (dont le son : une explosion dans la seule frame qui l'a jouée, le fond sonore des stats muet en pause) ; salon en lockstep, dont les messages mal formés d'un pair (geste d'invité, `turn` et départ de l'hôte) | `Sandbox` avec un rappel `send` qui empile |
+| [test/browser.ts](../../test/browser.ts) (hors `check`) | les deux copies du coloriage (shader de screen.ts, `Renderer`) sur la page [test/screen.html](../../test/screen.html) ; la page du jeu : première frame, console sans erreur, module du son chargé à la première touche sans erreur, bac reposé après une perte du contexte WebGL ; une exception de la page arrive sur `/api/error` (`204`) | un serveur Vite (`createServer`, port libre) et Chromium via `playwright` |
 | [test/pool.ts](../../test/pool.ts) | le moteur sur plusieurs fils : 400 ticks d'une partie chargée (monde généré, feu, explosifs, uranium, héros piloté) sur 1 fil et sur 4, **identiques au bit près**, pression comprise (le test vérifie qu'elle a bien soufflé) ; rebranchement sur un autre moteur | `Engine`, `Pool`, fils `worker_threads` ([test/helper.ts](../../test/helper.ts)) |
 | [test/rules.ts](../../test/rules.ts) | les « Règles à ne pas enfreindre » d'[AGENTS.md](../../AGENTS.md) qui se lisent dans la source : aucun `Math.random()` hors la graine du constructeur, ids de matière gelés, index.html sans `style=` ni `<script>` en ligne (CSP), la page qui n'importe ni l'`Engine` ni main.ts et ne crée pas de `Worker`, `localStorage` réservé à ui.ts, pas de `SELECT *`, pas de `cloudflare:workers` dans app.ts, et le README qui liste exactement la palette | la source des fichiers, lue ; `materials.ts` pour la palette |
 
@@ -246,11 +246,15 @@ Node 24 :
 7. `npm run stress` — les pires cas sous leurs plafonds (voir le tableau
    ci-dessus). Il a été vérifié contre le moteur d'avant l'optimisation des
    matières inactives : il y tombe sur l'aimant (4032 ns par cellule).
-8. **Deux budgets de bundle, 81 920 octets chacun**, non compressés
-   (`dist/client/assets`) : la **page** (`index-*.js` + `*.css`, ce qui
-   s'affiche d'abord) et le **moteur** (`worker-*.js`, le Worker de
-   simulation, qui sert aussi de fil auxiliaire). Un seul total ne disait pas
+8. **Deux budgets de bundle**, non compressés (`dist/client/assets`) : la
+   **page** (`index-*.js` + `*.css`, ce qui s'affiche d'abord), 86 016 octets
+   (84 Kio), et le **moteur** (`worker-*.js`, le Worker de simulation, qui sert
+   aussi de fil auxiliaire), 81 920 (80 Kio). Un seul total ne disait pas
    lequel avait grossi ; il avait dépassé 80 Ko sans que personne le voie.
+   La page est passée de 80 à 84 Kio avec le son : chargé au premier geste,
+   `sound-*.js` n'y compte pas, mais sa porte et l'assistant d'`import()` de
+   Vite (~1,5 Ko) si. Un module qui n'a rien à faire avant un geste du joueur
+   se charge de la même façon (audio.ts).
    Pas de framework, pas de dépendance client ajoutée à la légère, et pas de
    second fichier qui embarquerait une autre copie du moteur.
 

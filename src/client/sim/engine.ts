@@ -474,6 +474,14 @@ export class Engine {
   pool: { run(engine: Engine, kind: number, count: number): void } | null = null;
   /** Blocs de veille éveillés au dernier tick : 0 = bac au repos. */
   busy = 0;
+  /**
+   * Ce que le bac a fait d'audible depuis que sandbox.ts l'a relevé (puis
+   * remis à zéro) : explosions jouées par `settle()`, sur ce fil seul, et
+   * éclairs de la météo. `loudest` : le plus gros rayon, `at` sa colonne ;
+   * `boltAt` celle du dernier éclair. Aucune règle ne le lit : il ne pèse pas
+   * sur la partie, un salon peut l'ignorer.
+   */
+  readonly heard = { booms: 0, loudest: 0, at: 0, bolts: 0, boltAt: 0 };
   /** Graine du tick en cours, d'où chaque bloc tire la sienne (`block()`). */
   private tickSeed = 1;
   /** Blocs du damier par rangée et par colonne (voir `PART`). */
@@ -1271,6 +1279,9 @@ export class Engine {
       const y = down ? h - 1 - ry : ry, x = leftToRight ? rx : w - 1 - rx;
       const at = y * w + x;
       if (!EXPLOSIVE[this.cells[at]]) continue;
+      const r = code & 256 ? NUKE : code, heard = this.heard;
+      heard.booms++;
+      if (r > heard.loudest) { heard.loudest = r; heard.at = x; }
       if (code & 256) this.nuke(x, y);
       else this.explode(x, y, code);
     }

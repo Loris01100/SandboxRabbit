@@ -64,6 +64,14 @@ try {
   }, null, { timeout: 30_000 });
   assert.deepEqual(errors, [], "la page du jeu charge sans erreur dans la console");
 
+  // Le son : son module n'arrive qu'au premier geste (audio.ts), puis crée
+  // son contexte audio et ses boucles. Aucun test sans navigateur n'y passe.
+  const sound = page.waitForResponse((r) => r.url().includes("/sound.ts"), { timeout: 10_000 });
+  await page.keyboard.press("Shift");
+  assert.ok((await sound).ok(), "le module du son se charge au premier geste");
+  await page.waitForTimeout(300);
+  assert.deepEqual(errors, [], "le son démarre sans erreur dans la console");
+
   // Le pilote qui redémarre, simulé par WEBGL_lose_context. Lu dès l'événement
   // `restored`, avant toute frame : un contexte rendu part d'une image vide
   // (0, 0, 0), et seul screen.ts peut y reposer le bac — l'air n'est pas noir.
@@ -94,7 +102,7 @@ try {
   assert.match(sent.request().postData() ?? "", /^page : Error: essai de remontée/, "une exception de la page part vers /api/error");
   assert.equal(sent.status(), 204, "le Worker l'accepte");
 
-  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, contexte WebGL retrouvé, erreur remontée`);
+  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, son démarré, contexte WebGL retrouvé, erreur remontée`);
 } finally {
   await browser.close();
   await server.close();

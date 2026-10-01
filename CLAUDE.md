@@ -33,7 +33,7 @@ de sens.
 Restent en `ask`, donc toujours confirmées à la main, même dans un mode qui
 accepte les éditions : `npm run deploy` et `wrangler deploy` (AGENTS.md : sur
 demande explicite seulement), `git commit` / `push` / `reset` / `checkout`,
-`rm`, et `npm install <paquet>` — la CI tient deux budgets de 80 Kio, une
+`rm`, et `npm install <paquet>` — la CI tient deux budgets (84 et 80 Kio), une
 dépendance de plus se discute avant de s'installer.
 
 ### Hooks

@@ -121,7 +121,7 @@ for (const [nom, id] of Object.entries(IDS)) {
  * **type** : ils reçoivent le moteur du Worker en argument, ils ne le créent
  * pas. Ils ne sont donc pas dans la liste.
  */
-const PAGE = ["main", "world", "screen", "room", "share", "theme", "view", "keys", "palette", "settings", "hero", "ui", "errors"];
+const PAGE = ["main", "world", "screen", "room", "share", "theme", "view", "keys", "palette", "settings", "hero", "ui", "errors", "audio", "sound"];
 for (const nom of PAGE) {
   assert.ok(!code(`src/client/${nom}.ts`).includes("sim/engine.ts"),
     `${nom}.ts ne doit pas importer l'Engine : world.ts est la seule porte vers la simulation`);
@@ -139,7 +139,7 @@ for (const nom of PAGE) {
  * laisserait l'un des deux à moitié chargé (ses exports encore à
  * `undefined`). main.ts leur passe ce qu'il faut par un `init…()` à rappels.
  */
-for (const nom of ["room", "share", "theme", "view", "keys", "palette", "settings", "hero"]) {
+for (const nom of ["room", "share", "theme", "view", "keys", "palette", "settings", "hero", "audio", "sound"]) {
   assert.ok(!/from "\.\/main/.test(code(`src/client/${nom}.ts`)),
     `${nom}.ts ne doit pas importer main.ts (cycle) : passer par un rappel d'init…()`);
 }

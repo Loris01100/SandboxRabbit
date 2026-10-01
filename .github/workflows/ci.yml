@@ -39,15 +39,19 @@ jobs:
       # onde de pression, lave, aimants, bandes 1920×1080. Un bac plein
       # d'aimants coûtait 2 s par tick sans que rien ne le montre.
       - run: npm run stress
-      # Un client sans framework grossit lentement et sans bruit. Deux budgets de
-      # 80 ko non compressés : la page (JS + CSS, ce qui s'affiche d'abord) et
-      # le moteur (le Worker de simulation, qui sert aussi de fil auxiliaire).
-      # Un seul total ne disait pas lequel des deux avait grossi.
+      # Un client sans framework grossit lentement et sans bruit. Deux budgets
+      # non compressés : la page (JS + CSS, ce qui s'affiche d'abord) et le
+      # moteur (le Worker de simulation, qui sert aussi de fil auxiliaire), 80 Kio
+      # chacun. Un seul total ne disait pas lequel des deux avait grossi.
+      # La page est passée à 84 Kio avec le son : elle frôlait déjà les 80
+      # (81 014 octets), et même chargé au premier geste (sound-*.js, hors
+      # budget), le son y laisse sa porte (audio.ts) et l'assistant de Vite qui
+      # enrobe tout `import()`, ~1,5 Ko qu'aucune option ne retire.
       - name: Budget de bundle
         run: |
           page=$(cat dist/client/assets/index-*.js dist/client/assets/*.css | wc -c)
           engine=$(cat dist/client/assets/worker-*.js | wc -c)
-          echo "page : $page octets (budget 81920)"
+          echo "page : $page octets (budget 86016)"
           echo "moteur : $engine octets (budget 81920)"
-          test "$page" -le 81920
+          test "$page" -le 86016
           test "$engine" -le 81920

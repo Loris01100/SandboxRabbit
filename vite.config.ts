@@ -12,8 +12,15 @@ const isolation = {
   "cross-origin-embedder-policy": "require-corp",
 };
 
+/**
+ * Sans le polyfill de `modulepreload` : tous les navigateurs qui ont WebGL2 et
+ * `SharedArrayBuffer` le connaissent, et c'est un demi-Ko de moins dans la
+ * page, qui a un budget. L'assistant qui enrobe un `import()` (celui de
+ * sound.ts, dans audio.ts) reste là : Vite 8 n'a pas d'option pour s'en passer.
+ */
 export default defineConfig({
   plugins: [cloudflare()],
+  build: { modulePreload: false },
   server: { headers: isolation },
   preview: { headers: isolation },
 });

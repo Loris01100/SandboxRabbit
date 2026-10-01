@@ -19,7 +19,7 @@ les mesures de Rust/WASM dans [rust.md](../rust.md).
 | « Où part le temps d'un tick ? » | `node --cpu-prof`, voir plus bas |
 | « Qu'est-ce que rapporterait le multi-cœur, le GPU, un portage ? » | `npm run directions` (et `test/gpu.html` sous `npm run dev` pour WebGPU) — voir [tests.md § Choisir une direction](tests.md#choisir-une-direction) |
 | « Est-ce que Rust y gagnerait ? » | `npm run rust` → [rust.md](../rust.md) |
-| « Est-ce que la page a grossi ? » | `npm run build` — deux budgets de 80 Kio, la page et le moteur |
+| « Est-ce que la page a grossi ? » | `npm run build` — deux budgets, 84 Kio pour la page, 80 Kio pour le moteur |
 | « Est-ce que ça rame **vraiment** ? » | `npm run dev`, un grand bac, et regarder. Les scripts mesurent le moteur, pas la fluidité ressentie |
 
 Avant de conclure à une régression : la mesure dépend beaucoup de la charge de la
@@ -73,6 +73,7 @@ parallèle**. Le reste (micro-optimisations, portage) vient après.
 | Bandes brutes dans **un seul** tampon recyclé (plus d'arrondi, plus d'allocation par couche) | 11 ms (bac) et 15 ms (page) → ~2 ms chacune par frame | [architecture.md](architecture.md#trois-fils-dexécution) |
 | `SLICE` : une frame s'accorde 12 ms de simulation et abandonne son retard | la boucle montait à huit ticks par frame, 130 ms entre deux images | [architecture.md](architecture.md#trois-fils-dexécution) |
 | Échéance fixe plutôt qu'un délai **après** le travail | ~37 → 60 images par seconde | `loop()` de sim/worker.ts |
+| Son chargé au premier geste (`import()` d'audio.ts) et polyfill `modulepreload` retiré (vite.config.ts) | page 84 122 → 82 792 octets (son compris ; 81 014 sans) | [architecture.md](architecture.md#côté-page--qui-fait-quoi) |
 | Plafond de fils porté de 7 à 14 | bac plein de nanites en 1080p : 28 ms à 7 fils → 19 à 15 (16 cœurs) | `helpers()` de sim/worker.ts |
 
 ## Les pistes mesurées et laissées de côté

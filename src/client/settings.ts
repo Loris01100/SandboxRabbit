@@ -1,6 +1,7 @@
 import { MATERIALS, type MaterialId } from "./sim/materials.ts";
 import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
 import { current, paletteEl, select } from "./palette.ts";
+import { soundOn, soundVolume } from "./audio.ts";
 import { stored, write } from "./ui.ts";
 import { wholePixels, zoomInput } from "./view.ts";
 import { WIDTH, airView, hour, light, lightDetail, limitFps, resize, screen, set } from "./world.ts";
@@ -120,6 +121,16 @@ if (screen.kind === "2d") {
   lightDetailInput.parentElement!.title = "Demande WebGL2, absent de ce navigateur";
 }
 
+// Son (fenêtre Paramètres) : réglage de la page seule, sound.ts le fabrique.
+export const soundInput = document.querySelector<HTMLInputElement>("#sound")!;
+soundInput.addEventListener("change", () => soundOn(soundInput.checked));
+const volumeInput = document.querySelector<HTMLInputElement>("#volume")!;
+const volumeValue = document.querySelector<HTMLOutputElement>("#volume-value")!;
+volumeInput.addEventListener("input", () => {
+  soundVolume(Number(volumeInput.value) / 100);
+  volumeValue.value = `${volumeInput.value} %`;
+});
+
 // Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
 // que de dupliquer les handlers ci-dessus.
 // ponytail: un blob JSON sans version — un réglage renommé repart au défaut.
@@ -133,7 +144,7 @@ const SETTINGS = "sandbox-rabbit:reglages";
 const SAVED = [
   brushInput, speedInput, windInput, ambientInput, sizeInput,
   toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, airmapInput, lightingInput, hourInput,
-  fpsCapInput, lightDetailInput, wholeInput,
+  fpsCapInput, lightDetailInput, wholeInput, soundInput, volumeInput,
 ];
 const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";

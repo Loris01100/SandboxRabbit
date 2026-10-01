@@ -6,7 +6,8 @@ import { combo, keyOf, read, stored, write, type Action } from "./ui.ts";
 import { bound, held, openSettings } from "./keys.ts";
 import { MOVES, follow, panBy, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
 import { current, emit, select } from "./palette.ts";
-import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, toolInput } from "./settings.ts";
+import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, soundInput, toolInput } from "./settings.ts";
+import { hear, initSound, setHum } from "./audio.ts";
 import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, relay } from "./room.ts";
@@ -82,6 +83,11 @@ addEventListener("keydown", (e) => {
     // L'événement rejoué décoche l'autre vue, comme un clic.
     case "heat": heatmapInput.checked = !heatmapInput.checked; heatmapInput.dispatchEvent(new Event("change")); return;
     case "air": airmapInput.checked = !airmapInput.checked; airmapInput.dispatchEvent(new Event("change")); return;
+    case "mute":
+      soundInput.checked = !soundInput.checked;
+      soundInput.dispatchEvent(new Event("change"));
+      statusEl.textContent = soundInput.checked ? "Son rétabli." : "Son coupé.";
+      return;
     case "help": openSettings("settings-keys"); return;
     case "view": nextView(); return;
     case "nextHero": gesture({ t: "hero" }); return;
@@ -578,6 +584,7 @@ initShare({
 /* -------------------------------------------------------------------- scène */
 
 sizeInput.addEventListener("input", abandon);
+initSound();
 restore();
 
 
@@ -744,10 +751,12 @@ listen((news) => {
         ? `${MATERIALS[news.probe[0]].name} · ${Math.round(news.probe[1])} °C`
         : "–";
       if (track(news.hero)) steer();
+      hear(news.heard, news.w);
       return;
     }
     case "stats":
       filledEl.textContent = news.filled.toLocaleString("fr-FR");
+      setHum(news.hum);
       return;
     case "say":
       statusEl.textContent = news.text;

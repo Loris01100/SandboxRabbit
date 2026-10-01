@@ -267,6 +267,7 @@
       <nav class="keys-menu tabs" aria-label="Onglets des paramètres">
         <button type="button" data-tab="settings-general">Général</button>
         <button type="button" data-tab="settings-graphics">Graphismes</button>
+        <button type="button" data-tab="settings-sound">Son</button>
         <button type="button" data-tab="settings-keys">Raccourcis</button>
       </nav>
       <section id="settings-general">
@@ -303,6 +304,20 @@
           <span>Échelle entière : des cellules toutes de la même taille</span>
         </label>
         <p class="hint">Ça rame encore ? Dans le panneau, Physique du monde : décocher l'Éclairage soulage la carte graphique, et une Grille plus petite le processeur — 640 × 360, c'est quatre fois moins de cellules que 1280 × 720.</p>
+      </section>
+      <!-- Réglages de la page seule (settings.ts) : le son est fabriqué sur
+           place par sound.ts, le bac n'en sait rien. -->
+      <section id="settings-sound" hidden>
+        <label class="check" title="Explosions, tonnerre, crépitement du feu, grondement de la lave, pluie. Touche m.">
+          <input id="sound" type="checkbox" checked />
+          <span>Son</span>
+        </label>
+        <label class="row">
+          <span>Volume</span>
+          <input id="volume" type="range" min="0" max="100" step="5" value="50" />
+          <output id="volume-value">50 %</output>
+        </label>
+        <p class="hint">Le son démarre au premier clic ou à la première touche : les navigateurs refusent de jouer avant.</p>
       </section>
       <!-- Rempli par main.ts (listBindings) depuis KEY_GROUPS d'ui.ts : un
            onglet par encadré, un bouton par touche à changer. -->

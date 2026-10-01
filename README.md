@@ -48,6 +48,7 @@ mondes partagés, bac multijoueur.
 | Graphismes | Onglet de la fenêtre Paramètres, pour les PC modestes : limiter les images par seconde (fréquence de l'écran, 60 ou 30 au plus — la simulation garde sa vitesse), l'échelle entière (cochée par défaut : chaque cellule fait exactement 2, 3, 4… pixels de l'écran, toutes la même taille, avec une marge autour du bac ; le bac s'étire quand l'arrondi le rétrécirait de plus d'un quart) et la finesse de l'éclairage (fine, moyenne, grossière : jusqu'à seize fois moins de calcul pour la carte graphique). Propre à chaque écran, retenu d'une visite à l'autre ; le salon n'en sait rien. |
 | Lumière | Ce qui est chaud éclaire ce qui l'entoure. Aucun flou à calculer : `temp` est déjà diffusé par le moteur, donc l'air autour d'une flamme est chaud — le halo est un sous-produit de la thermique. |
 | Heure | Menu « Heure » : matin (doré), après-midi, soir (orangé), nuit (bleu sombre), ou « Cycle », une journée en fondu toutes les 4 minutes. La teinte n'épargne que ce qui émet (feu, lave, braises, étincelles, uranium…) : la nuit, avec l'éclairage, ce sont eux qui font voir le bac. L'heure s'affiche en tête du bac, à côté des fps : 6h, 15h, 20h, 2h, ou qui tourne avec le cycle. Propre à chaque écran, le salon ne la partage pas. |
+| Son | Synthétisé sur place par Web Audio, aucun fichier à télécharger : explosions (plus longues et plus graves avec le rayon, la bombe gronde), éclair puis tonnerre, crépitement du feu, grondement de la lave, pluie. Le fond sonore suit le nombre de flammes et de cellules de lave, et se tait en pause ; une explosion sonne à gauche ou à droite selon sa colonne. Onglet Son de la fenêtre Paramètres (case, volume), touche `m`. Le son démarre au premier clic : les navigateurs refusent de jouer avant. |
 | Vitesse | Curseur ×0,25 à ×4 : nombre de ticks de simulation par frame, avec reliquat pour le ralenti et plafond à 8 ticks pour ne pas s'enliser. |
 | Vent & gravité | Un curseur biaise la dérive horizontale, la touche `g` retourne la gravité. |
 | Température ambiante | Un curseur de -40 à 90 °C : c'est la température vers laquelle tout le bac retourne (`COOLING`). À -5 °C un lac gèle tout seul, à 90 °C plus rien ne prend. Le climat de la scène, en un réglage. |
@@ -100,7 +101,7 @@ mondes partagés, bac multijoueur.
 
 | Morceau | Choix | Pourquoi |
 | --- | --- | --- |
-| Front | TypeScript + Vite, WebGL2 (canvas 2D en secours), aucun framework | 1 cellule = 1 pixel : la grille monte en textures, un shader la colorie, un seul dessin par frame. Budgets de bundle en CI : 80 Kio pour la page (JS + CSS), 80 Kio pour le moteur (Worker). |
+| Front | TypeScript + Vite, WebGL2 (canvas 2D en secours), aucun framework | 1 cellule = 1 pixel : la grille monte en textures, un shader la colorie, un seul dessin par frame. Budgets de bundle en CI : 84 Kio pour la page (JS + CSS ; le son, chargé au premier clic, n'y compte pas), 80 Kio pour le moteur (Worker). |
 | Simulation | Web Worker | Le moteur ne partage pas le fil de la page. Coût du tick : `npm run bench`, la CI échoue au-delà de 4 ms en 320×180. |
 | Serveur | Worker Cloudflare + [Hono](https://hono.dev) | Un seul déploiement sert le site statique **et** l'API (`env.ASSETS`). |
 | Stockage | D1 en déployé, Map en mémoire en local, même interface | Voir `src/worker/store.ts`. |

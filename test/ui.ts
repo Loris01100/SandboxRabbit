@@ -7,6 +7,7 @@ import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, framePeriod, go
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 import { REPORT, reporter } from "../src/client/errors.ts";
+import { boomShape, humLevel, panOf, rainLevel } from "../src/client/sound.ts";
 
 // Objectifs : ce qui vient d'un autre visiteur ne passe pas sans contrôle.
 {
@@ -166,6 +167,22 @@ import { REPORT, reporter } from "../src/client/errors.ts";
   const long = reporter((text) => sent.push(text));
   long("x".repeat(REPORT + 100));
   assert.equal(sent.at(-1)!.length, REPORT, "un rapport est coupé au plafond");
+}
+
+// Son : les réglages purs de sound.ts (le reste demande un AudioContext).
+{
+  assert.equal(humLevel(0, 3000), 0, "rien ne brûle : silence");
+  assert.ok(humLevel(1, 3000) > 0.05, "une flamme seule s'entend");
+  assert.equal(humLevel(1e6, 3000), 1, "un brasier plafonne");
+  assert.ok(humLevel(200, 3000) < humLevel(400, 3000), "plus de feu, plus de bruit");
+  assert.equal(rainLevel(0), 0);
+  assert.equal(rainLevel(9), 0, "une météo inconnue se tait");
+  const tnt = boomShape(1, 5), bombe = boomShape(1, 16), chaîne = boomShape(100, 5);
+  assert.ok(bombe.seconds > tnt.seconds && bombe.cutoff < tnt.cutoff, "la bombe gronde plus longtemps, plus grave");
+  assert.ok(chaîne.gain > tnt.gain && chaîne.gain <= 1, "une chaîne sonne plus fort, sans saturer");
+  assert.equal(panOf(0, 320), -0.8);
+  assert.equal(panOf(319, 320), 0.8);
+  assert.equal(panOf(5, 1), 0, "un bac d'une colonne reste au centre");
 }
 
 console.log("ok — panneau conforme");
