@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { route } from "./relay.ts";
+import { PLACES, cursor, freeId, nick, roster, route, type Player } from "./relay.ts";
 
 /**
  * Salon d'un bac partagé. Le Durable Object **ne simule rien** : il relaie.
@@ -12,16 +12,21 @@ import { route } from "./relay.ts";
  * que le compte de joueurs monte (`peers`), un arrivant n'attend donc qu'un
  * aller-retour.
  */
-/** Joueurs par salon. Au-delà, un arrivant coûte un départ complet à tous les autres. */
-const PLACES = 8;
-
-/** Le rôle est gardé dans la pièce jointe du socket : elle survit à l'hibernation. */
-const isHost = (ws: WebSocket): boolean =>
-  (ws.deserializeAttachment() as { host: boolean } | null)?.host === true;
+/**
+ * Le joueur derrière un socket, gardé dans sa pièce jointe : elle survit à
+ * l'hibernation. Un socket ouvert avant les pseudos n'a que `host` : il passe
+ * pour le joueur 0, sans nom.
+ */
+function player(ws: WebSocket): Player {
+  const p = ws.deserializeAttachment() as Partial<Player> | null;
+  return { host: p?.host === true, id: p?.id ?? 0, name: p?.name ?? "" };
+}
+const isHost = (ws: WebSocket): boolean => player(ws).host;
 
 export class Room extends DurableObject {
-  fetch(): Response {
-    if (this.ctx.getWebSockets().length >= PLACES) {
+  fetch(request: Request): Response {
+    const before = this.ctx.getWebSockets();
+    if (before.length >= PLACES) {
       return new Response("salon complet", { status: 503 });
     }
     const [client, server] = Object.values(new WebSocketPair());
@@ -29,13 +34,23 @@ export class Room extends DurableObject {
     this.ctx.acceptWebSocket(server);
     const all = this.ctx.getWebSockets();
     const host = all.length === 1;
-    server.serializeAttachment({ host });
-    server.send(JSON.stringify({ type: "role", host }));
+    const id = freeId(before.map((ws) => player(ws).id));
+    const name = nick(new URL(request.url).searchParams.get("nick"));
+    server.serializeAttachment({ host, id, name } satisfies Player);
+    // Son numéro avec son rôle : la page s'en sert pour se reconnaître dans la liste.
+    server.send(JSON.stringify({ type: "role", host, id }));
     this.announce(all);
     return new Response(null, { status: 101, webSocket: client });
   }
 
   webSocketMessage(from: WebSocket, message: string | ArrayBuffer): void {
+    // Un curseur va à tous les autres, refait ici avec le numéro de l'émetteur
+    // (relay.ts) : il ne touche pas la grille, invités compris.
+    const pointer = cursor(message, player(from).id);
+    if (pointer) {
+      for (const ws of this.ctx.getWebSockets()) if (ws !== from) ws.send(pointer);
+      return;
+    }
     // La partie de l'hôte va aux invités, le geste d'un invité à l'hôte, et
     // rien d'autre ne passe (voir relay.ts) : un invité ne parle jamais aux
     // autres invités.
@@ -58,7 +73,8 @@ export class Room extends DurableObject {
    */
   private announce(left: WebSocket[]): void {
     const message = JSON.stringify({ type: "peers", n: left.length });
-    for (const ws of left) ws.send(message);
+    const players = roster(left.map(player));
+    for (const ws of left) { ws.send(message); ws.send(players); }
   }
 
   webSocketError(ws: WebSocket): void {
@@ -76,7 +92,11 @@ export class Room extends DurableObject {
     if (left.some(isHost)) return;
     const next = left[0];
     if (!next) return;
-    next.serializeAttachment({ host: true });
-    next.send(JSON.stringify({ type: "role", host: true }));
+    const me = player(next);
+    next.serializeAttachment({ ...me, host: true } satisfies Player);
+    next.send(JSON.stringify({ type: "role", host: true, id: me.id }));
+    // La liste annoncée plus haut n'avait plus d'hôte : elle repart avec le nouveau.
+    const players = roster(left.map(player));
+    for (const ws of left) ws.send(players);
   }
 }

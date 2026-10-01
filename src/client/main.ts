@@ -8,9 +8,9 @@ import { MOVES, follow, panBy, scroll, zoom, zoomAt, zoomCentered, zoomInput } f
 import { current, emit, select } from "./palette.ts";
 import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, soundInput, toolInput } from "./settings.ts";
 import { hear, initSound, setHum } from "./audio.ts";
-import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
+import { FILM_LINK, captureFrame, forgetOrigin, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
-import { initRoom, relay } from "./room.ts";
+import { initRoom, placeCursors, pointAt, relay } from "./room.ts";
 import { WIDTH, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, set, type ClipData } from "./world.ts";
 import { STEER, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
@@ -322,7 +322,10 @@ const probeEl = document.querySelector<HTMLSpanElement>("#probe")!;
  * Matière et température sous le curseur : c'est ce qui rend la vue thermique
  * lisible. Le bac les renvoie avec chaque frame — on lui dit juste où regarder.
  */
-const probe = (p: { x: number; y: number }): void => order({ t: "cursor", x: p.x, y: p.y });
+const probe = (p: { x: number; y: number }): void => {
+  order({ t: "cursor", x: p.x, y: p.y });
+  pointAt(p.x, p.y); // les autres joueurs d'un salon voient où l'on est
+};
 
 canvas.addEventListener("pointermove", (e) => {
   if (e.pointerType === "touch" && touches.has(e.pointerId)) {
@@ -387,6 +390,7 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
 }
 canvas.addEventListener("pointerleave", () => {
   order({ t: "cursor", x: -1, y: -1 }); // plus de curseur, plus de sonde
+  pointAt(-1, -1);
   probeEl.textContent = "–";
   ringEl.hidden = true;
 });
@@ -547,6 +551,7 @@ function startChallenge(c: Challenge): void {
  * son but et faisait tourner son chrono.
  */
 function abandon(): void {
+  forgetOrigin(); // ce n'est plus le monde de la galerie : resauvegardé, il ne sera pas son remix
   if (!challenge) return;
   goalEl.textContent = `${challenge.name} — abandonné.`;
   challenge = null;
@@ -716,6 +721,7 @@ function frame(now: number): void {
   if (present()) frames++;
   beat(now);
   gaze();
+  placeCursors();
   captureFrame(); // vidéo en cours : la frame y part aussi
 
   if (now - lastReport >= 500) {

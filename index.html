@@ -42,6 +42,9 @@
              touchent pas au rendu et suivent le zoom sans le savoir. -->
         <div id="ring" class="overlay" hidden aria-hidden="true"></div>
         <div id="marquee" class="overlay" hidden aria-hidden="true"></div>
+        <!-- Les curseurs des autres joueurs d'un salon (room.ts), posés comme
+             le cadre du héros : en pixels de la scène, hors du rendu. -->
+        <div id="peers" aria-hidden="true"></div>
       </div>
 
       <aside class="panel">
@@ -237,6 +240,8 @@
             <button id="gallery-open" type="button">Galerie</button>
           </div>
           <p id="status" class="hint" role="status"></p>
+          <!-- Les joueurs du salon, remplie par room.ts : vide hors salon. -->
+          <ul id="roster" class="roster" aria-label="Joueurs du salon" hidden></ul>
         </details>
       </aside>
     </main>
@@ -245,11 +250,13 @@
     <dialog id="gallery">
       <form method="dialog" class="gallery-bar">
         <h2>Galerie</h2>
+        <input id="gallery-search" type="search" placeholder="Chercher un nom" aria-label="Chercher un monde par son nom" />
         <label>
           <span>Tri</span>
           <select id="gallery-sort">
             <option value="date">Plus récents</option>
             <option value="views">Plus vus</option>
+            <option value="likes">Plus aimés</option>
           </select>
         </label>
         <button type="submit">Fermer</button>
@@ -271,6 +278,10 @@
         <button type="button" data-tab="settings-keys">Raccourcis</button>
       </nav>
       <section id="settings-general">
+        <label class="row" title="Le nom que voient les autres joueurs d'un bac partagé. Vide : « Joueur » et votre numéro dans le salon.">
+          <span>Pseudo</span>
+          <input id="nick" type="text" maxlength="24" placeholder="Joueur" autocomplete="nickname" />
+        </label>
         <label class="row">
           <span>Thème</span>
           <select id="theme">

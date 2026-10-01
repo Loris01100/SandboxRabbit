@@ -12,6 +12,10 @@ export interface World {
   views: number;
   /** Objectif si le monde est un défi : « ge:12:600 » ou « lt:5:1 ». Absent sinon. */
   goal?: string | null;
+  /** Le monde dont celui-ci est un remix (son `id`), ou rien s'il est parti de zéro. Le parent peut avoir disparu depuis. */
+  parent?: string | null;
+  /** Nombre de « J'aime ». */
+  likes?: number;
   /**
    * Jeton de suppression, rendu une seule fois à la sauvegarde. Il ne sort
    * jamais de `list()` ni de `get()` : c'est tout ce qui distingue le déposant
@@ -34,6 +38,8 @@ export interface Store {
   purge(keep: number): Promise<void>;
   /** Compte un chargement. Appelé par `GET /api/worlds/:id`, seul chemin de chargement. */
   see(id: string): Promise<void>;
+  /** Compte un « J'aime » ; rend le nouveau total, ou null si le monde n'existe pas. */
+  like(id: string): Promise<number | null>;
 }
 
 /**
@@ -52,8 +58,8 @@ export function createStore(env: Env): Store {
 const memory = new Map<string, World>();
 
 /**
- * Mondes gardés, et montrés par la galerie : les `keep` plus récents **et** les
- * `keep` plus vus. Avec les seuls récents, 50 sauvegardes vides (deux minutes
+ * Mondes gardés, et montrés par la galerie : les `keep` plus récents, les
+ * `keep` plus vus **et** les `keep` plus aimés. Avec les seuls récents, 50 sauvegardes vides (deux minutes
  * et demie au débit permis) poussaient tous les autres mondes dehors, et le
  * ménage nocturne les effaçait.
  * ponytail: un spammeur à plusieurs IP peut encore gonfler les vues de ses
@@ -62,12 +68,16 @@ const memory = new Map<string, World>();
 function kept(worlds: World[], keep: number): World[] {
   const recent = [...worlds].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const viewed = [...recent].sort((a, b) => b.views - a.views).slice(0, keep);
-  return recent.filter((w, i) => i < keep || viewed.includes(w));
+  const liked = [...recent].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0)).slice(0, keep);
+  return recent.filter((w, i) => i < keep || viewed.includes(w) || liked.includes(w));
 }
 
 /** Le choix de `kept()` en SQL, `?1` valant `keep`. */
 const KEPT =
-  "id IN (SELECT id FROM worlds ORDER BY created_at DESC LIMIT ?1) OR id IN (SELECT id FROM worlds ORDER BY views DESC, created_at DESC LIMIT ?1)";
+  "id IN (SELECT id FROM worlds ORDER BY created_at DESC LIMIT ?1) OR id IN (SELECT id FROM worlds ORDER BY views DESC, created_at DESC LIMIT ?1) OR id IN (SELECT id FROM worlds ORDER BY likes DESC, created_at DESC LIMIT ?1)";
+
+/** Les colonnes servies : jamais `token` (pas de `SELECT *`, voir test/rules.ts). */
+const COLUMNS = "id, name, width, height, data, created_at AS createdAt, views, goal, parent, likes";
 
 function memoryStore(): Store {
   return {
@@ -91,6 +101,12 @@ function memoryStore(): Store {
       const world = memory.get(id);
       if (world) world.views++;
     },
+    async like(id) {
+      const world = memory.get(id);
+      if (!world) return null;
+      world.likes = (world.likes ?? 0) + 1;
+      return world.likes;
+    },
     async purge(keep) {
       const alive = kept([...memory.values()], keep);
       for (const world of memory.values()) if (!alive.includes(world)) memory.delete(world.id);
@@ -102,21 +118,21 @@ function d1Store(db: D1Database): Store {
   return {
     async list() {
       const { results } = await db
-        .prepare(`SELECT id, name, width, height, data, created_at AS createdAt, views, goal FROM worlds WHERE ${KEPT} ORDER BY created_at DESC`)
+        .prepare(`SELECT ${COLUMNS} FROM worlds WHERE ${KEPT} ORDER BY created_at DESC`)
         .bind(50)
         .all<World>();
       return results;
     },
     async get(id) {
       return db
-        .prepare("SELECT id, name, width, height, data, created_at AS createdAt, views, goal FROM worlds WHERE id = ?")
+        .prepare(`SELECT ${COLUMNS} FROM worlds WHERE id = ?`)
         .bind(id)
         .first<World>();
     },
     async save(world) {
       await db
-        .prepare("INSERT INTO worlds (id, name, width, height, data, created_at, goal, token) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(world.id, world.name, world.width, world.height, world.data, world.createdAt, world.goal ?? null, world.token ?? null)
+        .prepare("INSERT INTO worlds (id, name, width, height, data, created_at, goal, token, parent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(world.id, world.name, world.width, world.height, world.data, world.createdAt, world.goal ?? null, world.token ?? null, world.parent ?? null)
         .run();
     },
     async remove(id, token) {
@@ -127,6 +143,11 @@ function d1Store(db: D1Database): Store {
     },
     async see(id) {
       await db.prepare("UPDATE worlds SET views = views + 1 WHERE id = ?").bind(id).run();
+    },
+    async like(id) {
+      // Une seule requête : l'incrément et le nouveau total, sans lecture à part.
+      const row = await db.prepare("UPDATE worlds SET likes = likes + 1 WHERE id = ? RETURNING likes").bind(id).first<{ likes: number }>();
+      return row?.likes ?? null;
     },
     async purge(keep) {
       await db

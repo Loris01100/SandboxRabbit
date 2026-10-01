@@ -45,6 +45,9 @@ const HEADERS: Record<string, string> = {
  */
 const CELLS = 1920 * 1080;
 
+/** Forme d'un `id` de monde (`crypto.randomUUID()`). */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", async (c, next) => {
@@ -123,6 +126,11 @@ app.post("/api/worlds", async (c) => {
   if (body.goal != null && !/^(ge|lt):\d{1,3}:\d{1,6}$/.test(body.goal)) {
     return c.json({ error: "objectif invalide" }, 400);
   }
+  // Remix : l'`id` du monde dont celui-ci est repris. Sa forme seulement — le
+  // parent peut disparaître au ménage suivant, la galerie le dit alors.
+  if (body.parent != null && !(typeof body.parent === "string" && UUID.test(body.parent))) {
+    return c.json({ error: "parent invalide" }, 400);
+  }
 
   const id = crypto.randomUUID();
   // Le jeton de suppression est tiré ici, pas envoyé par le client : c'est la
@@ -137,6 +145,8 @@ app.post("/api/worlds", async (c) => {
     createdAt: new Date().toISOString(),
     views: 0,
     goal: body.goal ?? null,
+    parent: body.parent ?? null,
+    likes: 0,
     token,
   });
   // Rendu une seule fois : aucune route de lecture ne le renvoie ensuite.
@@ -151,6 +161,22 @@ app.delete("/api/worlds/:id", async (c) => {
   const gone = await createStore(c.env).remove(c.req.param("id"), token);
   if (!gone) return c.json({ error: "pas votre monde" }, 403);
   return c.body(null, 204);
+});
+
+/**
+ * « J'aime » : un vote de plus, sans compte. Le débit a son compteur (20 par
+ * minute et par IP), sinon voter empêchait de sauvegarder.
+ * ponytail: rien n'empêche de revoter pour le même monde (la page s'en
+ * souvient, pas le Worker) ; un compte ou un Turnstile le jour où les votes
+ * comptent pour de vrai.
+ */
+app.post("/api/worlds/:id/like", async (c) => {
+  if (await flooding(c, "vote:")) return c.json({ error: "trop de requêtes" }, 429);
+  const id = c.req.param("id");
+  if (!UUID.test(id)) return c.json({ error: "introuvable" }, 404);
+  const likes = await createStore(c.env).like(id);
+  if (likes === null) return c.json({ error: "introuvable" }, 404);
+  return c.json({ likes });
 });
 
 /** Bac partagé : une websocket par joueur, un Durable Object par salon. */

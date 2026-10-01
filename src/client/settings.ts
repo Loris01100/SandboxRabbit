@@ -140,6 +140,9 @@ for (const input of mixInputs) {
   });
 }
 
+// Pseudo des salons (onglet Général) : room.ts le lit en entrant, il n'a qu'à être retenu.
+const nickInput = document.querySelector<HTMLInputElement>("#nick")!;
+
 // Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
 // que de dupliquer les handlers ci-dessus.
 // ponytail: un blob JSON sans version — un réglage renommé repart au défaut.
@@ -153,7 +156,7 @@ const SETTINGS = "sandbox-rabbit:reglages";
 const SAVED = [
   brushInput, speedInput, windInput, ambientInput, sizeInput,
   toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, airmapInput, lightingInput, hourInput,
-  fpsCapInput, lightDetailInput, wholeInput, soundInput, volumeInput, ...mixInputs,
+  fpsCapInput, lightDetailInput, wholeInput, soundInput, volumeInput, ...mixInputs, nickInput,
 ];
 const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";

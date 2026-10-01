@@ -317,3 +317,25 @@ export const ACTION_NAMES: Record<Action, string> = {
   view: "Vue du héros : de côté, avec l'encadré de ce qu'il voit, ou à la première personne",
   nextHero: "Piloter le héros suivant (la caméra le suit)",
 };
+
+/** Un nom ramené à ce qu'on tape pour le chercher : minuscules, sans accents. */
+const plain = (s: string): string => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+/**
+ * Recherche de la galerie : chaque mot tapé doit se trouver dans le nom, dans
+ * n'importe quel ordre, accents et casse ignorés — « volcan glace » trouve
+ * « La Glace du Volcan », « debacle » trouve « Débâcle ».
+ */
+export function matches(name: string, query: string): boolean {
+  const hay = plain(name);
+  return plain(query).split(/\s+/).every((word) => hay.includes(word));
+}
+
+/**
+ * La couleur d'un joueur de salon, d'après son numéro (1 à 8) : des teintes
+ * écartées d'un angle d'or, pour que deux voisins de numéro ne se confondent
+ * pas. Lisible sur le fond sombre du bac comme sur la page en mode jour.
+ */
+export function peerColor(id: number): string {
+  return `hsl(${Math.round((id * 137.5) % 360)} 85% 60%)`;
+}

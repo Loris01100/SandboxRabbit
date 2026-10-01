@@ -136,7 +136,14 @@ Ce qui est vérifié :
 4. **les erreurs remontent** : une exception lancée dans la page part vers
    `POST /api/error` (src/client/errors.ts) et le Worker répond `204`. Vite
    affiche alors un `[Unhandled error] Error: essai de remontée` : c'est
-   l'exception du test, pas une panne.
+   l'exception du test, pas une panne ;
+5. **le salon tourne à deux** : deux pages entrent dans un salon neuf (nom
+   horodaté) sur le Durable Object que le plugin Cloudflare fait tourner dans
+   workerd. Chacune voit la liste des joueurs avec les pseudos (un `<b>` reste
+   du texte), l'une voit le curseur de l'autre puis le perd quand il sort du
+   bac, et quand l'hôte ferme sa page l'autre est promue et son curseur
+   disparaît. La galerie, elle, n'y est pas : elle demanderait une D1 locale
+   migrée (`wrangler d1 migrations apply --local`) sur la machine de test.
 
 Ce n'est pas dans `npm run check` : il faut Chromium installé. La CI le lance
 après `check`.

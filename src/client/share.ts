@@ -1,6 +1,7 @@
 /**
- * Tout ce qui fait entrer ou sortir un monde : la galerie et l'API, la
- * sauvegarde, le lien partagé, l'image et la vidéo.
+ * Tout ce qui fait entrer ou sortir un monde : la sauvegarde dans la galerie
+ * (la galerie elle-même est dans gallery.ts, chargée à sa première ouverture),
+ * le lien partagé, l'image, la vidéo et le rejeu.
  *
  * Ce module ne connaît ni l'annulation ni les défis : `initShare()` reçoit les
  * deux gestes dont il a besoin (charger une grille, lancer un défi) plutôt que
@@ -8,11 +9,9 @@
  */
 import { HEIGHT, WIDTH, askFilm, askGrid, canvas } from "./world.ts";
 import { FILM_MAX, pack, parse, unpack, type Recording } from "./replay.ts";
-import { thumbnail } from "./sim/render.ts";
-import { decode } from "./sim/codec.ts";
 import { EMPTY, MATERIALS, PALETTE } from "./sim/materials.ts";
 import { type Challenge } from "./challenges.ts";
-import { goalText, read, write } from "./ui.ts";
+import { read, write } from "./ui.ts";
 
 /**
  * Les mondes déposés depuis ce navigateur : `{ id: jeton }`. Le Worker rend le
@@ -20,14 +19,31 @@ import { goalText, read, write } from "./ui.ts";
  * qui remplace les comptes qu'on n'a pas. Perdu (autre machine, stockage vidé),
  * le monde n'est plus supprimable : le ménage nocturne finira par l'emporter.
  */
-const OWNED = "sandbox-rabbit:mondes";
+export const OWNED = "sandbox-rabbit:mondes";
 
-function owned(): Record<string, string> {
+export function owned(): Record<string, string> {
   try {
     return JSON.parse(read(OWNED) ?? "{}") as Record<string, string>;
   } catch {
     return {};
   }
+}
+
+/**
+ * Le monde de la galerie qui est dans le bac, s'il y en a un : une sauvegarde
+ * le donne comme parent (remix). Tout ce qui remplace le bac l'oublie
+ * (`forgetOrigin()`, appelé par main.ts avec l'abandon du défi) — sinon un bac
+ * vidé puis redessiné partait comme le remix d'un monde dont il ne restait rien.
+ */
+let origin: { id: string; name: string } | null = null;
+
+export function forgetOrigin(): void {
+  origin = null;
+}
+
+/** La galerie vient de charger ce monde : resauvegardé, le bac sera son remix. */
+export function setOrigin(o: { id: string; name: string }): void {
+  origin = o;
 }
 
 export interface Deps {
@@ -53,14 +69,8 @@ export function initShare(hooks: Deps): void {
   deps = hooks;
 }
 
-/**
- * Défi bâti sur un monde partagé : la grille est déjà chargée, `build` n'a rien
- * à faire, et la condition de victoire est surveillée par le bac (on lui passe
- * l'objectif encodé). Il ne reste ici qu'un libellé et un chrono.
- */
-function challengeOf(w: World, objective: string): Challenge {
-  return { name: w.name, goal: objective, build: () => {}, won: () => false };
-}
+/** Les gestes reçus de main.ts, pour la galerie (gallery.ts), chargée plus tard. */
+export const shareDeps = (): Deps => deps;
 
 /** Recopie la frame courante dans la vidéo en cours, s'il y en a une. */
 export function captureFrame(): void {
@@ -68,137 +78,24 @@ export function captureFrame(): void {
 }
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
-const galleryEl = document.querySelector<HTMLDialogElement>("#gallery")!;
-const galleryGrid = document.querySelector<HTMLDivElement>("#gallery-grid")!;
 
-interface World { id: string; name: string; createdAt: string; width: number; height: number; data: string; views: number; goal?: string | null }
-
-/**
- * Galerie : une seule requête ramène les mondes avec leur grille, qui devient la
- * vignette. Ouverte en modale (`<dialog>`), le panneau est trop étroit pour
- * montrer des images.
- */
-let worlds: World[] = [];
-
-async function openGallery(): Promise<void> {
-  galleryEl.showModal();
-  galleryGrid.replaceChildren(note("Chargement…"));
-  try {
-    const list = await (await fetch("/api/worlds")).json();
-    if (!Array.isArray(list)) throw new Error("liste inattendue");
-    worlds = list;
-  } catch {
-    galleryGrid.replaceChildren(note("API injoignable."));
-    return;
-  }
-  drawGallery();
-}
-
-// Le tri se fait sur la liste déjà en main : elle est plafonnée à 100 mondes,
-// inutile de redemander au Worker.
-const sortInput = document.querySelector<HTMLSelectElement>("#gallery-sort")!;
-sortInput.addEventListener("change", drawGallery);
-
-function drawGallery(): void {
-  const sorted = [...worlds].sort((a, b) =>
-    sortInput.value === "views" ? (b.views ?? 0) - (a.views ?? 0) : b.createdAt.localeCompare(a.createdAt),
-  );
-  galleryGrid.replaceChildren(
-    ...(sorted.length ? sorted.map(card) : [note("Aucun monde. « Sauvegarder » en dépose un.")]),
-  );
-}
-
-function note(text: string): HTMLParagraphElement {
-  const p = document.createElement("p");
-  p.className = "hint";
-  p.textContent = text;
-  return p;
-}
-
-function card(w: World): HTMLDivElement {
-  const slot = document.createElement("div");
-  slot.className = "slot";
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "card";
-  const name = document.createElement("span");
-  name.className = "name";
-  const objective = goalText(w.goal);
-  name.textContent = objective ? `🎯 ${w.name}` : w.name; // textContent : le nom vient d'un autre visiteur
-  if (objective) button.title = objective;
-  const date = document.createElement("span");
-  date.className = "date";
-  date.textContent = `${new Date(w.createdAt).toLocaleDateString("fr-FR")} · ${w.views ?? 0} vue${(w.views ?? 0) > 1 ? "s" : ""}`;
-  button.append(name, date);
-
-  // La grille sert deux fois : à dessiner la vignette, puis à charger le monde.
-  try {
-    button.prepend(thumbnail(decode(w.data, w.width * w.height), w.width, w.height));
-  } catch {
-    button.title = "Monde illisible";
-  }
-  button.addEventListener("click", async () => {
-    // On charge par l'API plutôt que par la copie déjà en main : c'est ce
-    // passage qui compte la vue, et la copie n'a que la matière. Supprimé
-    // depuis l'ouverture de la galerie, le monde ne se charge plus ;
-    // injoignable, on se rabat sur la copie et on le dit.
-    const res = await fetch(`/api/worlds/${w.id}`).catch(() => null);
-    if (res?.status === 404) {
-      worlds = worlds.filter((x) => x !== w);
-      slot.replaceChildren(note(`« ${w.name} » a été supprimé.`));
-      return;
-    }
-    const fresh = res?.ok ? ((await res.json().catch(() => null)) as World | null) : null;
-    // Le monde emmène sa taille : le bac s'y met, plus de carte morte.
-    const done = deps.load(fresh?.data ?? w.data, w.width);
-    galleryEl.close();
-    if (!(await done)) return;
-    statusEl.textContent = fresh?.data
-      ? `« ${w.name} » chargé.`
-      : `« ${w.name} » chargé sans son état vivant (serveur injoignable).`;
-    // Un monde porteur d'un objectif se joue comme un défi : la scène est déjà
-    // en place, il ne reste que la condition à surveiller.
-    if (objective) deps.start(challengeOf(w, objective), w.goal ?? undefined);
-  });
-
-  // Suppression : seulement les siens. Le bouton n'apparaît que si on a le
-  // jeton rendu à la sauvegarde, et le Worker le redemande de toute façon.
-  const token = owned()[w.id];
-  slot.append(button);
-  if (token) slot.append(del(w, token, slot));
-  return slot;
-}
-
+// La galerie (vignettes, recherche, votes) n'est chargée qu'à sa première
+// ouverture : elle ne sert pas à ce qui s'affiche d'abord, et la page a un
+// budget (84 Kio). Le clic qui la charge l'ouvre aussitôt après.
+document.querySelector<HTMLButtonElement>("#gallery-open")!.addEventListener("click", () => {
+  void import("./gallery.ts").then((g) => g.openGallery());
+});
 /**
  * Pourquoi une écriture a échoué. Sans réponse (réseau coupé, déploiement en
  * cours), la sauvegarde restait sur « Sauvegarde… » sans fin ; et un refus de
  * débit disait « échec » quand il suffit d'attendre une minute.
  */
-function failure(res: Response | null, what: string): string {
+export function failure(res: Response | null, what: string): string {
   if (!res) return `Échec de ${what} : serveur injoignable.`;
   if (res.status === 429) return "Trop de requêtes : réessayez dans une minute.";
   return `Échec de ${what}.`;
 }
 
-function del(w: World, token: string, slot: HTMLDivElement): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "del";
-  button.title = "Supprimer";
-  button.textContent = "×";
-  button.addEventListener("click", async () => {
-    if (!confirm(`Supprimer « ${w.name} » ?`)) return;
-    const res = await fetch(`/api/worlds/${w.id}`, { method: "DELETE", headers: { "x-world-token": token } }).catch(() => null);
-    if (!res?.ok) { statusEl.textContent = failure(res, "la suppression"); return; }
-    slot.remove();
-    const mine = owned();
-    delete mine[w.id];
-    write(OWNED, JSON.stringify(mine));
-  });
-  return button;
-}
-
-document.querySelector<HTMLButtonElement>("#gallery-open")!.addEventListener("click", () => void openGallery());
 
 // Objectif facultatif : « au moins / moins de N cellules de X ». Deux
 // comparaisons suffisent — « plus aucun X » s'écrit « moins de 1 ».
@@ -234,15 +131,17 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
     body: JSON.stringify({
       name, width: WIDTH, height: HEIGHT, data,
       goal: goalOp.value ? `${goalOp.value}:${goalId.value}:${goalN.value}` : null,
+      parent: origin?.id ?? null,
     }),
   }).catch(() => null);
   if (!res?.ok) { statusEl.textContent = failure(res, "la sauvegarde"); return; }
   // Le jeton n'est rendu que là : gardé maintenant ou perdu pour de bon.
   const { id, token } = (await res.json()) as { id: string; token?: string };
   if (token) write(OWNED, JSON.stringify({ ...owned(), [id]: token }));
-  statusEl.textContent = alive
+  const remix = origin ? ` Remix de « ${origin.name} ».` : "";
+  statusEl.textContent = (alive
     ? "Sauvegardé — visible dans la galerie."
-    : "Sauvegardé sans son état vivant (trop lourd) — visible dans la galerie.";
+    : "Sauvegardé sans son état vivant (trop lourd) — visible dans la galerie.") + remix;
 });
 
 // Partage : le monde entier tient dans l'URL (RLE + base64, ~1 ko). La largeur

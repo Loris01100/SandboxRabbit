@@ -442,3 +442,37 @@ canvas:fullscreen { height: 100vh; width: auto; aspect-ratio: 16 / 9; }
 .card canvas { width: 100%; cursor: inherit; }
 .card .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .date { color: var(--muted); font-size: 0.74rem; }
+
+/* Les autres joueurs d'un salon (room.ts) : un point et un nom par curseur,
+   leur couleur passée en CSSOM (--peer). Le calque couvre la scène et coupe ce
+   qui en sort quand le bac est zoomé. */
+#peers { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 2; }
+.peer { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 4px; }
+.peer::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin: -4px;
+  border-radius: 50%;
+  background: var(--peer);
+  box-shadow: 0 0 0 1px #000a;
+}
+.peer span {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--peer);
+  color: #000;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.roster { margin: 0.4rem 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; font-size: 0.8rem; }
+.roster li::before { content: "●"; margin-right: 0.3rem; color: var(--peer); }
+.roster .me { font-weight: 600; }
+
+/* La recherche prend la place libre entre le titre et le tri. */
+#gallery-search { flex: 1; min-width: 6rem; margin: 0 0.75rem; }
+.gallery-bar { gap: 0.5rem; }
+.card .remix { color: var(--muted); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot .like { position: absolute; top: 0.25rem; left: 0.25rem; padding: 0 0.35rem; font-size: 0.74rem; line-height: 1.4; }

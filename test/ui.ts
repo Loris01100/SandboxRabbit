@@ -3,7 +3,7 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, framePeriod, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor, wholeScale } from "../src/client/ui.ts";
+import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, matches, peerColor, framePeriod, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor, wholeScale } from "../src/client/ui.ts";
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 import { REPORT, reporter } from "../src/client/errors.ts";
@@ -189,6 +189,16 @@ import { readFileSync } from "node:fs";
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const curseurs = [...html.matchAll(/data-mix="(\w+)"/g)].map((m) => m[1]);
   assert.deepEqual(curseurs.sort(), [...MIX].sort(), "chaque famille de sons a son curseur dans l'onglet Son");
+}
+
+// Recherche de la galerie et couleurs des joueurs d'un salon.
+{
+  assert.ok(matches("Débâcle", "debacle"), "accents et casse ignorés");
+  assert.ok(matches("La Glace du Volcan", "volcan glace"), "chaque mot, dans n'importe quel ordre");
+  assert.ok(!matches("La Glace du Volcan", "volcan lave"), "tous les mots doivent y être");
+  assert.ok(matches("n'importe quoi", "  "), "rien de tapé : tout passe");
+  const teintes = new Set(Array.from({ length: 8 }, (_, i) => peerColor(i + 1)));
+  assert.equal(teintes.size, 8, "huit joueurs, huit couleurs");
 }
 
 console.log("ok — panneau conforme");

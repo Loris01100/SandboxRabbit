@@ -72,7 +72,8 @@ src/client/
   terrain.ts             monde généré par graine, bâti au repos             (pur)
   sight.ts               ce que voit le héros : rayons → colonne de pixels  (pur)
   ui.ts                  logique pure du panneau + read/write/forget (localStorage)
-  room.ts share.ts theme.ts   salon, galerie/exports, jour-nuit (reçoivent leurs dépendances par init…())
+  room.ts share.ts theme.ts   salon (pseudos, curseurs), sauvegarde/exports, jour-nuit (reçoivent leurs dépendances par init…())
+  gallery.ts             la galerie (recherche, tri, J'aime, remix), chargée à sa première ouverture par share.ts
   audio.ts sound.ts      son : porte (charge sound.ts au premier geste) et synthèse Web Audio ; Heard / Hum de sandbox.ts
   errors.ts              exceptions de la page et du Worker de simulation → POST /api/error ; reporter() (pur)
   sim/
@@ -155,7 +156,7 @@ reproductible, ids de matière gelés, CSP, cloisonnement de la page,
   sandbox.ts, sinon le rejeu diverge. S'il la remplace, il arrête d'abord le
   rejeu (`this.play(false)`).
 - `localStorage` uniquement via `read` / `write` / `forget` de ui.ts.
-- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts`, `palette.ts`, `settings.ts`, `hero.ts`, `audio.ts`, `sound.ts` n'importent pas main.ts (cycle).
+- `room.ts`, `share.ts`, `theme.ts`, `view.ts`, `keys.ts`, `palette.ts`, `settings.ts`, `hero.ts`, `audio.ts`, `sound.ts`, `gallery.ts` n'importent pas main.ts (cycle).
 - Une frame ne porte que les bandes changées : world.ts les recopie toutes
   dans son miroir, n'en saute jamais une. Un réglage qui change l'aspect sans
   écriture (comme `heatmap`) fait tout recolorier.
@@ -172,8 +173,11 @@ reproductible, ids de matière gelés, CSP, cloisonnement de la page,
   `vet()` / `vetBeats()`. `life` n'est pas filtré :
   une règle qui y lit un id de matière passe par `KNOWN`.
 - Le salon (`relay.ts`) ne laisse passer que `start` / `turn` de l'hôte vers
-  les invités et `do` / `sync` d'un invité vers l'hôte ; `role` et `peers` ne
-  viennent que du Durable Object.
+  les invités et `do` / `sync` d'un invité vers l'hôte ; `role`, `peers` et
+  `roster` ne viennent que du Durable Object. Le `cursor` va de chacun à tous,
+  mais **refait** par le DO (`cursor()` : cellules entières, numéro de
+  l'émetteur) : il ne touche jamais la grille — rien de ce qui la change ne
+  passe par lui.
 - Salon en lockstep : ce qui change la grille de l'hôte sans geste passe par
   `stamp()` de sandbox.ts, sinon les invités divergent (voir
   [docs/agents/architecture.md](docs/agents/architecture.md)).

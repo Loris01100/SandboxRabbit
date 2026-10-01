@@ -14,14 +14,23 @@
  * Une fois par seconde l'hôte joint l'empreinte de sa grille : un invité qui
  * ne la retrouve pas demande un nouveau départ (`sync`).
  *
- * ponytail: pas d'identité ni de verrou, qui entre peint. Et un invité voit
- * son propre coup de pinceau après un aller-retour : pas de prédiction locale.
+ * Chacun entre avec un pseudo (Paramètres › Général), que le salon nettoie et
+ * numérote (1 à 8, d'où la couleur) ; la liste des joueurs s'affiche sous la
+ * barre de statut, et chacun voit les curseurs des autres. Le curseur ne
+ * touche pas la grille : il voyage à part (`cursor`), au plus toutes les
+ * `POINT` ms, et ne peut pas faire diverger le lockstep.
+ *
+ * ponytail: un pseudo n'est pas une identité — rien ne l'authentifie, deux
+ * joueurs peuvent porter le même, et il n'y a pas de verrou : qui entre peint.
+ * Et un invité voit son propre coup de pinceau après un aller-retour : pas de
+ * prédiction locale.
  *
  * Ce module ne connaît ni le bouton Pause ni le sélecteur de taille : il les
  * demande par des rappels, sinon il faudrait importer main.ts et boucler.
  */
-import { HEIGHT, WIDTH, listen, order } from "./world.ts";
+import { HEIGHT, WIDTH, cellBox, listen, order } from "./world.ts";
 import type { Gesture } from "./gestures.ts";
+import { peerColor } from "./ui.ts";
 
 /** Appelé quand on devient hôte (true) ou invité (false) : un invité ne pilote pas la pause. */
 let onRole: (host: boolean) => void = () => {};
@@ -62,6 +71,104 @@ function parse(data: string): any {
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const roomButton = document.querySelector<HTMLButtonElement>("#room")!;
+const nickInput = document.querySelector<HTMLInputElement>("#nick")!;
+const rosterEl = document.querySelector<HTMLUListElement>("#roster")!;
+const peersEl = document.querySelector<HTMLDivElement>("#peers")!;
+
+/** Un joueur du salon tel que la page le montre ; `x`, `y` : la cellule sous son curseur (-1 : hors du bac). */
+interface Peer { name: string; host: boolean; x: number; y: number; el: HTMLDivElement | null }
+/** Les joueurs, par numéro (donné par le salon). Le nôtre y est, sans curseur. */
+const players = new Map<number, Peer>();
+/** Notre numéro dans le salon (message `role`) ; 0 tant qu'on ne le connaît pas. */
+let me = 0;
+const nameOf = (id: number, name: string): string => name || `Joueur ${id}`;
+
+/** La liste des joueurs (message `roster`) : refait la liste affichée et les curseurs, garde les positions connues. */
+function seat(list: unknown): void {
+  if (!Array.isArray(list)) return;
+  const next = new Map<number, Peer>();
+  for (const p of list) {
+    if (!p || typeof p.id !== "number" || typeof p.name !== "string") continue;
+    const old = players.get(p.id);
+    next.set(p.id, { name: p.name, host: p.host === true, x: old?.x ?? -1, y: old?.y ?? -1, el: old?.el ?? null });
+  }
+  // Un joueur parti emporte son curseur.
+  for (const [id, p] of players) if (!next.has(id)) p.el?.remove();
+  players.clear();
+  for (const [id, p] of next) players.set(id, p);
+  drawRoster();
+}
+
+/** La liste affichée sous la barre de statut, et un curseur par autre joueur. */
+function drawRoster(): void {
+  rosterEl.hidden = players.size === 0;
+  rosterEl.replaceChildren(...[...players].sort(([a], [b]) => a - b).map(([id, p]) => {
+    const li = document.createElement("li");
+    li.style.setProperty("--peer", peerColor(id)); // CSSOM : la CSP refuse l'attribut style=
+    // textContent : le pseudo vient d'un autre joueur.
+    li.textContent = nameOf(id, p.name) + (p.host ? " (hôte)" : "") + (id === me ? " (vous)" : "");
+    if (id === me) {
+      li.className = "me";
+      p.el?.remove();
+      p.el = null;
+      return li;
+    }
+    if (!p.el) {
+      p.el = document.createElement("div");
+      p.el.className = "peer";
+      p.el.hidden = true;
+      p.el.style.setProperty("--peer", peerColor(id));
+      p.el.append(document.createElement("span"));
+      peersEl.append(p.el);
+    }
+    p.el.querySelector("span")!.textContent = nameOf(id, p.name);
+    return li;
+  }));
+}
+
+/**
+ * Replace les curseurs des autres sur la scène : main.ts l'appelle à chaque
+ * image, zoom et caméra compris, comme le cadre du héros.
+ */
+export function placeCursors(): void {
+  if (players.size === 0) return;
+  const c = cellBox(), stage = peersEl.getBoundingClientRect();
+  for (const p of players.values()) {
+    if (!p.el) continue;
+    // Une grille d'une autre taille (le temps d'un nouveau départ) : on ne sait pas où il est.
+    const away = p.x < 0 || p.x >= WIDTH || p.y >= HEIGHT;
+    p.el.hidden = away;
+    if (!away) p.el.style.transform = `translate(${c.left - stage.left + (p.x + 0.5) * c.sx}px, ${c.top - stage.top + (p.y + 0.5) * c.sy}px)`;
+  }
+}
+
+/**
+ * Intervalle minimal entre deux curseurs envoyés, en ms : chaque curseur
+ * réveille le Durable Object et part à tous les autres. 80 ms suivent un geste
+ * sans saccade gênante ; à huit joueurs, ~100 messages par seconde au plus.
+ */
+const POINT = 80;
+let pending: [number, number] | null = null;
+let pointed = "";
+let pointTimer = 0;
+
+/** La cellule sous notre curseur (-1, -1 : hors du bac), à montrer aux autres. main.ts l'appelle avec la sonde. */
+export function pointAt(x: number, y: number): void {
+  if (socket?.readyState !== WebSocket.OPEN || peers < 2) return;
+  pending = [x, y];
+  if (!pointTimer) pointTimer = window.setTimeout(flushPoint, POINT);
+}
+
+function flushPoint(): void {
+  pointTimer = 0;
+  if (!pending) return;
+  const [x, y] = pending;
+  pending = null;
+  // Le pinceau tenu immobile rappelle la sonde à chaque image : rien de neuf à dire.
+  if (`${x},${y}` === pointed) return;
+  pointed = `${x},${y}`;
+  send(JSON.stringify({ type: "cursor", x, y }));
+}
 let socket: WebSocket | null = null;
 let room = "";
 let host = false;
@@ -113,6 +220,11 @@ function leaveRoom(): void {
   socket = null;
   host = false;
   peers = 1;
+  me = 0;
+  pointed = "";
+  players.clear();
+  peersEl.replaceChildren();
+  drawRoster();
   order({ t: "host", on: false });
   order({ t: "follow", rec: null });
   roomButton.textContent = "Bac partagé";
@@ -140,7 +252,9 @@ roomButton.addEventListener("click", () => {
  */
 function join(name: string): void {
   quitting = false;
-  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/room/${encodeURIComponent(name)}`);
+  // Le pseudo voyage dans l'URL : le salon le nettoie et le range avec le socket.
+  const nick = encodeURIComponent(nickInput.value.trim());
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/room/${encodeURIComponent(name)}?nick=${nick}`);
   socket = ws;
   room = name;
   roomButton.textContent = "Quitter le salon";
@@ -152,6 +266,7 @@ function join(name: string): void {
     if (!msg) return;
     if (msg.type === "role") {
       host = msg.host === true;
+      if (typeof msg.id === "number") { me = msg.id; drawRoster(); }
       onRole(host);
       statusEl.textContent = host
         ? `Salon « ${room} » — vous menez la partie.`
@@ -165,6 +280,11 @@ function join(name: string): void {
       const before = peers;
       peers = msg.n;
       if (host && (peers > before || peers < 2)) restart();
+    }
+    if (msg.type === "roster") seat(msg.players);
+    if (msg.type === "cursor" && Number.isInteger(msg.x) && Number.isInteger(msg.y)) {
+      const p = players.get(msg.id);
+      if (p) { p.x = msg.x; p.y = msg.y; }
     }
     if (msg.type === "start" && !host && msg.rec && typeof msg.rec === "object") {
       const { w, h } = msg.rec;

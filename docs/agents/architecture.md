@@ -227,9 +227,25 @@ de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixel
   (pur, testé dans test/api.ts) lit le `type` de chaque message texte
   ≤ 200 000 caractères et ne laisse passer que `start` / `turn` de l'hôte
   vers les invités, `do` / `sync` d'un invité vers l'hôte. Un invité ne parle
-  donc jamais aux autres invités, et `role` / `peers` ne viennent que du DO :
-  un invité qui les imitait destituait l'hôte ou le faisait taire. Le rôle vit
-  dans la pièce jointe du socket (`serializeAttachment`). 8 places.
+  donc jamais aux autres invités, et `role` / `peers` / `roster` ne viennent
+  que du DO : un invité qui les imitait destituait l'hôte ou le faisait taire.
+  Seule exception, le **curseur** (`cursor`), qui va de chacun à tous les
+  autres : il ne touche pas la grille, donc ne peut pas faire diverger le
+  lockstep, et le DO le **refait** (`cursor()` de relay.ts) avec le numéro de
+  l'émetteur — un joueur ne déplace pas le curseur d'un autre. Le joueur
+  (`{host, id, name}`) vit dans la pièce jointe du socket
+  (`serializeAttachment`). 8 places (`PLACES`).
+- **Pseudos** : le joueur l'annonce dans l'URL (`/api/room/:id?nick=…`, champ
+  « Pseudo » de Paramètres › Général, retenu dans `:reglages`) ; le DO le
+  nettoie (`nick()` : sans caractère de contrôle, 24 caractères) et donne un
+  numéro de 1 à 8 (`freeId()`, recyclé au départ), d'où la couleur
+  (`peerColor()` d'ui.ts). Rien ne l'authentifie : deux joueurs peuvent porter
+  le même (voir le `ponytail:` de room.ts). Pseudo vide : « Joueur N ».
+- **Curseurs** : main.ts passe la cellule survolée à `pointAt()` de room.ts
+  avec la sonde ; il part au plus toutes les `POINT` = 80 ms, seulement s'il a
+  changé et qu'on n'est pas seul. Chez les autres, un `.peer` (point et nom)
+  dans `#peers`, replacé à chaque image par `placeCursors()` (zoom et caméra
+  compris, comme le cadre du héros). -1, -1 : hors du bac, caché.
 - Client : [src/client/room.ts](../../src/client/room.ts) pour le réseau,
   `host()` / `follow()` / `catchUp()` de
   [sandbox.ts](../../src/client/sim/sandbox.ts) pour la simulation.
@@ -263,8 +279,10 @@ de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixel
 
 | Message | Sens | Contenu |
 | --- | --- | --- |
-| `role` | DO → client | `{host: boolean}` |
+| `role` | DO → client | `{host: boolean, id}` : `id`, son numéro dans le salon (1 à 8) |
 | `peers` | DO → tous | `{n}` : nombre de connectés ; l'hôte renvoie un `start` quand il monte, se tait à 1 |
+| `roster` | DO → tous | `{players: [{id, name, host}]}` après chaque `peers`, et de nouveau après une promotion : la liste sous la barre de statut, un curseur par autre joueur |
+| `cursor` | chacun → DO → tous les autres | `{x, y}` en cellules entières (-1, -1 : hors du bac) ; le DO le renvoie avec `id`, celui de l'émetteur |
 | `start` | hôte → invités | `{rec: Recording}` : grille complète (état vivant), `clock`, `seed`, `scan`, réglages |
 | `turn` | hôte → invités | `{ticks, beats, sums}` toutes les 50 ms tant que le bac avance ou qu'il y a des gestes |
 | `do` | invité → hôte | `{g: Gesture}` ; l'hôte l'applique via le même chemin que ses propres gestes |
@@ -332,9 +350,10 @@ le charger dans Node. Ce qui en a besoin (le Durable Object) vit dans
 | Route | Rôle | Garde-fous |
 | --- | --- | --- |
 | `GET /api/health` | état + backend (`d1` / `memory`) | — |
-| `GET /api/worlds` | les 50 plus récents **et** les 50 plus vus (`kept()` de store.ts, 100 max), `data` **coupé au premier bloc** (matière seule, pour les vignettes) | — |
+| `GET /api/worlds` | les 50 plus récents, les 50 plus vus **et** les 50 plus aimés (`kept()` de store.ts, 150 max), avec `parent` et `likes` ; `data` **coupé au premier bloc** (matière seule, pour les vignettes) | — |
 | `GET /api/worlds/:id` | monde complet, **incrémente `views`** | seul chemin de chargement depuis la galerie ; au-delà du débit (compteur `vue:` à part), servi sans compter la vue |
-| `POST /api/worlds` | `{name, width, height, data, goal?}` → `201 {id, token}` | débit, `data` ≤ 200 000, dimensions entières et ≤ 1920×1080 cellules (`CELLS`, la plus grande grille du menu : en ajouter une plus grande = relever ce plafond), `goal` validé par regex |
+| `POST /api/worlds` | `{name, width, height, data, goal?, parent?}` → `201 {id, token}` | débit, `data` ≤ 200 000, dimensions entières et ≤ 1920×1080 cellules (`CELLS`, la plus grande grille du menu : en ajouter une plus grande = relever ce plafond), `goal` validé par regex, `parent` (le monde remixé) à la forme d'un id (`UUID`) — son existence n'est pas vérifiée, le ménage peut l'effacer après coup |
+| `POST /api/worlds/:id/like` | un « J'aime » de plus → `200 {likes}` | débit (compteur `vote:` à part), `404` si l'id n'a pas la forme d'un id ou que le monde n'existe pas. Pas de dédoublonnage côté Worker (pas de comptes) : la page retient ses votes (`:votes`) — voir le `ponytail:` de la route |
 | `DELETE /api/worlds/:id` | en-tête `x-world-token` requis | débit, `403` si mauvais jeton |
 | `GET /api/room/:id` | upgrade WebSocket vers le DO | `503` sans binding `ROOM`, débit, `426` sans upgrade |
 | `POST /api/error` | rapport d'erreur d'un joueur (texte brut, par `sendBeacon`) → `console.error({message, report, agent})` → `204` ; rien en base | corps ≤ 16 Kio (`bodyLimit`, `413`), débit (compteur `erreur:` à part : une page qui boucle n'empêche pas de sauvegarder), `400` si vide |
@@ -379,9 +398,13 @@ répond 500.
   nommées dans les `SELECT` D1). Ne jamais écrire `SELECT *`.
 - Le client garde ses jetons dans `localStorage` (`sandbox-rabbit:mondes`).
 - Ménage nocturne (cron `0 4 * * *`, `scheduled` dans index.ts) : garde les
-  mondes que la galerie montre, les 50 plus récents et les 50 plus vus
-  (`kept()` en mémoire, `KEPT` en SQL) : 50 sauvegardes de spam ne chassent
-  plus un monde que les joueurs chargent. Les mondes à `token` NULL (d'avant la migration 0004) ne
+  mondes que la galerie montre, les 50 plus récents, les 50 plus vus et les 50
+  plus aimés (`kept()` en mémoire, `KEPT` en SQL) : 50 sauvegardes de spam ne
+  chassent plus un monde que les joueurs chargent ou aiment.
+- Colonnes servies : `COLUMNS` de store.ts, la même liste pour `list()` et
+  `get()` — `parent` (migration 0005, sans clé étrangère : le parent peut
+  partir au ménage, l'enfant garde le lien) et `likes` (incrémenté par
+  `UPDATE … RETURNING likes`, une seule requête). Les mondes à `token` NULL (d'avant la migration 0004) ne
   partent que par là.
 - Schéma : un **nouveau** fichier numéroté dans [migrations/](../../migrations/),
   jamais de retouche d'un fichier existant. Appliquer avec
@@ -426,18 +449,33 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | [replay.ts](../../src/client/replay.ts) | `Recorder` / `Player` | **oui** |
 | [challenges.ts](../../src/client/challenges.ts) | défis et décors bâtis en code | **oui** |
 | [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
-| [room.ts](../../src/client/room.ts) | salon côté navigateur | non |
-| [share.ts](../../src/client/share.ts) | galerie, PNG, vidéo, lien ; export / import du rejeu | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
+| [room.ts](../../src/client/room.ts) | salon côté navigateur : lockstep, pseudo (`#nick`), liste des joueurs (`#roster`), curseurs des autres (`pointAt()`, `placeCursors()`, calque `#peers`) | non |
+| [share.ts](../../src/client/share.ts) | sauvegarde (avec `parent` : l'origine d'un remix, `setOrigin()` / `forgetOrigin()`), jetons des mondes déposés, PNG, vidéo, lien ; export / import du rejeu ; charge gallery.ts au premier clic sur « Galerie » | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
+| [gallery.ts](../../src/client/gallery.ts) | la galerie, chargée à sa première ouverture (`import()`, hors du budget de la page) : vignettes, recherche par nom, tri (récents, vus, aimés), « J'aime », remix, suppression des siens | non (la recherche, `matches()` d'ui.ts : **oui**) |
 | [theme.ts](../../src/client/theme.ts) | thème Système / Jour / Nuit, onglet Général de la fenêtre Paramètres (onglets câblés dans keys.ts) | non |
 | [sim/*](../../src/client/sim/) | moteur, rendu, codec, registre, bac | **oui** |
 
 ### Galerie et mondes-défis
 
-Dans [share.ts](../../src/client/share.ts), pas dans main.ts. La galerie est un
+Dans [gallery.ts](../../src/client/gallery.ts), chargé par share.ts au premier
+clic sur « Galerie », pas dans main.ts. La galerie est un
 `<dialog>` ouvert en `showModal()`, remplie par **une seule** requête
 `GET /api/worlds` : les vignettes sont redessinées depuis la grille reçue
 (`thumbnail()` de render.ts, sous-échantillonnée au-delà de 320 de large), et le
-tri (récents / plus vus) se fait sur cette liste côté client. Cliquer une carte
+tri (récents / plus vus / plus aimés) comme la recherche par nom (`matches()`
+d'ui.ts : chaque mot, accents et casse ignorés) se font sur cette liste côté
+client. Entrée dans la recherche est retenue : elle validerait le
+`<form method="dialog">` et fermerait la galerie.
+
+**Remix** : charger un monde de la galerie le retient comme origine
+(`setOrigin()` de share.ts, **après** le chargement) ; la sauvegarde suivante
+l'envoie en `parent`. Tout ce qui remplace le bac l'oublie : `abandon()` de
+main.ts (vider, nouveau monde, décor, autre chargement, taille) appelle
+`forgetOrigin()`. Une carte dit « remix de « … » » (nom du parent lu dans la
+liste en main, « d'un monde disparu » s'il n'y est plus) et compte ses remix.
+
+**J'aime** : un bouton par carte, éteint une fois voté (`:votes`, 500 ids au
+plus). Cliquer une carte
 recharge le monde par `GET /api/worlds/:id` — ne pas « optimiser » en
 réutilisant la copie en main, c'est ce chemin qui compte les vues. Le `×` de
 suppression n'apparaît que sur les cartes dont on détient le jeton. Un monde
@@ -460,7 +498,7 @@ kilo-octets de lien ne se déplient pas en gigaoctets. Le rejeu validé part au
 bac par `watch()` (rappel passé à `initShare()`) : ordre `reel`, puis lecture
 comme au bouton « Rejouer », taille du bac ajustée (`fit()`).
 
-Les modules périphériques (`room`, `share`, `theme`, `view`, `keys`, `palette`, `settings`, `hero`) ne doivent **pas**
+Les modules périphériques (`room`, `share`, `gallery`, `theme`, `view`, `keys`, `palette`, `settings`, `hero`, `audio`, `sound`) ne doivent **pas**
 importer main.ts (cycle) : main.ts leur passe ce dont ils ont besoin par un
 `init…()` à rappels.
 
@@ -469,7 +507,8 @@ Accès `localStorage` : uniquement via `read` / `write` / `forget` de ui.ts
 Un `localStorage.getItem` nu jette quand les cookies sont bloqués, et au
 chargement d'un module cela laisse la page blanche. Clés existantes :
 `sandbox-rabbit:mondes`, `:reglages`, `:records`, `:bac`, `:theme`, `:touches`
-(les touches réassignées, relues par `parseBindings()`).
+(les touches réassignées, relues par `parseBindings()`), `:votes` (les mondes
+aimés depuis ce navigateur, gallery.ts).
 
 `:bac` suit le format d'un lien de partage, `320~<grille>` (`loadWorld()` de
 main.ts lit les deux ; une valeur sans `~`, d'avant, se charge dans le bac tel

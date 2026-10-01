@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import app from "../src/worker/app.ts";
-import { route } from "../src/worker/relay.ts";
+import { PLACES, cursor, freeId, nick, roster, route } from "../src/worker/relay.ts";
 import { createStore, type World } from "../src/worker/store.ts";
 
 const env = {} as never;
@@ -149,6 +149,62 @@ const body = async <T,>(res: Response | Promise<Response>): Promise<T> => (await
   assert.equal(route("null", false), null);
   assert.equal(route(msg({ type: "do", g: "x".repeat(200_001) }), false), null, "plafonné à la taille d'un monde");
   assert.equal(route(new ArrayBuffer(4), false), null, "rien que du texte");
+}
+
+// Pseudos, numéros et curseurs du salon : ce qu'un joueur annonce n'est pas
+// de confiance, et le numéro d'un curseur vient du salon, jamais de l'émetteur.
+{
+  assert.equal(nick("  Alice\n\u0000 la  Lapine "), "Alice la Lapine", "contrôles retirés, espaces resserrés");
+  assert.equal(nick("x".repeat(100)).length, 24, "24 caractères au plus");
+  assert.equal(nick("🐇".repeat(30)), "🐇".repeat(24), "comptés en caractères, pas en moitiés d'emoji");
+  assert.equal(nick(null), "");
+  assert.equal(freeId([]), 1);
+  assert.equal(freeId([1, 2, 4]), 3, "le plus petit numéro libre, recyclé");
+  assert.equal(freeId(Array.from({ length: PLACES }, (_, i) => i + 1)), 0);
+
+  const msg = (o: unknown): string => JSON.stringify(o);
+  assert.deepEqual(JSON.parse(cursor(msg({ type: "cursor", x: 10, y: 20, id: 7 }), 3)!), { type: "cursor", id: 3, x: 10, y: 20 },
+    "le numéro est celui que le salon connaît, pas celui que l'émetteur prétend");
+  assert.ok(cursor(msg({ type: "cursor", x: -1, y: -1 }), 1), "hors du bac : -1, -1");
+  for (const bad of [{ x: 1.5, y: 2 }, { x: -1, y: 4 }, { x: 5000, y: 0 }, { x: "3", y: 3 }, { x: 3 }]) {
+    assert.equal(cursor(msg({ type: "cursor", ...bad }), 1), null, `curseur refusé : ${msg(bad)}`);
+  }
+  assert.equal(cursor(msg({ type: "do", g: {} }), 1), null, "un geste n'est pas un curseur");
+  assert.equal(route(msg({ type: "cursor", x: 1, y: 1 }), false), null, "ni route() ni un invité ne relaient un curseur brut");
+  assert.deepEqual(JSON.parse(roster([{ id: 1, name: "A", host: true }])), { type: "roster", players: [{ id: 1, name: "A", host: true }] });
+}
+
+// Remix et « J'aime ».
+{
+  const parent = await body<Monde>(app.request("/api/worlds", json(monde), env));
+  const enfant = await app.request("/api/worlds", json({ ...monde, parent: parent.id }), env);
+  assert.equal(enfant.status, 201, "un remix se sauvegarde avec son parent");
+  const lu = await body<Monde & { parent: string; likes: number }>(app.request(`/api/worlds/${(await body<Monde>(enfant)).id}`, {}, env));
+  assert.equal(lu.parent, parent.id, "et le garde");
+  assert.equal(lu.likes, 0, "un monde neuf n'a aucun « J'aime »");
+  assert.equal((await app.request("/api/worlds", json({ ...monde, parent: "../etc" }), env)).status, 400, "un parent qui n'a pas la forme d'un id est refusé");
+
+  const vote = await app.request(`/api/worlds/${parent.id}/like`, { method: "POST" }, env);
+  assert.equal(vote.status, 200);
+  assert.equal((await body<{ likes: number }>(vote)).likes, 1, "le vote compte");
+  assert.equal((await body<{ likes: number }>(app.request(`/api/worlds/${parent.id}/like`, { method: "POST" }, env))).likes, 2);
+  assert.equal((await app.request("/api/worlds/00000000-0000-0000-0000-000000000000/like", { method: "POST" }, env)).status, 404, "pas de vote pour un monde absent");
+  assert.equal((await app.request("/api/worlds/pas-un-id/like", { method: "POST" }, env)).status, 404);
+  const listés = await body<{ id: string; likes: number; token?: string }[]>(app.request("/api/worlds", {}, env));
+  const listé = listés.find((w) => w.id === parent.id)!;
+  assert.equal(listé.likes, 2, "la galerie voit les votes");
+  assert.equal(listé.token, undefined, "et toujours pas le jeton");
+}
+
+// Le ménage garde les mondes aimés, comme les mondes vus.
+{
+  const store = createStore(env);
+  const vieux = { name: "v", width: 4, height: 4, data: "AQE=", views: 0, createdAt: "2000-01-01T00:00:00.000Z" };
+  await store.save({ ...vieux, id: "adoré" });
+  for (let i = 0; i < 3; i++) await store.like("adoré");
+  for (let i = 0; i < 60; i++) await store.save({ ...vieux, id: `récent${i}`, createdAt: new Date(Date.now() + i).toISOString() });
+  await store.purge(50);
+  assert.ok(await store.get("adoré"), "le monde aimé survit au ménage");
 }
 
 // Sans binding Durable Object (tests, `vite dev`), le bac partagé se dit indisponible.

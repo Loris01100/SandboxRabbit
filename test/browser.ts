@@ -102,7 +102,43 @@ try {
   assert.match(sent.request().postData() ?? "", /^page : Error: essai de remontée/, "une exception de la page part vers /api/error");
   assert.equal(sent.status(), 204, "le Worker l'accepte");
 
-  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, son démarré, contexte WebGL retrouvé, erreur remontée`);
+  // Le salon, à deux, sur le Durable Object que Vite fait tourner dans workerd :
+  // pseudos, liste des joueurs, curseur de l'autre, promotion quand l'hôte part.
+  // Un nom de salon neuf à chaque passage, pour ne croiser personne.
+  const salon = `essai-${Date.now()}`;
+  // Sa propre liste : celle de la page contient déjà l'exception lancée exprès ci-dessus.
+  const ratés: string[] = [];
+  const joueur = async (nick: string) => {
+    const p = await browser.newPage();
+    p.on("pageerror", (e) => ratés.push(`${nick} : ${e.message}`));
+    await p.goto(base);
+    await p.waitForFunction(() => document.querySelector<HTMLCanvasElement>("#world")!.width !== 300, null, { timeout: 30_000 });
+    await p.evaluate((n) => { document.querySelector<HTMLInputElement>("#nick")!.value = n; }, nick);
+    p.once("dialog", (d) => void d.accept(salon));
+    await p.evaluate(() => document.querySelector<HTMLButtonElement>("#room")!.click());
+    return p;
+  };
+  const noms = (p: typeof page) => p.$$eval("#roster li", (l) => l.map((li) => li.textContent));
+  const alice = await joueur("Alice");
+  await alice.waitForFunction(() => document.querySelectorAll("#roster li").length === 1, null, { timeout: 15_000 });
+  const bob = await joueur("Bob <b>");
+  for (const p of [alice, bob]) await p.waitForFunction(() => document.querySelectorAll("#roster li").length === 2, null, { timeout: 15_000 });
+  assert.deepEqual(await noms(bob), ["Alice (hôte)", "Bob <b> (vous)"], "chacun voit les pseudos, l'hôte et lui-même ; un pseudo reste du texte");
+  const cadre = (await alice.locator("#world").boundingBox())!;
+  await alice.mouse.move(cadre.x + cadre.width / 2, cadre.y + cadre.height / 2);
+  await alice.mouse.move(cadre.x + cadre.width / 2 + 20, cadre.y + cadre.height / 2);
+  await bob.waitForFunction(() => [...document.querySelectorAll<HTMLElement>(".peer")].some((e) => !e.hidden), null, { timeout: 5_000 });
+  assert.equal(await bob.$eval(".peer", (e) => e.textContent), "Alice", "Bob voit le curseur d'Alice, à son nom");
+  await alice.mouse.move(2, 2);
+  await bob.waitForFunction(() => [...document.querySelectorAll<HTMLElement>(".peer")].every((e) => e.hidden), null, { timeout: 5_000 });
+  await alice.close();
+  await bob.waitForFunction(() => document.querySelectorAll("#roster li").length === 1, null, { timeout: 10_000 });
+  assert.deepEqual(await noms(bob), ["Bob <b> (hôte) (vous)"], "Alice partie : Bob mène, et son curseur à elle a disparu");
+  assert.equal(await bob.$$eval(".peer", (l) => l.length), 0);
+  await bob.close();
+  assert.deepEqual(ratés, [], "le salon tourne sans erreur");
+
+  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, son démarré, contexte WebGL retrouvé, erreur remontée, salon à deux`);
 } finally {
   await browser.close();
   await server.close();
