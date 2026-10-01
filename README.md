@@ -218,7 +218,7 @@ Deux pistes distinctes, à ne pas confondre :
   des Workers accorde 10 ms par requête : il faudrait l'offre payante. Un
   classement qui croirait le temps annoncé se tricherait d'une requête.
 
-**Dette connue** : les `ponytail:` du code (perte de contexte WebGL, gravité
+**Dette connue** : les `ponytail:` du code (gravité
 inversée du lapin, éclairage absent du rendu de secours, salon sans identité ni
 prédiction locale, records locaux, héros sans métier ni inventaire, onde de pression sans inertie, piles
 d'erreur minifiées…). La skill `ponytail-debt` en fait la liste

@@ -19,19 +19,18 @@
     "loc": "node test/loc.ts"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.60.1",
-    "@types/node": "^26.6.2",
+    "@cloudflare/vite-plugin": "^1.62.3",
+    "@types/node": "^26.6.3",
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.1",
-    "wrangler": "^4.0.0"
+    "vite": "^8.3.2",
+    "wrangler": "^4.145.0"
   },
   "dependencies": {
-    "hono": "^4.13.5"
+    "hono": "^4.13.12"
   },
   "allowScripts": {
-    "workerd@1.20260811.1": true,
-    "esbuild@0.25.12": true,
+    "workerd@1.20260930.2": true,
     "esbuild@0.28.1": true
   }
 }

@@ -44,7 +44,7 @@ pas de linter.
 | [docs/agents/architecture.md](docs/agents/architecture.md) | toucher à la page, au Worker de simulation, au salon, à l'API, au stockage ou au codec. Protocoles `Order` / `News` et salon, routes, clés `localStorage`. |
 | [docs/agents/simulation.md](docs/agents/simulation.md) | modifier `engine.ts`, `materials.ts` ou `render.ts`. Tous les invariants du moteur, les usages de `life`. |
 | [docs/agents/recettes.md](docs/agents/recettes.md) | ajouter une matière, une règle, un défi, un geste, un ordre, un contrôle, un raccourci, une route, une migration. |
-| [docs/agents/rendu.md](docs/agents/rendu.md) | toucher à `screen.ts` : la chaîne grille → pixel, les textures et les quatre programmes WebGL2, l'éclairage global (*radiance cascades*) et son dimensionnement, le secours 2D. |
+| [docs/agents/rendu.md](docs/agents/rendu.md) | toucher à `screen.ts` : la chaîne grille → pixel, les textures et les quatre programmes WebGL2, l'éclairage global (*radiance cascades*) et son dimensionnement, la perte de contexte, le secours 2D. |
 | [docs/agents/performance.md](docs/agents/performance.md) | optimiser quoi que ce soit : quoi lancer selon la question, comment profiler, ce qui a déjà payé (et de combien), les pistes laissées de côté. |
 | [docs/agents/tests.md](docs/agents/tests.md) | écrire ou corriger un test, mettre à jour l'empreinte du moteur, comprendre la CI et ses budgets. |
 | [docs/navigateur.md](docs/navigateur.md) | écrire ou lancer un test dans un vrai navigateur (Playwright), installer Chromium sur une machine neuve, le reprendre dans un autre projet. |

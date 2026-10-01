@@ -56,8 +56,37 @@ try {
   assert.deepEqual(errors, [], "la page de comparaison tourne sans erreur");
 
   await page.goto(base);
-  await page.waitForFunction(() => document.querySelector<HTMLCanvasElement>("#world")!.width > 1, null, { timeout: 30_000 });
+  // Un canvas sans attributs mesure 300 × 150 : il ne quitte cette taille qu'à
+  // la première frame, qui lui donne celle de la grille (320 × 180 au départ).
+  await page.waitForFunction(() => {
+    const c = document.querySelector<HTMLCanvasElement>("#world")!;
+    return c.width !== 300 || c.height !== 150;
+  }, null, { timeout: 30_000 });
   assert.deepEqual(errors, [], "la page du jeu charge sans erreur dans la console");
+
+  // Le pilote qui redémarre, simulé par WEBGL_lose_context. Lu dès l'événement
+  // `restored`, avant toute frame : un contexte rendu part d'une image vide
+  // (0, 0, 0), et seul screen.ts peut y reposer le bac — l'air n'est pas noir.
+  const back = await page.evaluate(async () => {
+    const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
+    const gl = canvas.getContext("webgl2")!;
+    const lose = gl.getExtension("WEBGL_lose_context")!;
+    const event = (name: string) => new Promise((done) => canvas.addEventListener(name, done, { once: true }));
+    const lost = event("webglcontextlost");
+    lose.loseContext();
+    await lost;
+    // Une tâche plus loin : appelé dans la microtâche de l'événement, avant que
+    // Chromium ait fini de le distribuer, restoreContext() est ignoré.
+    await new Promise((done) => setTimeout(done));
+    const restored = event("webglcontextrestored");
+    lose.restoreContext();
+    await restored;
+    const px = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    return px.some((v, i) => i % 4 !== 3 && v > 0);
+  });
+  assert.ok(back, "après une perte du contexte WebGL, le bac est reposé");
+  assert.deepEqual(errors, [], "perdre puis retrouver le contexte WebGL ne lève rien");
 
   const beacon = page.waitForResponse((r) => r.url().endsWith("/api/error"), { timeout: 10_000 });
   await page.evaluate(() => { window.setTimeout(() => { throw new Error("essai de remontée"); }); });
@@ -65,7 +94,7 @@ try {
   assert.match(sent.request().postData() ?? "", /^page : Error: essai de remontée/, "une exception de la page part vers /api/error");
   assert.equal(sent.status(), 204, "le Worker l'accepte");
 
-  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, erreur remontée`);
+  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, contexte WebGL retrouvé, erreur remontée`);
 } finally {
   await browser.close();
   await server.close();

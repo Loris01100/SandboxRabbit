@@ -124,8 +124,14 @@ Ce qui est vérifié :
    [AGENTS.md](../AGENTS.md)). L'éclairage global (`lit`) n'existe que côté
    shader : il n'est pas comparé ;
 2. **la page du jeu charge** : le bac reçoit sa première frame (le canvas
-   `#world` prend la taille de la grille) sans aucune erreur dans la console ;
-3. **les erreurs remontent** : une exception lancée dans la page part vers
+   `#world` quitte les 300 × 150 d'un canvas vide pour la taille de la grille)
+   sans aucune erreur dans la console ;
+3. **le contexte WebGL se retrouve** : `WEBGL_lose_context` le perd puis le
+   rend, et le bac est reposé dès l'événement `webglcontextrestored`, avant
+   toute frame (src/client/screen.ts, `restartable()`). `restoreContext()`
+   s'appelle une tâche après l'événement `lost` : dans sa microtâche, Chromium
+   l'ignore. Sans `preventDefault()` sur la perte, l'onglet plante ;
+4. **les erreurs remontent** : une exception lancée dans la page part vers
    `POST /api/error` (src/client/errors.ts) et le Worker répond `204`. Vite
    affiche alors un `[Unhandled error] Error: essai de remontée` : c'est
    l'exception du test, pas une panne.

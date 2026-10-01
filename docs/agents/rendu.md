@@ -120,6 +120,19 @@ couleur (`LIGHT_GAIN` = 1,5) — le halo se voit sur le fond sombre, le gain
 change **ou** quand `detail()` change `lightWidth` (mais pas avant la première
 frame, `paint()` s'en charge).
 
+## La perte de contexte
+
+Le contexte WebGL peut se perdre (pilote qui redémarre, onglet en arrière-plan
+sur un mobile). `createScreen()` enveloppe donc `glScreen()` dans
+`restartable()` : à `webglcontextlost`, il appelle `preventDefault()` (sans quoi
+le navigateur ne rend jamais le contexte) et ne peint plus ; à
+`webglcontextrestored`, il refait un `glScreen()` neuf, lui redonne la dernière
+largeur de `detail()` et repose en entier le dernier miroir reçu. world.ts a
+continué d'y recopier les bandes pendant la perte, et un bac en pause, qui
+n'envoie plus de frame, réapparaît quand même. Tout ce que `glScreen()` monte
+(programmes, textures, cibles) doit donc pouvoir être refait de zéro : pas
+d'objet GL gardé hors de lui.
+
 ## Le secours 2D
 
 Sans WebGL2 (`getContext("webgl2")` nul — le choix est définitif, un canvas n'a
@@ -137,6 +150,5 @@ la seule différence d'aspect assumée entre les deux chemins
   flottants, le GPU arrondissait autrement 2 % des paliers.
 - `preserveDrawingBuffer: true` n'est pas décoratif : le PNG et la vidéo de
   share.ts relisent le canvas par `drawImage()` après coup.
-- `ponytail:` une perte de contexte WebGL (pilote qui redémarre) laisse le bac
-  noir jusqu'au rechargement ; et les cascades sont « à la vanille », sans la
-  correction bilinéaire des rayons.
+- `ponytail:` les cascades sont « à la vanille », sans la correction
+  bilinéaire des rayons.

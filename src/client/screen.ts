@@ -17,9 +17,9 @@
  * l'est de l'autre. `preserveDrawingBuffer` garde l'image entre deux frames —
  * le PNG et la vidéo (share.ts) la relisent par `drawImage(canvas)`.
  *
- * ponytail: une perte de contexte WebGL (pilote qui redémarre) laisse le bac
- * noir jusqu'au rechargement. Écouter `webglcontextlost` / `restored` et tout
- * remonter le jour où ça se voit.
+ * Le contexte WebGL peut se perdre (pilote qui redémarre, onglet en arrière-plan
+ * sur un mobile) : `restartable()` remonte alors programmes et textures et
+ * repose tout le bac, sans quoi il restait noir jusqu'au rechargement.
  */
 import { AIR_LEVELS, GLOW, GLOWING, Renderer, lighting, palette, type Grid, type Tint, type View } from "./sim/render.ts";
 
@@ -45,7 +45,43 @@ export interface Screen {
 /** L'écran du canvas : WebGL2 s'il le peut, sinon 2D. Un canvas n'a qu'un contexte : le choix est définitif. */
 export function createScreen(canvas: HTMLCanvasElement): Screen {
   const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true });
-  return gl ? glScreen(gl) : flatScreen(canvas);
+  return gl ? restartable(canvas, gl) : flatScreen(canvas);
+}
+
+/**
+ * `glScreen` qui survit à une perte de contexte. Perdu, tout ce qu'il a monté
+ * (programmes, textures, framebuffers) ne vaut plus rien et chaque appel GL
+ * échoue en silence — compiler un shader lèverait même : on ne peint plus.
+ * Rendu, on remonte tout et l'on repose le dernier miroir en entier. world.ts
+ * a continué d'y recopier les bandes pendant la perte : rien n'est perdu, et
+ * un bac en pause, qui n'envoie plus de frame, réapparaît quand même.
+ */
+function restartable(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Screen {
+  let inner: Screen | null = glScreen(gl);
+  let width = LIGHT_WIDTH;
+  let last: Parameters<Screen["paint"]> | null = null;
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault(); // sans ça, le navigateur ne rend jamais le contexte
+    inner = null;
+  });
+  canvas.addEventListener("webglcontextrestored", () => {
+    inner = glScreen(gl);
+    inner.detail(width);
+    if (!last) return;
+    const [grid, , , , , view, lit, tint] = last;
+    inner.paint(grid, 0, 0, grid.width, grid.height, view, lit, tint);
+  });
+  return {
+    kind: "webgl2",
+    detail(w) {
+      if (w > 0) width = w;
+      inner?.detail(w);
+    },
+    paint(...args) {
+      last = args;
+      inner?.paint(...args);
+    },
+  };
 }
 
 const VERTEX = `#version 300 es
