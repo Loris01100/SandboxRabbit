@@ -1008,6 +1008,9 @@ export class Engine {
   step(): void {
     this.parity ^= 1;
     this.rouse();
+    // La grille a changé sous le moteur (chargement, collage, monde adopté) :
+    // des héros ont pu arriver sans numéro, ou deux avec le même.
+    if (this.seek) this.enlist();
     if (this.seek || (this.chosen !== 0 && !this.piloted())) this.find();
     const tick = this.state;
     this.tickSeed = mix(tick);
@@ -2271,9 +2274,63 @@ export class Engine {
     const x = heart % this.width, y = (heart / this.width) | 0, [dx, dy] = HERO_SLOTS.name;
     if (!this.inBounds(x + dx, y + dy)) return;
     const head = this.index(x + dx, y + dy);
-    if (this.life[head] === 0) this.life[head] = 1 + (heart % 250);
+    if (this.life[head] === 0) this.enlist();
+    // Deux cent cinquante héros déjà numérotés : celui-ci vit, mais personne
+    // ne peut le désigner — `chosen` est un numéro.
+    if (this.life[head] === 0) return;
     this.chosen = this.life[head];
     this.hero = heart;
+  }
+
+  /**
+   * Un numéro par héros, et un seul. Deux héros qui portent le même sont le
+   * même pour le moteur : ils obéissent ensemble aux touches, partagent le nom
+   * qu'on leur donne, et `find()` rend l'un ou l'autre selon l'ordre du
+   * balayage. Le tirage d'avant ne regardait pas qui était déjà là — la place
+   * du cœur à la pose, un tirage au sort pour un héros venu d'une grille sans
+   * état vivant —, et une poignée de héros suffisait à en doubler deux.
+   *
+   * Deux balayages : qui porte quoi, un doublon perdant le sien (le premier du
+   * balayage le garde, pour que le piloté reste piloté), puis le premier
+   * numéro libre à partir de la place du cœur — deux héros posés loin l'un de
+   * l'autre gardent ainsi des numéros différents d'une partie à l'autre.
+   * Au-delà de 250 héros vivants, les suivants restent à 0 : ils vivent, mais
+   * n'obéissent à personne tant qu'un numéro ne se libère pas.
+   *
+   * Hors du damier — une pose, un chargement, un collage —, jamais pendant :
+   * il faut lire tout le bac, et les fils ne voient que leur part.
+   */
+  private enlist(): void {
+    // Rare : pas de table à garder d'un appel à l'autre, et rien de partagé.
+    const taken = new Uint8Array(251);
+    const w = this.width, [dx, dy] = HERO_SLOTS.name;
+    for (let i = 0; i < this.cells.length; i++) {
+      if (this.cells[i] !== HERO) continue;
+      const at = this.named(i, dx, dy, w);
+      if (at < 0) continue;
+      const n = this.life[at];
+      if (n === 0) continue;
+      if (taken[n]) this.life[at] = 0;
+      else taken[n] = 1;
+    }
+    for (let i = 0; i < this.cells.length; i++) {
+      if (this.cells[i] !== HERO) continue;
+      const at = this.named(i, dx, dy, w);
+      if (at < 0 || this.life[at] !== 0) continue;
+      for (let k = 0; k < 250; k++) {
+        const n = 1 + (i + k) % 250;
+        if (taken[n]) continue;
+        this.life[at] = n;
+        taken[n] = 1;
+        break;
+      }
+    }
+  }
+
+  /** La cellule où le héros de cœur `i` garde son numéro, -1 si elle est hors du bac. */
+  private named(i: number, dx: number, dy: number, w: number): number {
+    const x = i % w + dx, y = ((i / w) | 0) + dy;
+    return this.inBounds(x, y) ? this.index(x, y) : -1;
   }
 
   /**
@@ -2570,12 +2627,15 @@ export class Engine {
     if (hurt > 0) harm += hurt;
     else if (harm > 0 && this.rand() < MEND) harm--;
     if (harm >= HERO_HARM) { this.kill(H, x, y, 1, t > COOK ? FIRE : t < FROST ? ICE : EMPTY); return; }
-    const name = life[this.slot(x, y, S.name)] || 1 + Math.floor(this.rand() * 250);
+    // Pas de numéro tiré ici : il faudrait savoir lesquels sont pris, donc lire
+    // tout le bac, et une règle ne voit que ses quinze cellules. `enlist()` s'en
+    // charge entre deux ticks ; d'ici là le héros vit sans numéro.
+    const name = life[this.slot(x, y, S.name)];
     let age = life[this.slot(x, y, S.age)];
     if (age < 250 && this.rand() < YEAR) age++;
     let dug = life[this.slot(x, y, S.dug)], laid = life[this.slot(x, y, S.laid)];
 
-    const p = name === this.chosen ? this.pilot : 0, g = this.gravity;
+    const p = name !== 0 && name === this.chosen ? this.pilot : 0, g = this.gravity;
     const dir = (p & PILOT.right ? 1 : 0) - (p & PILOT.left ? 1 : 0);
     let face = this.life[i] & FACING_LEFT ? -1 : 1;
     if (dir !== 0) face = dir;

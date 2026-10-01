@@ -1625,6 +1625,30 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(fiche(nommé, HERO_SLOTS.name), numéro, "son corps emporte sa fiche quand il marche");
   assert.ok(fiche(nommé, HERO_SLOTS.dug) > 0, "il compte ce qu'il creuse");
   assert.ok(heroName(nommé, numéro).length > 0, "son nom d'origine vient de la liste");
+
+  // Deux héros ne partagent pas de numéro : `chosen` en est un, ils obéiraient
+  // ensemble. Le tirage d'avant le prenait de la place du cœur, et deux héros
+  // dont les index sont distants de 250 — ici une marche de quatre rangées —
+  // tombaient tous les deux sur le 1.
+  const paire = new Engine(W, H, 31);
+  paire.rect(0, SOL, W - 1, H - 1, STONE);
+  paire.rect(5, SOL - 4, 15, SOL - 4, STONE);
+  assert.equal(paire.spawnHero(20, SOL - 2), 2000, "un héros sur le sol");
+  assert.equal(paire.spawnHero(10, SOL - 6), 1750, "un autre sur la marche, 250 cellules plus tôt");
+  paire.step();
+  const numéros = [...paire.cells].flatMap((id, at) =>
+    id === HERO ? [paire.life[paire.index(at % W + HERO_SLOTS.name[0], ((at / W) | 0) + HERO_SLOTS.name[1])]] : []);
+  assert.equal(new Set(numéros).size, 2, `deux numéros distincts (${numéros})`);
+  assert.ok(!numéros.includes(0), "et aucun héros sans numéro");
+
+  // Un monde chargé sans état vivant arrive sans numéros : le moteur les rend
+  // au premier tick (`seek`), sinon plus personne n'obéit aux touches.
+  paire.life.fill(0);
+  paire.adopt(paire.cells.slice());
+  paire.step();
+  const rendus = [...paire.cells].flatMap((id, at) =>
+    id === HERO ? [paire.life[paire.index(at % W + HERO_SLOTS.name[0], ((at / W) | 0) + HERO_SLOTS.name[1])]] : []);
+  assert.ok(!rendus.includes(0) && new Set(rendus).size === 2, `renumérotés, toujours distincts (${rendus})`);
   applyGesture(nommé, { t: "name", id: numéro, name: "  Robert le Lapin des Bois  " });
   assert.equal(heroName(nommé, numéro), "Robert le Lapin des", "renommé, sans blancs autour, 20 caractères au plus");
   applyGesture(nommé, { t: "name", id: 999, name: "Pirate" });

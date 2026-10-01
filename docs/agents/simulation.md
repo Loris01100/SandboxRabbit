@@ -602,10 +602,21 @@ les autres attendent debout, mais vivent (chute, dégâts, âge).
 - Son **nom** n'est pas dans la grille : le numéro en choisit un dans `NAMES`
   (gestures.ts), sauf nom donné par le geste `name`, rangé dans
   `engine.names` (que le moteur ne lit pas) et sauvé en 5ᵉ bloc du codec.
+- **Son numéro est unique** (`enlist()`). `chosen` *est* un numéro : deux héros
+  qui le partagent obéissent ensemble aux touches, portent le même nom et
+  `find()` rend l'un ou l'autre. `enlist()` balaie le bac deux fois — qui porte
+  quoi, un doublon perdant le sien (le premier du balayage le garde, pour que
+  le piloté reste piloté), puis le premier numéro libre à partir de la place
+  du cœur, sans `rand()` : `terrain()` n'a pas le droit d'en consommer. Il
+  tourne **hors du damier** (il lit tout le bac, un fil ne voit que sa part) :
+  à la pose (`pick()`) et en tête de `step()` quand `seek` est levé. Une règle
+  ne peut donc pas en tirer un : un héros né pendant le damier (un cœur posé
+  par `set()` qui se refait un corps) vit sans numéro — il n'obéit à personne,
+  `name !== 0` le garde — jusqu'au prochain `enlist()`. Au-delà de **250 héros
+  vivants**, les suivants restent à 0 pour la même raison.
 - `engine.chosen` ne change **qu'entre deux ticks** — il est publié aux fils
   (`PARAM.chosen`) : héros posé par `paint` / `rect` / `spawnHero` (`pick()`,
-  qui lui donne un numéro tiré de sa place s'il n'en a pas, sans `rand()` :
-  `terrain()` n'a pas le droit d'en consommer), geste `hero` (`nextHero()`,
+  qui le numérote s'il n'en a pas), geste `hero` (`nextHero()`,
   suivant dans l'ordre de la grille), ou `find()` en tête de `step()`. Celui-ci
   retrouve le piloté **par son numéro** quand la grille a été remplacée
   (`seek`, levé par `adopt` et `paste` : `hero`, un index, ne voyage ni avec
