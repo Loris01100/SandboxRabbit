@@ -2562,7 +2562,7 @@ export class Engine {
     if (whole < H.id.length) { this.maim(H, x, y, 1); return; }
     const { life } = this, S = HERO_SLOTS;
     const t = this.temp[i];
-    const head = KIND[this.get(x, y - 3)] === KINDS.liquid;
+    const head = this.submerged(x, y);
     const hurt = (t > COOK || t < FROST ? SCALD : 0) + (head ? CHOKE : 0);
     let harm = life[this.slot(x, y, S.harm)];
     if (hurt > 0) harm += hurt;
@@ -2610,6 +2610,24 @@ export class Engine {
     life[this.slot(cx, cy, S.dug)] = Math.min(250, dug);
     life[this.slot(cx, cy, S.laid)] = Math.min(250, laid);
     if (name === this.chosen) this.hero = at;
+  }
+
+  /**
+   * La tête du héros de cœur (x, y) est-elle sous l'eau ? La cellule juste
+   * au-dessus ne suffit pas : des héros empilés (un pilier de spawns, une
+   * colonne qui coule ensemble) n'y voient que les jambes de celui du dessus,
+   * jamais de liquide — ceux du dessous ne se noyaient jamais. On remonte donc
+   * à travers les créatures jusqu'à la première cellule qui dise ce qu'il
+   * respire, sans dépasser les 15 cellules que le damier garantit (trois héros
+   * de plus au-dessus). Enseveli plus profond que ça, on tranche sur les côtés
+   * de la tête : le liquide qui l'entoure dit la même chose que celui du dessus.
+   */
+  private submerged(x: number, y: number): boolean {
+    for (let k = 3; k <= 15; k++) {
+      const id = this.get(x, y - k);
+      if (!CREATURE[id]) return KIND[id] === KINDS.liquid;
+    }
+    return KIND[this.get(x - 2, y - 2)] === KINDS.liquid || KIND[this.get(x + 2, y - 2)] === KINDS.liquid;
   }
 
   /** La cellule du corps du héros de cœur (x, y) qui garde une donnée de `HERO_SLOTS`. Corps entier : dans la grille. */

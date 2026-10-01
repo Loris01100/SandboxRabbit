@@ -562,12 +562,18 @@ les autres attendent debout, mais vivent (chute, dégâts, âge).
   l'enregistre dans le rejeu et le relaie à l'hôte d'un salon. Il figure aussi
   dans la `Scene` du rejeu, pour un enregistrement lancé touche enfoncée.
 - Ordre d'un tick : corps entier, dégâts — `SCALD` par tick au-delà de
-  `COOK` ou sous `FROST`, `CHOKE` la tête sous un liquide, sinon un de guéri
-  avec la chance `MEND` ; mort à `HERO_HARM`, en feu, en glace ou noyé —,
+  `COOK` ou sous `FROST`, `CHOKE` la tête sous un liquide (`submerged()`),
+  sinon un de guéri avec la chance `MEND` ; mort à `HERO_HARM`, en feu, en glace ou noyé —,
   numéro tiré s'il n'en a pas, un an avec la chance `YEAR` (une journée du
   cycle, 240 s), creuser, puis un mouvement vertical — saut (`JUMP` ticks
   de montée), nage (saut tenu dans un liquide), chute (lente dans un liquide,
   `SINK`) — et un pas de côté (`STRIDE`), qui grimpe une marche d'une cellule.
+- `submerged()` ne regarde pas que la cellule au-dessus de la tête : elle
+  remonte à travers les créatures (jusqu'à 15 cellules, la portée que le
+  damier garantit) jusqu'à la première qui dise ce qu'il respire. Sans ça, des
+  héros empilés — un pilier de spawns, une colonne qui coule ensemble — ne
+  voyaient au-dessus de leur tête que le corps du voisin : seul celui du haut
+  se noyait. Enseveli plus profond, on tranche sur les côtés de la tête.
 - Contrairement au lapin il **marche dans l'eau** (`relocate(…, wet)` partout)
   : plus dense qu'elle, il y coule et nage en sautant.
 - Il creuse le solide (statique ou poudre) par `become()`, sauf `METAL` et les

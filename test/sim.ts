@@ -1565,6 +1565,23 @@ function top(e: Engine, id: MaterialId): number {
   for (let t = 0; t < HERO_HARM; t++) noyé.step();
   assert.equal(count(noyé, HERO), 0, "mais pas indéfiniment : il se noie");
 
+  // Empilés, le héros du dessous n'a au-dessus de la tête que le corps de celui
+  // du dessus : sans la remontée à travers les créatures, il respirait au fond
+  // de l'eau pendant que l'autre se noyait.
+  const pile = new Engine(W, H, 34);
+  pile.rect(0, SOL, W - 1, H - 1, STONE);
+  pile.rect(0, 5, W - 1, SOL - 1, WATER);
+  pile.paint(10, 24, 1, HERO, 1, true);
+  pile.paint(10, 20, 1, HERO, 1, true);
+  assert.equal(count(pile, HERO), 2, "deux héros empilés en pleine eau");
+  for (let t = 0; t < 60; t++) pile.step();
+  const coeurs = [...pile.cells].flatMap((id, at) => (id === HERO ? [at] : []));
+  assert.equal(coeurs.length, 2, "les deux tiennent encore après une seconde");
+  for (const at of coeurs) {
+    const dégâts = pile.life[at + HERO_SLOTS.harm[0] + HERO_SLOTS.harm[1] * W];
+    assert.ok(dégâts > 40, "chacun des deux manque d'air, pas seulement celui du dessus");
+  }
+
   const nommé = plaine();
   tenir(nommé, 0, 1);
   const numéro = fiche(nommé, HERO_SLOTS.name);
