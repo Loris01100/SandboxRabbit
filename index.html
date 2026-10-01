@@ -317,6 +317,33 @@
           <input id="volume" type="range" min="0" max="100" step="5" value="50" />
           <output id="volume-value">50 %</output>
         </label>
+        <!-- Chaque famille de sons sous le volume général : `data-mix` la nomme
+             (MIX de sound.ts), settings.ts câble tous les curseurs d'un coup. -->
+        <label class="row">
+          <span>Explosions</span>
+          <input id="mix-booms" data-mix="booms" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
+        <label class="row">
+          <span>Tonnerre</span>
+          <input id="mix-thunder" data-mix="thunder" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
+        <label class="row">
+          <span>Feu</span>
+          <input id="mix-fire" data-mix="fire" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
+        <label class="row">
+          <span>Lave</span>
+          <input id="mix-lava" data-mix="lava" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
+        <label class="row">
+          <span>Pluie</span>
+          <input id="mix-rain" data-mix="rain" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
         <p class="hint">Le son démarre au premier clic ou à la première touche : les navigateurs refusent de jouer avant.</p>
       </section>
       <!-- Rempli par main.ts (listBindings) depuis KEY_GROUPS d'ui.ts : un

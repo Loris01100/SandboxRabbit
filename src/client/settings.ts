@@ -1,7 +1,7 @@
 import { MATERIALS, type MaterialId } from "./sim/materials.ts";
 import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
 import { current, paletteEl, select } from "./palette.ts";
-import { soundOn, soundVolume } from "./audio.ts";
+import { soundMix, soundOn, soundVolume } from "./audio.ts";
 import { stored, write } from "./ui.ts";
 import { wholePixels, zoomInput } from "./view.ts";
 import { WIDTH, airView, hour, light, lightDetail, limitFps, resize, screen, set } from "./world.ts";
@@ -130,6 +130,15 @@ volumeInput.addEventListener("input", () => {
   soundVolume(Number(volumeInput.value) / 100);
   volumeValue.value = `${volumeInput.value} %`;
 });
+// Un curseur par famille de sons (explosions, tonnerre, feu…), nommée par son `data-mix`.
+const mixInputs = [...document.querySelectorAll<HTMLInputElement>("[data-mix]")];
+for (const input of mixInputs) {
+  const out = input.nextElementSibling as HTMLOutputElement;
+  input.addEventListener("input", () => {
+    soundMix(input.dataset.mix!, Number(input.value) / 100);
+    out.value = `${input.value} %`;
+  });
+}
 
 // Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
 // que de dupliquer les handlers ci-dessus.
@@ -144,7 +153,7 @@ const SETTINGS = "sandbox-rabbit:reglages";
 const SAVED = [
   brushInput, speedInput, windInput, ambientInput, sizeInput,
   toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, airmapInput, lightingInput, hourInput,
-  fpsCapInput, lightDetailInput, wholeInput, soundInput, volumeInput,
+  fpsCapInput, lightDetailInput, wholeInput, soundInput, volumeInput, ...mixInputs,
 ];
 const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";

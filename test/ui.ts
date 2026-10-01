@@ -7,7 +7,8 @@ import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, framePeriod, go
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 import { REPORT, reporter } from "../src/client/errors.ts";
-import { boomShape, humLevel, panOf, rainLevel } from "../src/client/sound.ts";
+import { MIX, boomShape, humLevel, panOf, rainLevel } from "../src/client/sound.ts";
+import { readFileSync } from "node:fs";
 
 // Objectifs : ce qui vient d'un autre visiteur ne passe pas sans contrôle.
 {
@@ -183,6 +184,11 @@ import { boomShape, humLevel, panOf, rainLevel } from "../src/client/sound.ts";
   assert.equal(panOf(0, 320), -0.8);
   assert.equal(panOf(319, 320), 0.8);
   assert.equal(panOf(5, 1), 0, "un bac d'une colonne reste au centre");
+  // Un curseur par famille, ni plus ni moins : sans le sien, une famille ne se
+  // baisse plus ; un curseur de trop ne réglerait rien (audio.ts l'ignore).
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const curseurs = [...html.matchAll(/data-mix="(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(curseurs.sort(), [...MIX].sort(), "chaque famille de sons a son curseur dans l'onglet Son");
 }
 
 console.log("ok — panneau conforme");

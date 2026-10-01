@@ -17,6 +17,10 @@
  */
 import type { Heard, Hum } from "./sim/sandbox.ts";
 
+/** Les familles de sons, chacune avec son curseur dans l'onglet Son (`data-mix` d'index.html). */
+export const MIX = ["booms", "thunder", "fire", "lava", "rain"] as const;
+export type Mix = Record<(typeof MIX)[number], number>;
+
 /** Flammes à partir desquelles le feu crépite à plein volume : un bel incendie de forêt. */
 const FULL_FIRE = 3000;
 /** Pareil pour la lave : une coulée qui remplit le bas d'un 320×180. */
@@ -70,6 +74,8 @@ let enabled = true;
 let volume = 0.5;
 let playing = 0;
 let hum: Hum = { fire: 0, lava: 0, rain: 0 };
+/** Volume de chaque famille, 0 à 1, par-dessus le volume général. */
+let mix: Mix = { booms: 1, thunder: 1, fire: 1, lava: 1, rain: 1 };
 
 /** Un tampon de `seconds` secondes rempli par `fill(i)` (mono). */
 function buffer(c: AudioContext, seconds: number, fill: (i: number, rate: number) => number): AudioBuffer {
@@ -143,19 +149,26 @@ export function soundVolume(v: number): void {
   if (ctx && master) master.gain.setTargetAtTime(v, ctx.currentTime, 0.05);
 }
 
+/** Volume de chaque famille de sons, 0 à 1 : les fonds sonores suivent aussitôt, les coups au suivant. */
+export function soundMix(next: Mix): void {
+  mix = { ...next };
+  setHum(hum);
+}
+
 /** Les fonds sonores, mis à jour deux fois par seconde (stats) : le fondu de 0,3 s couvre l'écart. */
 export function setHum(next: Hum): void {
   hum = next;
   if (!ctx || !fireGain || !lavaGain || !rainGain) return;
   const t = ctx.currentTime;
-  fireGain.gain.setTargetAtTime(0.5 * humLevel(next.fire, FULL_FIRE), t, 0.3);
-  lavaGain.gain.setTargetAtTime(0.9 * humLevel(next.lava, FULL_LAVA), t, 0.3);
-  rainGain.gain.setTargetAtTime(0.18 * rainLevel(next.rain), t, 0.6);
+  fireGain.gain.setTargetAtTime(0.5 * mix.fire * humLevel(next.fire, FULL_FIRE), t, 0.3);
+  lavaGain.gain.setTargetAtTime(0.9 * mix.lava * humLevel(next.lava, FULL_LAVA), t, 0.3);
+  rainGain.gain.setTargetAtTime(0.18 * mix.rain * rainLevel(next.rain), t, 0.6);
 }
 
 /** Un coup de bruit qui s'éteint : explosion ou tonnerre. */
 function burst(gain: number, seconds: number, cutoff: number, floor: number, pan: number, delay = 0): void {
-  if (!ctx || !master || !white || playing >= VOICES) return;
+  // Coupé par son curseur : rien à jouer (et une rampe exponentielle ne part pas de zéro).
+  if (!ctx || !master || !white || playing >= VOICES || gain < 0.001) return;
   const t = ctx.currentTime + delay;
   const src = ctx.createBufferSource();
   src.buffer = white;
@@ -183,12 +196,12 @@ export function hear(heard: Heard | null, width: number): void {
   if (!heard || !ctx || !enabled || ctx.state !== "running") return;
   if (heard.booms > 0) {
     const { gain, seconds, cutoff } = boomShape(heard.booms, heard.loudest);
-    burst(gain, seconds, cutoff, 40, panOf(heard.at, width));
+    burst(gain * mix.booms, seconds, cutoff, 40, panOf(heard.at, width));
   }
   if (heard.bolts > 0) {
     const pan = panOf(heard.boltAt, width);
     // Le claquement de l'éclair, puis le roulement qui arrive un peu après.
-    burst(0.5, 0.15, 6000, 800, pan);
-    burst(0.7, 2.8, 500, 30, pan, 0.25 + Math.random() * 0.4);
+    burst(0.5 * mix.thunder, 0.15, 6000, 800, pan);
+    burst(0.7 * mix.thunder, 2.8, 500, 30, pan, 0.25 + Math.random() * 0.4);
   }
 }

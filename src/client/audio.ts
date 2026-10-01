@@ -8,12 +8,14 @@
 import type { Heard, Hum } from "./sim/sandbox.ts";
 
 type Sound = typeof import("./sound.ts");
+type Mix = import("./sound.ts").Mix;
 
 let sound: Sound | null = null;
 let loading = false;
 let on = true;
 let level = 0.5;
 let hum: Hum = { fire: 0, lava: 0, rain: 0 };
+let mix: Mix = { booms: 1, thunder: 1, fire: 1, lava: 1, rain: 1 };
 
 /** À appeler une fois, depuis main.ts. Chaque geste relance aussi un contexte que le navigateur aurait suspendu. */
 export function initSound(): void {
@@ -25,6 +27,7 @@ export function initSound(): void {
     void import("./sound.ts").then((m) => {
       sound = m;
       m.soundVolume(level);
+      m.soundMix(mix);
       m.setHum(hum);
       m.soundOn(on);
     });
@@ -42,6 +45,13 @@ export function soundOn(v: boolean): void {
 export function soundVolume(v: number): void {
   level = v;
   sound?.soundVolume(v);
+}
+
+/** Volume d'une famille de sons (`MIX` de sound.ts), 0 à 1. Une famille inconnue est ignorée. */
+export function soundMix(family: string, v: number): void {
+  if (!(family in mix)) return;
+  mix = { ...mix, [family]: v };
+  sound?.soundMix(mix);
 }
 
 /** Le fond sonore, relevé avec les stats du bac. */
