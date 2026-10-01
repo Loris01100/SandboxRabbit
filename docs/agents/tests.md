@@ -29,6 +29,9 @@ TypeScript directement.
 
 ## Choisir une direction
 
+Avant d'ouvrir une piste, lire [performance.md](performance.md) : ce qui a déjà
+payé, et pourquoi le GPU et Rust sont restés des prototypes.
+
 Les grands mondes animés butent sur un seul cœur de processeur. `npm run
 directions` ([test/directions.ts](../../test/directions.ts)) mesure, sur la
 machine qui le lance, ce que rapporterait chaque piste — il n'échoue jamais et

@@ -93,6 +93,9 @@ flowchart LR
 3. **Le Worker Cloudflare** sert le site statique **et** l'API — il n'y a pas
    de projet Pages séparé.
 
+Le détail du coloriage de la page — textures, programmes WebGL2, éclairage
+global — est dans [rendu.md](rendu.md).
+
 Conséquence clé : **aucun module de la page n'importe l'`Engine`**. Tout ce
 qui a besoin de la grille passe par [world.ts](../../src/client/world.ts).
 
@@ -116,6 +119,9 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | `rec` / `play` `{on}` | Enregistrement / rejeu. Le rejeu obéit à la pause ; à sa fin, le moteur reprend les réglages du panneau (`knobs`) |
 | `film` `{ask}` | Répond par `reply` : le dernier rejeu enregistré ou importé (`Recording`), ou `null` (`askFilm()` de world.ts) — ce qu'exportent lien et fichier |
 | `reel` `{rec}` | Remplace le rejeu du bac par un rejeu importé, **déjà passé par `vet()`** côté page ; arrête le rejeu en cours. Refusé à un invité |
+| `host` `{on}` | Devenir l'hôte d'un salon (`on` faux : cesser de diffuser). Arrête le rejeu, repart de la grille présente dans un `Recorder` neuf et répond par un `start` |
+| `follow` `{rec}` | Suivre l'hôte : la partie reçue devient un `Player` après `vet()`. `null` = ne plus suivre, et les réglages du panneau rentrent au moteur |
+| `turn` `{ticks,beats,sums}` | La suite de la partie de l'hôte, allongée dans le `Player` (`feed()`). Écartée si on ne suit personne, ou si `vetBeats()` la refuse |
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
@@ -126,6 +132,9 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | `say` | à la demande | message pour la barre de statut |
 | `won` | à la demande | le défi en cours est réussi (vérifié toutes les 500 ms dans le Worker) |
 | `rec` / `play` | à la demande | fin d'enregistrement, début/fin de rejeu |
+| `start` | quand l'hôte (re)part | `{rec}` : sa grille entière et l'état de son tirage, à diffuser aux invités |
+| `turn` | 20 × / s chez l'hôte, tant que le bac avance ou qu'il y a des gestes | `{ticks, beats, sums}` : jusqu'où il est allé, ce qui s'est passé, et une empreinte par seconde |
+| `desync` | une fois par divergence | l'invité n'a pas retrouvé l'empreinte de l'hôte (ou son enregistrement local a changé de taille) : room.ts en fait un `sync` |
 
 Questions-réponses : `askLoad()` et `askClip()` numérotent leur ordre (`ask`) et
 attendent la `reply` qui porte le même numéro. C'est le seul moyen d'`await`
@@ -260,6 +269,52 @@ de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixel
 | `turn` | hôte → invités | `{ticks, beats, sums}` toutes les 50 ms tant que le bac avance ou qu'il y a des gestes |
 | `do` | invité → hôte | `{g: Gesture}` ; l'hôte l'applique via le même chemin que ses propres gestes |
 | `sync` | invité → hôte | demande un nouveau `start` (empreinte différente, changement de taille) |
+
+### Le déroulé d'une partie
+
+Qui parle quand, et avec quelles constantes (toutes dans sandbox.ts, sauf
+`RESYNC` et le délai de reconnexion, dans room.ts côté page) :
+
+1. **Entrée.** `join()` ouvre le WebSocket et le DO répond `role`. Hôte :
+   `order({t:"follow", rec:null})` (on ne suit plus personne) puis `restart()`.
+   Invité : on attend un `start`.
+2. **`restart()`** envoie `order({t:"host", on: peers >= 2})` : **seul, l'hôte ne
+   diffuse rien**. Il est rappelé à chaque `peers` qui monte (un arrivant ne
+   connaît que l'état présent) et quand on retombe sous deux.
+3. **`host(true)`** (sandbox.ts) arrête le rejeu, ouvre un `Recorder` sur la
+   grille présente et répond par la nouvelle `start`, que room.ts relaie.
+4. **La suite.** À chaque frame, `frame()` compte les millisecondes ; toutes les
+   `TURN` = 50 ms, si le compteur de ticks a bougé ou qu'il y a des gestes, il
+   envoie `turn` avec ce que le `Recorder` a accumulé (`drain()`, qui le vide) et
+   les empreintes en attente. Un tick sur `SUM` = 60 (une seconde à vitesse
+   normale) ajoute une empreinte FNV de `cells` à `sums`.
+5. **Chez l'invité**, `catchUp()` avance d'**un tiers du retard** par frame,
+   `CATCH_UP` = 32 ticks au plus : régulier quand les messages arrivent par
+   paquets de trois frames, et l'écart se stabilise tout seul quelle que soit la
+   vitesse de l'hôte. Avant chaque pas, si une empreinte est attendue à ce tick,
+   il la compare — une seule fois : `lost` empêche d'inonder l'hôte de demandes.
+   Un invité en retard reste en retard sans rien perdre, la partie l'attend.
+6. **Divergence.** `desync` → room.ts envoie `sync` → l'hôte **diffère** la
+   demande jusqu'à `RESYNC` = 2 s après son dernier départ, puis `restart()`.
+   Différée et non jetée : sinon un invité qui divergerait sans cesse resterait
+   figé. Une seule demande à la fois (`resync`).
+7. **Taille.** Un `start` dont la taille n'est pas la nôtre déclenche le rappel
+   `size()` (le sélecteur du panneau) et **la partie est ignorée** : le bac
+   recréé, un nouveau `sync` ramènera un départ à la bonne taille.
+8. **Départ de l'hôte.** Le DO promeut le plus ancien restant, qui reçoit `role`
+   et repart de **sa** grille — la même, au retard près. Côté page, `leaveRoom()`
+   rend la main au joueur (`onRole(true)`) : sans ça, un invité qui part restait
+   en pause.
+9. **Coupure.** Une connexion **établie** (`opened`) qui tombe sans « Quitter »
+   (`quitting`) est retentée une fois après 1 s. Une tentative qui n'ouvre pas ne
+   relance rien : pas de boucle contre un salon plein ou un Worker à terre. Le
+   drapeau `failed` garde « Salon injoignable » d'être effacé par « Salon
+   quitté », puisqu'un échec déclenche `error` **puis** `close`.
+
+Ce que coûte une partie : un départ 2 à 9 Ko, une suite ~50 octets. Un message
+au-delà de `HEAVY` = 200 000 caractères (le plafond du DO, `MAX` de relay.ts)
+n'est pas envoyé — le DO le jetterait sans rien dire — et l'hôte le signale dans
+la barre de statut.
 
 Ce qui arrive d'un pair n'est pas de confiance : `known()` écarte les ids de
 matière inconnus, `disc()` borne les rayons, `applyGesture` refuse un `clip`

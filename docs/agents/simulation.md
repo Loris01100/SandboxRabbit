@@ -112,6 +112,59 @@ Le pool s'attache quand ses fils sont prêts (`bind()`), et se rattache à
 chaque nouveau moteur (changement de taille) ; en attendant, le moteur fait
 tout seul. Une passe de moins de quatre travaux ne réveille personne.
 
+### La mécanique, de près
+
+Tout tient dans deux tampons partagés, sans un `postMessage` par passe — il y en
+a sept par tick.
+
+- **La mémoire** (`Memory`) : la taille du bac et dix-huit tampons nommés, en
+  `SharedArrayBuffer` quand la plateforme le permet (Node, page isolée),
+  en `ArrayBuffer` sinon. Un fil auxiliaire fait
+  `new Engine(w, h, 1, memory)` : une **vue** sur la même mémoire, qui ne
+  construit rien (ni grain, ni `stir` rempli) et ne fait que les travaux qu'on
+  lui confie.
+- **`control`** (`Int32Array`, cases de `CTL`), lue et écrite par `Atomics`
+  seulement : `gen` (génération de passe, c'est là qu'on attend), `job` (le genre
+  de travail, `JOB`), `count` (combien), `next` (prochain travail à prendre),
+  `done` (fils qui ont fini), `later` et `held` (compteurs des explosions et des
+  cellules différées), `hero` (le cœur du héros piloté), `gust` (« il y a de la
+  pression quelque part »).
+- **`params`** (`Float64Array`, cases de `PARAM`) : ce que le coordinateur
+  **publie** avant le tick (`publish()`) et qu'un fil **relit** avant chaque
+  travail (`sync()`) — parité, graine du tick, gravité, vent, ambiante, matière
+  des sources, commandes du héros, héros choisi, lequel des deux tampons de
+  température et de pression est courant, et `gusty`. `sync()` écrit les champs
+  directement, **sans passer par les accesseurs** : changer la gravité par
+  l'accesseur réveillerait tout le bac, et ce n'est pas à un auxiliaire de le
+  faire.
+- **`jobs`** (`Int32Array`, un par bloc) : la liste du travail de la passe
+  courante, remplie par le coordinateur (les blocs de la phase qui ont un bloc de
+  veille éveillé, ou les blocs de veille éveillés pour la chaleur et la
+  pression). `run(kind, count)` en fait les `count` premiers.
+
+Une passe, dans l'ordre : `signal()` pose `job`, `count`, remet `next` et `done`
+à zéro, incrémente `gen` et `Atomics.notify` ; chaque fil sort de son
+`Atomics.wait(gen)`, `sync()`, puis **prend les travaux un à un** par
+`Atomics.add(next, 1)` jusqu'à épuisement (`take()`) ; il incrémente `done` et le
+signale. Le coordinateur prend sa part lui aussi, puis attend que `done` atteigne
+le nombre de fils. Prendre les travaux un à un plutôt que par tranches égales
+évite qu'un bloc coûteux (une explosion, un nid de nanites) ne retienne les
+autres.
+
+Les sept genres de travaux (`JOB`) : `cells` (un bloc du damier), `heat`,
+`diffuse`, `settle` (les trois passes de la chaleur), `air` et `gust` (la
+pression, `gust` au dernier sous-pas), `hush` (l'endormissement des blocs).
+`stop` n'est pas un travail : c'est le signal qui fait sortir un fil de sa
+boucle.
+
+`bind(engine)` sert un nouveau moteur (bac neuf, autre taille) : l'ancien est
+lâché (`JOB.stop`), les fils reçoivent la mémoire du nouveau avec un numéro de
+**génération**, et le pool ne s'attache (`engine.pool = this`) qu'une fois tous
+les « prêt » de cette génération revenus — en attendant, le moteur fait tout
+lui-même, au même résultat. Un fil qui reçoit une mémoire déjà lâchée (deux
+`bind()` coup sur coup) le voit d'emblée et rend la main : sans ça il attendait
+pour toujours une passe qui ne viendrait plus.
+
 ## Blocs de veille
 
 La grille est découpée en blocs de 16×16 (`CHUNK`). Un bloc où rien ne bouge
@@ -270,6 +323,8 @@ Invariants :
     les scènes de lave.
 
 ### Performance du chemin chaud
+
+Ce qui a déjà été optimisé, et de combien : [performance.md](performance.md).
 
 Ce que la boucle lit par cellule et par tick est **dérivé** de `MATERIALS` au
 chargement, en tableaux typés indexés par id : `KIND`, `DENSITY`, `HEAT`,
@@ -550,6 +605,10 @@ les autres attendent debout, mais vivent (chute, dégâts, âge).
 - `terrain()` (terrain.ts) en pose un au sec, au plus près du centre.
 
 ## Rendu
+
+Les **règles d'aspect** ci-dessous valent pour les deux coloriages ; la
+mécanique de celui de la page (textures, programmes, éclairage global) est dans
+[rendu.md](rendu.md).
 
 1 cellule = 1 pixel, mise à l'échelle par CSS `image-rendering: pixelated`.
 **Pas de dessin par cellule.** Le Worker ne colorie plus : c'était 6 ms par
