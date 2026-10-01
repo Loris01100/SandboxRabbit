@@ -83,6 +83,7 @@ src/client/
     engine.ts            l'automate cellulaire (tableaux plats)
     materials.ts         MATERIALS, CATEGORIES, PALETTE, SHORTCUTS
     render.ts            bandes (Tracker), Renderer : matière, vue thermique, vue pression ; vignettes
+    flatlight.ts         éclairage global du secours 2D, chargé à la demande par screen.ts      (pur)
     codec.ts             RLE + base64 url (format des mondes sauvegardés)
     libm.ts              sin, cos, atan, atan2, exp, log déterministes (copie de musl)   (pur)
 src/worker/
@@ -164,7 +165,11 @@ reproductible, ids de matière gelés, CSP, cloisonnement de la page,
   pas de dessin par cellule.
 - Le coloriage existe en deux copies : le shader de screen.ts et `Renderer`
   de render.ts (secours sans WebGL2, tests). Un aspect se change des deux
-  côtés ; `npm run browser` compare les deux.
+  côtés ; `npm run browser` compare les deux. L'éclairage aussi a deux
+  chemins (cascades du shader, `FlatLight` de sim/flatlight.ts) : mêmes
+  entrées (`lighting()`, `RED_HOT`) et même mélange, mais ils se ressemblent
+  sans coïncider et ne sont pas comparés — une matière lumineuse se règle
+  dans `lighting()`, pour les deux.
 - Pas de `style=` ni de `<script>` en ligne : la CSP les bloque.
 - Données externes (galerie, lien, pair de salon) : `engine.adopt()` et
   `known()` écartent les ids inconnus, `disc()` borne les rayons,

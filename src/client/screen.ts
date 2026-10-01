@@ -21,15 +21,17 @@
  * sur un mobile) : `restartable()` remonte alors programmes et textures et
  * repose tout le bac, sans quoi il restait noir jusqu'au rechargement.
  */
-import { AIR_LEVELS, GLOW, GLOWING, Renderer, lighting, palette, type Grid, type Tint, type View } from "./sim/render.ts";
+import type { FlatLight } from "./sim/flatlight.ts";
+import { AIR_LEVELS, GLOW, GLOWING, LIGHT_GAIN, LIGHT_HALO, RED_HOT, Renderer, lighting, palette, type Grid, type Tint, type View } from "./sim/render.ts";
 
 export interface Screen {
   /** « webgl2 » ou « 2d » : ce qui colorie, pour le dire à qui le demande. */
   readonly kind: "webgl2" | "2d";
   /**
    * Repose le rectangle (x0, y0)–(x1, y1) exclus de `grid` ; une autre grille
-   * (nouvelle taille) repart d'une image entière. `lit` : éclairage global,
-   * WebGL2 seulement — il recalcule tout le bac, quel que soit le rectangle.
+   * (nouvelle taille) repart d'une image entière. `lit` : éclairage global —
+   * il recalcule tout le bac, quel que soit le rectangle (en 2D, `FlatLight`,
+   * au plus toutes les `relight()` ms).
    * `tint` : l'heure de la journée (`HOURS` de render.ts). `view` : matière,
    * vue thermique ou vue pression — les deux dernières sans éclairage.
    */
@@ -37,7 +39,7 @@ export interface Screen {
   /**
    * Largeur maximale de la grille de lumière, en texels (`LIGHT_WIDTH` par
    * défaut) : la moitié, c'est quatre fois moins de texels à éclairer, pour une
-   * carte graphique modeste. Sans effet en 2D, qui n'éclaire pas.
+   * carte graphique modeste. Sans effet en 2D, dont la grille est fixe (`FLAT_LIGHT`).
    */
   detail(width: number): void;
 }
@@ -89,11 +91,6 @@ void main() {
   vec2 v = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
   gl_Position = vec4(v * 2.0 - 1.0, 0.0, 1.0);
 }`;
-
-/** Éclat de la lumière reçue, ajouté tel quel : le halo sur le fond sombre. */
-const LIGHT_HALO = 160;
-/** Éclat de la lumière reçue, proportionnel à la couleur : les surfaces éclairées. */
-const LIGHT_GAIN = 1.5;
 
 const FRAGMENT = `#version 300 es
 precision highp float;
@@ -218,7 +215,7 @@ void main() {
     int id = int(texelFetch(cells, p, 0).r);
     vec4 m = vec4(texelFetch(table, ivec2(id, 0), 0)) / 255.0;
     float t = texelFetch(temp, p, 0).r;
-    if (id != 0 && t > 450.0) m.rgb = max(m.rgb, vec3(1.0, 0.45, 0.1) * min(1.0, (t - 450.0) / 700.0));
+    if (id != 0 && t > ${RED_HOT.toFixed(1)}) m.rgb = max(m.rgb, vec3(1.0, 0.45, 0.1) * min(1.0, (t - ${RED_HOT.toFixed(1)}) / 700.0));
     sum += vec4(m.rgb * m.a, m.a);
     n += 1.0;
   }
@@ -513,23 +510,59 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   };
 }
 
-/** Le secours sans WebGL2 : `Renderer` sur le miroir, puis `putImageData` du rectangle changé. */
+/**
+ * Intervalle minimal entre deux éclairages du secours 2D, en ms, selon la
+ * taille du bac : la lumière n'est pas locale, chaque éclairage la recalcule
+ * (~5 ms) et recolorie tout le bac. 50 ms jusqu'en 640×360 — vingt fois par
+ * seconde, une flamme vacille encore —, puis de plus en plus espacé, ~200 ms
+ * en 1920×1080. Entre deux, seul le rectangle changé est reposé, avec la
+ * lumière d'avant.
+ */
+const relight = (cells: number): number => Math.max(50, Math.min(200, cells / 10_000));
+
+/**
+ * Le secours sans WebGL2 : `Renderer` sur le miroir, puis `putImageData` du
+ * rectangle changé. L'éclairage y passe par `FlatLight` (sim/flatlight.ts),
+ * qui ressemble au shader sans en être une copie, chargé à la première frame
+ * éclairée : d'ici là, et s'il ne se charge pas, le bac est peint sans lumière.
+ */
 function flatScreen(canvas: HTMLCanvasElement): Screen {
   const ctx = canvas.getContext("2d", { alpha: false })!;
   let of: Grid | null = null;
   let renderer: Renderer | null = null;
   let image: ImageData | null = null;
+  let lights: FlatLight | null = null;
+  let loading = false;
+  let litAt = -Infinity;
+  let wasLit = false;
   return {
     kind: "2d",
     detail() {},
-    paint(grid, x0, y0, x1, y1, view, _lit, tint) {
-      if (grid !== of || !renderer || !image) {
-        of = grid;
-        renderer = new Renderer(grid);
-        image = new ImageData(renderer.pixels as Uint8ClampedArray<ArrayBuffer>, grid.width, grid.height);
+    paint(grid, x0, y0, x1, y1, view, lit, tint) {
+      if (lit && !lights && !loading) {
+        loading = true;
+        // Arrivé, il éclaire dès la frame suivante, bac entier (`wasLit` le force).
+        void import("./sim/flatlight.ts").then((m) => { lights = new m.FlatLight(); });
+      }
+      const on = lit && view === "matter" && lights !== null;
+      if (grid !== of || !renderer || !image || on !== wasLit) {
+        if (grid !== of || !renderer || !image) {
+          of = grid;
+          renderer = new Renderer(grid);
+          image = new ImageData(renderer.pixels as Uint8ClampedArray<ArrayBuffer>, grid.width, grid.height);
+        }
+        x0 = 0; y0 = 0; x1 = grid.width; y1 = grid.height;
+        litAt = -Infinity;
+      }
+      wasLit = on;
+      if (x1 <= x0 || y1 <= y0) return;
+      const now = performance.now();
+      if (on && lights && now - litAt >= relight(grid.width * grid.height)) {
+        litAt = now;
+        lights.compute(grid);
         x0 = 0; y0 = 0; x1 = grid.width; y1 = grid.height;
       }
-      if (x1 <= x0 || y1 <= y0) return;
+      renderer.lights = on ? lights : null;
       renderer.view = view;
       renderer.tint = tint;
       renderer.paint(x0, y0, x1, y1);

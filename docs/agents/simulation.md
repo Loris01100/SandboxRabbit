@@ -683,11 +683,13 @@ tick en 1920×1080 chargé (`npm run directions`).
   tests et à `npm run directions` ; le test du miroir (test/sandbox.ts)
   vérifie qu'un miroir se colorie comme le moteur.
 - **Seule exception : l'éclairage global** (*radiance cascades*, screen.ts),
-  qui n'existe qu'en WebGL2. Il ajoute sa lumière par-dessus le coloriage
-  commun et `Renderer` n'en a pas de copie (`ponytail:` de `lighting()`).
+  en WebGL2, et par `FlatLight` (sim/flatlight.ts) dans le secours 2D, qui lui
+  ressemble sans en être une copie (voir [rendu.md](rendu.md#le-secours-2d)).
+  Les deux ajoutent leur lumière par-dessus le coloriage commun, avec le même
+  mélange (`LIGHT_HALO`, `LIGHT_GAIN` de render.ts).
   Ce qu'une matière émet et arrête vit dans `lighting()` (render.ts), une
   table de 256 × RGBA comme `palette()` ; le rougeoiement des corps chauds
-  (au-delà de 450 °C) est ajouté dans le shader `SCENE`. Une matière qui
+  (au-delà de `RED_HOT` = 450 °C) est ajouté par `SCENE` et par `FlatLight`. Une matière qui
   émet doit arrêter un peu de lumière (opacité > 0), sinon elle n'éclaire
   rien : test/sim.ts le vérifie. Une nouvelle matière lumineuse = une ligne
   `set(…)` dans `lighting()`. Une matière opaque qui brille n'est pas

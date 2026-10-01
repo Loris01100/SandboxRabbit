@@ -121,8 +121,8 @@ Ce qui est vérifié :
    est calculée en entiers des deux côtés — en flottants, le GPU arrondissait
    autrement 2 % des paliers). C'est la seule garde des deux copies
    du coloriage (voir « Le coloriage existe en deux copies » dans
-   [AGENTS.md](../AGENTS.md)). L'éclairage global (`lit`) n'existe que côté
-   shader : il n'est pas comparé ;
+   [AGENTS.md](../AGENTS.md)). L'éclairage global (`lit`) n'est pas
+   comparé : le secours 2D en a un qui ressemble (`FlatLight`), pas une copie ;
 2. **la page du jeu charge** : le bac reçoit sa première frame (le canvas
    `#world` quitte les 300 × 150 d'un canvas vide pour la taille de la grille)
    sans aucune erreur dans la console. Puis une touche pressée : le module du
@@ -144,6 +144,10 @@ Ce qui est vérifié :
    bac, et quand l'hôte ferme sa page l'autre est promue et son curseur
    disparaît. La galerie, elle, n'y est pas : elle demanderait une D1 locale
    migrée (`wrangler d1 migrations apply --local`) sur la machine de test.
+6. **le secours 2D éclaire** : un second Chromium, lancé avec
+   `--disable-webgl --disable-webgl2`, charge la page : elle colorie par
+   `Renderer`, charge sim/flatlight.ts à la première frame éclairée, propose
+   la case « Éclairage » et tourne sans erreur.
 
 Ce n'est pas dans `npm run check` : il faut Chromium installé. La CI le lance
 après `check`.

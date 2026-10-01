@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeNames, decodeTemp, encode } from "../src/client/sim/codec.ts";
 import { CLOCK, DAY, HOURS, clockAt, Renderer, hourTint, lighting, thumbnail } from "../src/client/sim/render.ts";
+import { FlatLight } from "../src/client/sim/flatlight.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../src/client/gestures.ts";
 import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
@@ -1798,6 +1799,48 @@ const lumière = lighting();
 for (let id = 0; id < 256; id++) {
   const émet = lumière[id * 4] + lumière[id * 4 + 1] + lumière[id * 4 + 2] > 0;
   if (émet) assert.ok(lumière[id * 4 + 3] > 0, `la matière ${id} émet de la lumière, elle doit en arrêter un peu`);
+}
+
+/**
+ * L'éclairage du secours 2D (`FlatLight`) : il ne copie pas le shader, mais il
+ * doit en garder les traits qu'on voit — la lave éclaire autour d'elle, un mur
+ * fait de l'ombre, le noir reste noir, la pierre au bord de la lave prend sa
+ * lumière, et ce qui brille ne se rajoute pas sa propre lumière.
+ */
+{
+  const W2 = 160, H2 = 90;
+  const e = new Engine(W2, H2);
+  e.rect(20, 40, 30, 50, LAVA);
+  e.rect(80, 0, 83, H2 - 1, STONE); // un mur du haut en bas
+  const grid = { width: W2, height: H2, ambient: e.ambient, cells: e.cells, life: e.life, frozen: e.frozen, noise: e.noise, temp: e.temp, press: e.press };
+  const l = new FlatLight();
+  l.compute(grid);
+  const at = (x: number, y: number): number => {
+    const t = (Math.floor(y / l.scale) * l.width + Math.floor(x / l.scale)) * 3;
+    return l.light[t] + l.light[t + 1] + l.light[t + 2];
+  };
+  assert.ok(at(40, 45) > 0.05, `à côté de la lave, de la lumière (${at(40, 45).toFixed(3)})`);
+  assert.ok(at(40, 45) > at(70, 45), "plus loin, moins");
+  assert.ok(at(70, 45) > at(95, 45) * 4, `derrière le mur, l'ombre (${at(70, 45).toFixed(3)} devant, ${at(95, 45).toFixed(3)} derrière)`);
+  assert.ok(at(81, 45) > 0, "le mur, opaque, prend la lumière de son voisin éclairé");
+  assert.equal(at(25, 45), 0, "la lave, qui brille, ne reçoit rien en plus");
+
+  const noir = new Engine(W2, H2);
+  noir.rect(0, 60, W2 - 1, H2 - 1, STONE);
+  l.compute({ ...grid, cells: noir.cells, temp: noir.temp, life: noir.life, frozen: noir.frozen, noise: noir.noise, press: noir.press });
+  assert.ok(l.light.every((v) => v === 0), "sans rien qui émette, pas de lumière");
+
+  // Le mélange : la même cellule, plus claire éclairée, jamais plus sombre.
+  l.compute(grid);
+  const sans = new Renderer(grid), avec = new Renderer(grid);
+  avec.lights = l;
+  sans.draw(); avec.draw();
+  let plusClair = 0;
+  for (let i = 0; i < sans.pixels.length; i++) {
+    assert.ok(avec.pixels[i] >= sans.pixels[i], "l'éclairage ajoute, il n'enlève rien");
+    if (avec.pixels[i] > sans.pixels[i]) plusClair++;
+  }
+  assert.ok(plusClair > 1000, `l'air autour de la lave s'éclaire (${plusClair} canaux)`);
 }
 
 /** Le cycle des heures passe par chaque heure au quart de journée, en boucle, et ne sort pas de [0, 1]. */

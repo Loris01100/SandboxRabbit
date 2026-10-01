@@ -64,7 +64,7 @@ leurs unités une fois pour toutes.
 
 | Programme | Écrit dans | Rôle |
 | --- | --- | --- |
-| `FRAGMENT` | le canvas | le coloriage : copie de `Renderer.shade()` / `shadeHeat()` / `shadeAir()`. `view` = 0 matière, 1 thermique, 2 pression (les deux dernières sortent tôt, sans éclairage ni heure) |
+| `FRAGMENT` | le canvas | le coloriage : copie de `Renderer.shade()` / `shadeHeat()` / `shadeAir()` ; le mélange de la lumière, de `Renderer.illuminate()`. `view` = 0 matière, 1 thermique, 2 pression (les deux dernières sortent tôt, sans éclairage ni heure) |
 | `SCENE` | `scene` | résume le bac en grille de lumière : par texel, moyenne de l'émission prémultipliée par l'opacité et de l'opacité (`lighting()` de render.ts), plus le rougeoiement au-delà de 450 °C |
 | `CASCADE` | `cascades[n]` | une cascade de *radiance cascades*, de la plus lointaine à la plus proche |
 | `FLUENCE` | `light` | moyenne les 4 directions de la cascade 0 en une lumière par texel |
@@ -137,9 +137,43 @@ d'objet GL gardé hors de lui.
 
 Sans WebGL2 (`getContext("webgl2")` nul — le choix est définitif, un canvas n'a
 qu'un contexte), `flatScreen()` fait tourner le même `Renderer` qu'en test sur le
-miroir, puis un `putImageData` du rectangle changé. Il **n'éclaire pas** : c'est
-la seule différence d'aspect assumée entre les deux chemins
-(`ponytail:` de `lighting()`).
+miroir, puis un `putImageData` du rectangle changé.
+
+**Il éclaire aussi**, par `FlatLight`
+([sim/flatlight.ts](../../src/client/sim/flatlight.ts)), qui **ressemble** au
+shader sans en être une copie — les *radiance cascades* demandent des milliers
+de rayons par texel, que le fil de la page ne peut pas se payer :
+
+- **Mêmes entrées** : émission et opacité de `lighting()`, rougeoiement au-delà
+  de `RED_HOT` (450 °C), moyennés par texel comme `SCENE`, puis une pyramide de
+  niveaux réduits (les mipmaps).
+- **Autre chemin** : une seule grille de `FLAT_LIGHT` = 80 texels de large, quelle
+  que soit la taille du bac ; par texel non opaque, `RAYS` = 16 rayons dont le
+  pas grandit avec la distance (1 jusqu'à 8 texels, puis le quart de la
+  distance) et qui lisent la pyramide **en bilinéaire** au niveau de leur pas —
+  lue au plus proche, la lumière se dessinait en pavés. Même absorption que
+  `CASCADE` : `(1 − opacité)^pas`, la part arrêtée renvoie sa couleur.
+- **Même fin** que `FLUENCE` (un opaque prend la lumière de son voisin le plus
+  éclairé, un opaque qui brille ne reçoit rien) et **même mélange** que
+  `FRAGMENT` : `LIGHT_HALO` et `LIGHT_GAIN`, désormais dans render.ts pour les
+  deux chemins.
+- **Coût** : ~4,5 ms par éclairage, de 320×180 à 1920×1080 (la collecte ne lit
+  qu'une cellule sur `scale/4` par sens au-delà de 4 × 4 cellules par texel) ;
+  le mélange par rangée (`row()` : la lumière interpolée en vertical une fois,
+  index et poids horizontaux précalculés) ajoute ~30 % au coloriage. Comme la
+  lumière n'est pas locale, un éclairage recolorie tout le bac : au plus toutes
+  les `relight()` ms, 50 jusqu'en 640×360, ~200 en 1920×1080 ; entre deux, seul
+  le rectangle changé est reposé, avec la lumière d'avant.
+- **Chargé à la demande** (`import()` dans `flatScreen()`, à la première frame
+  éclairée) : seule une page sans WebGL2 en a besoin, et la page a un budget.
+  D'ici là, le bac est peint sans lumière.
+- **Pas comparé** au shader par `npm run browser` : les deux ressemblent, ils
+  ne coïncident pas (`ponytail:` de `FlatLight`). test/sim.ts en garde les
+  traits (la lave éclaire, un mur fait de l'ombre, le noir reste noir) et
+  test/browser.ts le fait tourner dans un Chromium sans WebGL. Pour juger
+  l'aspect, comparer à l'œil : la même scène peinte des deux façons, la nuit.
+- La case « Éclairage » est proposée aussi sans WebGL2 ; « Finesse de
+  l'éclairage » (Graphismes), non : la grille du secours est fixe.
 
 ## En touchant à ce fichier
 

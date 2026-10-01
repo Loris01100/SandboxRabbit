@@ -75,6 +75,8 @@ parallèle**. Le reste (micro-optimisations, portage) vient après.
 | Échéance fixe plutôt qu'un délai **après** le travail | ~37 → 60 images par seconde | `loop()` de sim/worker.ts |
 | Son chargé au premier geste (`import()` d'audio.ts) et polyfill `modulepreload` retiré (vite.config.ts) | page 84 122 → 82 792 octets (son compris ; 81 014 sans) | [architecture.md](architecture.md#côté-page--qui-fait-quoi) |
 | Galerie chargée à sa première ouverture (gallery.ts par `import()` de share.ts) | page 87 997 → 84 457 octets, pseudos, curseurs, remix et votes compris | [architecture.md](architecture.md#galerie-et-mondes-défis) |
+| Éclairage du secours 2D (`FlatLight`) : calendrier des pas précalculé, lecture bilinéaire en ligne, texels opaques sautés, collecte sous-échantillonnée, mélange par rangée | lumière 13,6 → 4,5 ms (320×180), 22,9 → 4,4 ms (1920×1080) ; coloriage éclairé 1920×1080 73 → 32 ms (27 sans lumière) | [rendu.md](rendu.md#le-secours-2d) |
+| `FlatLight` chargé à la demande (sim/flatlight.ts) | page 89 186 → 85 274 octets | [rendu.md](rendu.md#le-secours-2d) |
 | Plafond de fils porté de 7 à 14 | bac plein de nanites en 1080p : 28 ms à 7 fils → 19 à 15 (16 cœurs) | `helpers()` de sim/worker.ts |
 
 ## Les pistes mesurées et laissées de côté

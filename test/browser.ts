@@ -138,7 +138,34 @@ try {
   await bob.close();
   assert.deepEqual(ratés, [], "le salon tourne sans erreur");
 
-  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, son démarré, contexte WebGL retrouvé, erreur remontée, salon à deux`);
+  // Le secours 2D, dans un Chromium sans WebGL : la page charge, colorie par
+  // `Renderer` et éclaire par `FlatLight` (screen.ts, `flatScreen()`), sans
+  // erreur. Seul ce test passe par ce chemin : partout ailleurs, il y a WebGL2.
+  const sansGl = await chromium.launch({ args: ["--disable-webgl", "--disable-webgl2"] });
+  try {
+    const p = await sansGl.newPage();
+    const plat: string[] = [];
+    p.on("pageerror", (e) => plat.push(e.message));
+    p.on("console", (m) => { if (m.type() === "error") plat.push(m.text()); });
+    // L'éclairage y est chargé à la première frame éclairée (sim/flatlight.ts).
+    const lumière = p.waitForResponse((r) => r.url().includes("/flatlight.ts"), { timeout: 30_000 });
+    await p.goto(base);
+    await p.waitForFunction(() => document.querySelector<HTMLCanvasElement>("#world")!.width !== 300, null, { timeout: 30_000 });
+    assert.ok((await lumière).ok(), "le module d'éclairage du secours se charge");
+    assert.equal(await p.evaluate(() => !!document.createElement("canvas").getContext("webgl2")), false, "ce Chromium-là n'a pas de WebGL2");
+    assert.equal(await p.$eval("#lighting", (e) => (e as HTMLInputElement).disabled), false, "l'éclairage est proposé aussi sans WebGL2");
+    // De quoi éclairer, puis quelques frames : `FlatLight` tourne.
+    await p.evaluate(() => { const h = document.querySelector<HTMLSelectElement>("#hour")!; h.value = "nuit"; h.dispatchEvent(new Event("input")); });
+    await p.keyboard.press("6");
+    const cadre2 = (await p.locator("#world").boundingBox())!;
+    await p.mouse.click(cadre2.x + cadre2.width / 2, cadre2.y + cadre2.height / 2);
+    await p.waitForTimeout(500);
+    assert.deepEqual(plat, [], "le secours 2D éclaire sans erreur");
+  } finally {
+    await sansGl.close();
+  }
+
+  console.log(`ok — navigateur : ${report.cases.length} rendus identiques à une unité près, page du jeu chargée, son démarré, contexte WebGL retrouvé, erreur remontée, salon à deux, secours 2D éclairé`);
 } finally {
   await browser.close();
   await server.close();

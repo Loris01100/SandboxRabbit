@@ -2,6 +2,7 @@ import {
   EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MAGNET, MATERIALS, MOLTEN_GLASS, SPARK, SWITCH, THERMITE, URANIUM,
 } from "./materials.ts";
 import { type Engine } from "./engine.ts";
+import type { FlatLight } from "./flatlight.ts";
 
 /**
  * Ce qu'il faut pour colorier un bac : la grille et son état, sans le moteur.
@@ -212,11 +213,8 @@ export const GLOW = 40;
  * 256 × RGBA : ce qu'elle émet (rouge, vert, bleu), puis ce qu'elle arrête
  * (255 = opaque). Le verre laisse passer, l'eau atténue, la pierre fait
  * de l'ombre. Le feu, gaz, arrête un peu : sans ça, une flamme n'émettrait
- * rien. La chaleur ajoute son rougeoiement dans le shader, au-delà de 450 °C.
- *
- * ponytail: seul le shader éclaire — `Renderer` (secours 2D, tests) n'en a
- * pas de copie, l'effet ne tient qu'en WebGL2. À recopier le jour où le
- * secours doit ressembler.
+ * rien. La chaleur ajoute son rougeoiement au-delà de `RED_HOT` °C. Lue par
+ * le shader (screen.ts) et par `FlatLight`, l'éclairage du secours 2D.
  */
 export function lighting(): Uint8Array {
   const out = new Uint8Array(256 * 4);
@@ -237,6 +235,12 @@ export function lighting(): Uint8Array {
   return out;
 }
 
+/** Température à partir de laquelle toute matière rougeoie dans la grille de lumière, en °C ; pleine lueur `RED_HOT` + 700. */
+export const RED_HOT = 450;
+/** Éclat de la lumière reçue, ajouté tel quel : le halo sur le fond sombre. */
+export const LIGHT_HALO = 160;
+/** Éclat de la lumière reçue, proportionnel à la couleur : les surfaces éclairées. */
+export const LIGHT_GAIN = 1.5;
 /** Une teinte d'heure : rouge, vert, bleu, multipliés à la couleur des matières qui n'émettent pas. */
 export type Tint = readonly [number, number, number];
 
@@ -303,6 +307,8 @@ export class Renderer {
   view: View = "matter";
   /** L'heure de la journée, voir `HOURS`. */
   tint: Tint = HOURS["apres-midi"];
+  /** L'éclairage global du secours 2D, ou rien (tests, case décochée) : ajouté en vue matière seulement. */
+  lights: FlatLight | null = null;
 
   private readonly grid: Grid;
 
@@ -342,42 +348,70 @@ export class Renderer {
 
   /** Les cellules `from` à `to` (exclu) d'une rangée, en couleurs de matière. `warm` : seuil de lumière. */
   private shade(from: number, to: number, warm: number): void {
-    const { cells, noise, frozen, life, width, temp } = this.grid;
-    const { buffer, palette, grain, glows, emits } = this;
+    const { buffer, lights } = this;
     const [tr, tg, tb] = this.tint;
-    for (let i = from; i < to; i++) {
-      const id = cells[i];
-      const base = palette[id];
-      // Lumière : `temp` est déjà diffusé par le moteur, donc l'air autour
-      // d'une flamme est chaud — c'est un halo tout prêt, sans flou à calculer.
-      const t = temp[i];
-      const lit = t > warm ? Math.min(1, (t - warm) / 400) : 0;
-      if (id === EMPTY) {
-        const sky = dim(base, tr, tg, tb);
-        buffer[i] = lit === 0 ? sky : light(sky, lit);
-        continue;
-      }
-      // Quatre matières seulement s'éclairent selon leur `life` — l'interrupteur
-      // fermé et l'aimant inversé (qui n'ont pas de couleur propre pour ça), la
-      // thermite allumée, l'uranium qui s'emballe et pâlit avant de sauter. Une
-      // table dit lesquelles : ailleurs, `life` n'est même pas lu.
-      const glow = glows[id] === 0 ? 0
-        : id === URANIUM ? life[i] >> 1
-        : id === THERMITE ? (life[i] > 0 ? 110 : 0)
-        : life[i] === 1 ? 55
-        : 0;
-      // Le bruit par cellule décale les 3 canaux d'un même delta : la teinte
-      // reste identique, seule la luminosité varie. Une cellule figée est
-      // tramée en damier, pour la distinguer au premier coup d'œil.
-      const d = frozen[i]
-        ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
-        : glow || (noise[i] * grain[id]) >> 7;
-      const r = clamp((base & 0xff) + d);
-      const g = clamp(((base >> 8) & 0xff) + d);
-      const b = clamp(((base >> 16) & 0xff) + d);
-      const raw = 0xff000000 | (b << 16) | (g << 8) | r;
-      const shade = emits[id] ? raw : dim(raw, tr, tg, tb);
-      buffer[i] = lit === 0 ? shade : light(shade, lit);
+    for (let i = from; i < to; i++) buffer[i] = this.shadeOne(i, warm, tr, tg, tb);
+    if (lights) this.illuminate(lights, from, to);
+  }
+
+  /** La couleur d'une cellule en vue matière, avant l'éclairage global. */
+  private shadeOne(i: number, warm: number, tr: number, tg: number, tb: number): number {
+    const { cells, noise, frozen, life, width, temp } = this.grid;
+    const { palette, grain, glows, emits } = this;
+    const id = cells[i];
+    const base = palette[id];
+    // Lumière : `temp` est déjà diffusé par le moteur, donc l'air autour
+    // d'une flamme est chaud — c'est un halo tout prêt, sans flou à calculer.
+    const t = temp[i];
+    const lit = t > warm ? Math.min(1, (t - warm) / 400) : 0;
+    if (id === EMPTY) {
+      const sky = dim(base, tr, tg, tb);
+      return lit === 0 ? sky : light(sky, lit);
+    }
+    // Quatre matières seulement s'éclairent selon leur `life` — l'interrupteur
+    // fermé et l'aimant inversé (qui n'ont pas de couleur propre pour ça), la
+    // thermite allumée, l'uranium qui s'emballe et pâlit avant de sauter. Une
+    // table dit lesquelles : ailleurs, `life` n'est même pas lu.
+    const glow = glows[id] === 0 ? 0
+      : id === URANIUM ? life[i] >> 1
+      : id === THERMITE ? (life[i] > 0 ? 110 : 0)
+      : life[i] === 1 ? 55
+      : 0;
+    // Le bruit par cellule décale les 3 canaux d'un même delta : la teinte
+    // reste identique, seule la luminosité varie. Une cellule figée est
+    // tramée en damier, pour la distinguer au premier coup d'œil.
+    const d = frozen[i]
+      ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
+      : glow || (noise[i] * grain[id]) >> 7;
+    const r = clamp((base & 0xff) + d);
+    const g = clamp(((base >> 8) & 0xff) + d);
+    const b = clamp(((base >> 16) & 0xff) + d);
+    const raw = 0xff000000 | (b << 16) | (g << 8) | r;
+    const shade = emits[id] ? raw : dim(raw, tr, tg, tb);
+    return lit === 0 ? shade : light(shade, lit);
+  }
+
+  /**
+   * Ajoute l'éclairage global aux cellules `from` à `to` (une rangée) déjà
+   * coloriées, comme le `FRAGMENT` du shader : un halo constant
+   * (`LIGHT_HALO`) et une part proportionnelle à la couleur (`LIGHT_GAIN`).
+   */
+  private illuminate(lights: FlatLight, from: number, to: number): void {
+    const { buffer } = this;
+    const w = this.grid.width, y = (from / w) | 0, x0 = from - y * w;
+    const { band, left, right, frac } = lights.row(y, w);
+    for (let i = from, x = x0; i < to; i++, x++) {
+      const l = left[x], r = right[x], f = frac[x];
+      const lr = band[l] + (band[r] - band[l]) * f;
+      const lg = band[l + 1] + (band[r + 1] - band[l + 1]) * f;
+      const lb = band[l + 2] + (band[r + 2] - band[l + 2]) * f;
+      if (lr + lg + lb < 0.002) continue; // dans le noir : rien à ajouter
+      const c = buffer[i];
+      const cr = c & 0xff, cg = (c >> 8) & 0xff, cb = (c >> 16) & 0xff;
+      const R = Math.min(255, cr + lr * (LIGHT_HALO + cr * LIGHT_GAIN));
+      const G = Math.min(255, cg + lg * (LIGHT_HALO + cg * LIGHT_GAIN));
+      const B = Math.min(255, cb + lb * (LIGHT_HALO + cb * LIGHT_GAIN));
+      buffer[i] = 0xff000000 | (B << 16) | (G << 8) | R;
     }
   }
 

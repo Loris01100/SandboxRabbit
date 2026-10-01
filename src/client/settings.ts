@@ -102,10 +102,6 @@ setInterval(() => { if (hourInput.value === "cycle") tickHour(); }, 1000);
 
 const lightingInput = document.querySelector<HTMLInputElement>("#lighting")!;
 lightingInput.addEventListener("change", () => light(lightingInput.checked));
-if (screen.kind === "2d") {
-  lightingInput.disabled = true;
-  lightingInput.parentElement!.title = "Demande WebGL2, absent de ce navigateur";
-}
 
 // Graphismes (fenêtre Paramètres), pour les petits PC : moins d'images par
 // seconde, un éclairage plus grossier. Réglages de la page seule — le bac
