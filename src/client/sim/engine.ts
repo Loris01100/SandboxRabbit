@@ -1,6 +1,6 @@
 import {
   ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FALLOUT, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
-  FILINGS, HERO, HERO_BODY, HERO_HARM, HERO_HEAD, HERO_LEGS, HERO_SLOTS, MAGNET, MINE, MUD, NANITE, NITRO, PILOT, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL,
+  FILINGS, HERO, HERO_BODY, HERO_HARM, HERO_HEAD, HERO_LEGS, HERO_SLOTS, MAGNET, MINE, NANITE, NITRO, PILOT, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL,
   SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM, STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
@@ -2398,9 +2398,9 @@ export class Engine {
     const t = this.temp[i];
     if (t > COOK) { this.kill(R, x, y, f, FIRE); return; }
     if (t < FROST) { this.kill(R, x, y, f, ICE); return; }
-    // De l'eau par-dessus les oreilles : il se noie (plus dense qu'elle, il coule).
-    const above = this.get(x, y - 3);
-    if ((above === WATER || above === SALTWATER || above === MUD) && this.rand() < DROWN) {
+    // De l'eau par-dessus les oreilles (plus dense qu'elle, il coule) ou du
+    // sable : il n'a pas de santé comme le héros, il s'étouffe d'un coup.
+    if (this.stifling(this.airway(x, y)) && this.rand() < DROWN) {
       this.kill(R, x, y, f, EMPTY);
       return;
     }
@@ -2562,8 +2562,10 @@ export class Engine {
     if (whole < H.id.length) { this.maim(H, x, y, 1); return; }
     const { life } = this, S = HERO_SLOTS;
     const t = this.temp[i];
-    const head = this.submerged(x, y);
-    const hurt = (t > COOK || t < FROST ? SCALD : 0) + (head ? CHOKE : 0);
+    const over = this.airway(x, y);
+    // La nage ne tient qu'au liquide ; l'apnée compte aussi le sable par-dessus.
+    const head = KIND[over] === KINDS.liquid;
+    const hurt = (t > COOK || t < FROST ? SCALD : 0) + (this.stifling(over) ? CHOKE : 0);
     let harm = life[this.slot(x, y, S.harm)];
     if (hurt > 0) harm += hurt;
     else if (harm > 0 && this.rand() < MEND) harm--;
@@ -2613,21 +2615,42 @@ export class Engine {
   }
 
   /**
-   * La tête du héros de cœur (x, y) est-elle sous l'eau ? La cellule juste
-   * au-dessus ne suffit pas : des héros empilés (un pilier de spawns, une
-   * colonne qui coule ensemble) n'y voient que les jambes de celui du dessus,
-   * jamais de liquide — ceux du dessous ne se noyaient jamais. On remonte donc
-   * à travers les créatures jusqu'à la première cellule qui dise ce qu'il
-   * respire, sans dépasser les 15 cellules que le damier garantit (trois héros
-   * de plus au-dessus). Enseveli plus profond que ça, on tranche sur les côtés
-   * de la tête : le liquide qui l'entoure dit la même chose que celui du dessus.
+   * Ce que la créature de cœur (x, y) a sur la tête, donc ce qu'elle respire.
+   * La cellule juste au-dessus suffit presque toujours — sauf empilées (un
+   * pilier de héros, des lapins tombés au même endroit) : chacune n'y voit que
+   * le corps du voisin et jamais de liquide, si bien que seule celle du haut
+   * se noyait.
+   *
+   * On regarde alors les côtés de la tête, où le corps ne tient qu'une
+   * cellule : c'est ce qui entoure vraiment la tête, et une pile les laisse
+   * libres — sauf serrée, les corps se chevauchant d'une rangée, et ce sont
+   * les jambes du voisin. Reste à remonter la colonne, moins juste (le voisin
+   * y fait tuba) mais c'est le dernier recours, borné aux 15 cellules que le
+   * damier garantit. Des créatures jusqu'au bout : de l'air, on n'étouffe pas
+   * sur une supposition.
    */
-  private submerged(x: number, y: number): boolean {
-    for (let k = 3; k <= 15; k++) {
+  private airway(x: number, y: number): MaterialId {
+    const over = this.get(x, y - 3);
+    if (!CREATURE[over]) return over;
+    const left = this.get(x - 1, y - 2);
+    if (!CREATURE[left]) return left;
+    const right = this.get(x + 1, y - 2);
+    if (!CREATURE[right]) return right;
+    for (let k = 4; k <= 15; k++) {
       const id = this.get(x, y - k);
-      if (!CREATURE[id]) return KIND[id] === KINDS.liquid;
+      if (!CREATURE[id]) return id;
     }
-    return KIND[this.get(x - 2, y - 2)] === KINDS.liquid || KIND[this.get(x + 2, y - 2)] === KINDS.liquid;
+    return EMPTY;
+  }
+
+  /**
+   * De quoi on étouffe, la tête dedans : un liquide (noyade) ou une poudre
+   * (enseveli sous une dune, sous la neige, sous ce qu'on vient de creuser).
+   * Une créature est une poudre, mais `airway()` n'en rend jamais.
+   */
+  private stifling(id: MaterialId): boolean {
+    const kind = KIND[id];
+    return kind === KINDS.liquid || kind === KINDS.powder;
   }
 
   /** La cellule du corps du héros de cœur (x, y) qui garde une donnée de `HERO_SLOTS`. Corps entier : dans la grille. */

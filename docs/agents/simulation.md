@@ -518,8 +518,9 @@ Un lapin = **neuf cellules de forme fixe** (`RABBIT_SHAPE`, tirée de
 `RABBIT_DX` / `RABBIT_DY` / `RABBIT_ID`). Le cœur (`RABBIT`) porte la satiété et décide de
 tout ; le reste du corps (`RABBIT_BODY`, `RABBIT_EYE`, `RABBIT_TAIL`, hors
 palette, `part` dans `MATERIALS`) n'a aucun état. Ordre d'un tick du cœur :
-vérifier le corps, cuisson, gel, noyade (eau, eau salée ou boue au-dessus des
-oreilles), faim, chute, puis — posé — manger, se reproduire, se déplacer.
+vérifier le corps, cuisson, gel, étouffement (un liquide ou une poudre sur la
+tête : `airway()` et `stifling()`, partagés avec le héros), faim, chute, puis
+— posé — manger, se reproduire, se déplacer.
 
 - **Le corps ne dépend pas de `life`.** Le sens (gauche / droite) se lit sur
   le corps (`intact()` compte les cellules en place pour chaque sens), et une
@@ -562,18 +563,26 @@ les autres attendent debout, mais vivent (chute, dégâts, âge).
   l'enregistre dans le rejeu et le relaie à l'hôte d'un salon. Il figure aussi
   dans la `Scene` du rejeu, pour un enregistrement lancé touche enfoncée.
 - Ordre d'un tick : corps entier, dégâts — `SCALD` par tick au-delà de
-  `COOK` ou sous `FROST`, `CHOKE` la tête sous un liquide (`submerged()`),
-  sinon un de guéri avec la chance `MEND` ; mort à `HERO_HARM`, en feu, en glace ou noyé —,
+  `COOK` ou sous `FROST`, `CHOKE` la tête dans un liquide ou une poudre
+  (`airway()`, `stifling()`), sinon un de guéri avec la chance `MEND` ; mort à
+  `HERO_HARM`, en feu, en glace ou noyé —,
   numéro tiré s'il n'en a pas, un an avec la chance `YEAR` (une journée du
   cycle, 240 s), creuser, puis un mouvement vertical — saut (`JUMP` ticks
   de montée), nage (saut tenu dans un liquide), chute (lente dans un liquide,
   `SINK`) — et un pas de côté (`STRIDE`), qui grimpe une marche d'une cellule.
-- `submerged()` ne regarde pas que la cellule au-dessus de la tête : elle
-  remonte à travers les créatures (jusqu'à 15 cellules, la portée que le
-  damier garantit) jusqu'à la première qui dise ce qu'il respire. Sans ça, des
-  héros empilés — un pilier de spawns, une colonne qui coule ensemble — ne
-  voyaient au-dessus de leur tête que le corps du voisin : seul celui du haut
-  se noyait. Enseveli plus profond, on tranche sur les côtés de la tête.
+- **Ce qu'on respire** se lit par `airway()`, commun aux deux créatures : la
+  cellule au-dessus de la tête, sinon — si c'est une créature — les côtés de
+  la tête, où le corps ne tient qu'une cellule, sinon la colonne au-dessus
+  (15 cellules au plus, la portée que le damier garantit). Sans ces deux
+  replis, des créatures empilées ne voyaient au-dessus de leur tête que le
+  corps du voisin : seule celle du haut se noyait. Les côtés passent avant la
+  colonne, qui ferait du voisin un tuba ; une pile serrée (les corps se
+  chevauchent d'une rangée) les occupe, d'où le troisième essai.
+- `stifling()` dit de quoi on étouffe : un liquide (noyade) **ou une poudre**
+  (enseveli sous une dune, sous la neige, sous ce qu'on vient de creuser). Le
+  héros y perd `CHOKE` par tick, le lapin meurt d'un coup avec la chance
+  `DROWN`. La nage, elle, ne tient qu'au liquide (`wet`) : on ne nage pas dans
+  le sable.
 - Contrairement au lapin il **marche dans l'eau** (`relocate(…, wet)` partout)
   : plus dense qu'elle, il y coule et nage en sautant.
 - Il creuse le solide (statique ou poudre) par `become()`, sauf `METAL` et les

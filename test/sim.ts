@@ -752,6 +752,29 @@ function count(e: Engine, id: MaterialId): number {
   assert.equal(corps(mare), 0, "et il s'y est noyé");
   assert.ok(count(mare, WATER) >= eau - 2, `l'eau qu'il a traversée n'a pas disparu (${count(mare, WATER)} sur ${eau})`);
 
+  // Empilés, chacun n'a au-dessus des oreilles que le corps du voisin : sans
+  // les côtés de la tête, seul celui du haut se noyait, et celui du dessous
+  // respirait au fond de l'eau tant que l'autre lui servait de couvercle. Un
+  // puits juste à sa largeur (de x - 2 à x + 1) : il ne peut pas se décaler,
+  // et celui du haut dépasse de l'eau, donc il survit pour faire le couvercle.
+  const pile = pré(15);
+  for (let y = 24; y < 38; y++) { pile.set(18, y, STONE); pile.set(23, y, STONE); }
+  for (let x = 19; x < 23; x++) for (let y = 31; y < 38; y++) pile.set(x, y, WATER);
+  pile.paint(21, SOL, 1, RABBIT, 1, true);
+  pile.paint(21, SOL - 4, 1, RABBIT, 1, true);
+  assert.equal(count(pile, RABBIT), 2, "deux lapins empilés dans un puits noyé");
+  for (let t = 0; t < 60; t++) pile.step();
+  assert.equal(corps(pile), 9, "celui du dessous se noie sans attendre que l'autre lui libère la tête");
+
+  // Le sable par-dessus les oreilles étouffe comme l'eau : enseveli, il meurt.
+  const enseveli = pré(21);
+  enseveli.paint(25, SOL, 1, RABBIT);
+  for (let t = 0; t < 10; t++) enseveli.step();
+  enseveli.rect(20, 28, 30, 33, SAND);
+  let étouffé = 400;
+  for (let t = 0; t < 400; t++) { enseveli.step(); if (corps(enseveli) === 0) { étouffé = t; break; } }
+  assert.ok(étouffé < 400, "un lapin enseveli sous le sable s'étouffe");
+
   // Deux lapins repus dans un enclos : un petit, de la même taille qu'eux.
   const enclos = pré(16);
   for (let y = 26; y < 38; y++) { enclos.set(14, y, STONE); enclos.set(45, y, STONE); }
@@ -1581,6 +1604,15 @@ function top(e: Engine, id: MaterialId): number {
     const dégâts = pile.life[at + HERO_SLOTS.harm[0] + HERO_SLOTS.harm[1] * W];
     assert.ok(dégâts > 40, "chacun des deux manque d'air, pas seulement celui du dessus");
   }
+
+  // Le sable étouffe aussi, mais sans mouiller : enseveli, il perd de l'air
+  // sans se mettre à nager pour autant.
+  const sous = plaine();
+  tenir(sous, 0, 5);
+  const [hx, hy] = où(sous);
+  sous.rect(hx - 5, hy - 7, hx + 5, hy - 3, SAND);
+  tenir(sous, 0, 60);
+  assert.ok(fiche(sous, HERO_SLOTS.harm) > 40, "enseveli sous le sable, il manque d'air");
 
   const nommé = plaine();
   tenir(nommé, 0, 1);
