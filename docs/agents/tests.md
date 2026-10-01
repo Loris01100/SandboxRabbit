@@ -43,6 +43,12 @@ Y a sa place une règle **vérifiable en lisant un fichier**, dont l'infraction
 serait silencieuse. Le comportement du moteur, du panneau et de l'API reste à
 sim.ts, ui.ts et api.ts.
 
+Le script tourne en 0,3 s, ce qui lui vaut un second appelant : sous Claude
+Code, un hook `PostToolUse` le relance dès qu'une écriture touche `src/`,
+index.html ou le README, sans attendre `npm run check`
+([CLAUDE.md](../../CLAUDE.md)). Il reste la référence unique de ces règles —
+un hook ne recopie pas ses tests, il l'appelle.
+
 Chaque assert a été vérifié en cassant exprès la règle qu'il garde : un test de
 source qui ne mord pas ne se voit pas, il passe. Casser la règle avant de
 croire l'assert.

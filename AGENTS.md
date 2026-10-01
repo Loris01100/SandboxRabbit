@@ -237,12 +237,14 @@ local, faute de frappe, refactor interne). Le dire explicitement.
 | une optimisation (moteur, rendu, boucle, budgets) | [performance.md](docs/agents/performance.md) (« Ce qui a déjà payé », avec le gain mesuré) |
 | `rust/` | [docs/rust.md](docs/rust.md) (et ses résultats, s'ils changent) |
 | une skill (`.claude/skills/` ou `.agents/skills/`) | l'autre copie, identique : les deux dossiers portent les mêmes skills |
+| les permissions ou les hooks de `.claude/` | [CLAUDE.md](CLAUDE.md), section « Propre à Claude Code » (ce qui passe sans demander, ce qui reste confirmé, ce que garde chaque hook) |
 | une nouvelle marche à suivre récurrente | [recettes.md](docs/agents/recettes.md) |
 | une nouvelle règle à ne pas enfreindre | « Règles à ne pas enfreindre » ci-dessus **et** le guide concerné |
 
 Côté Claude Code, un hook `Stop` ([.claude/hooks/doc-sync.mjs](.claude/hooks/doc-sync.mjs), en Node : pas de `jq` à installer)
-refuse de clore un tour quand du code a changé sans aucun `.md`. Les autres
-agents appliquent la règle d'eux-mêmes.
+refuse de clore un tour quand du code a changé sans aucun `.md` — et deux autres
+hooks gardent les règles ci-dessus au moment de l'écriture ([CLAUDE.md](CLAUDE.md)).
+Les autres agents appliquent la règle d'eux-mêmes.
 
 ## Avant de rendre la main
 
