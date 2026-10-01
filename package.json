@@ -19,8 +19,8 @@
     "loc": "node test/loc.ts"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.60.1",
-    "@types/node": "^26.6.2",
+    "@cloudflare/vite-plugin": "^1.62.0",
+    "@types/node": "^26.6.3",
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
