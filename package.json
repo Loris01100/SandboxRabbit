@@ -27,7 +27,7 @@
     "wrangler": "^4.0.0"
   },
   "dependencies": {
-    "hono": "^4.13.5"
+    "hono": "^4.13.10"
   },
   "allowScripts": {
     "workerd@1.20260811.1": true,
