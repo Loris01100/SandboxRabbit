@@ -4,7 +4,7 @@ Guide pour les agents IA (Claude Code, Codex, Cursor, Copilot, Gemini…) qui
 travaillent sur ce dépôt. Ce fichier est le point d'entrée ; les guides
 détaillés sont dans [docs/agents/](docs/agents/).
 
-**Sandbox Rabbit** est un bac à sable cellulaire (« falling sand ») : ~47
+**Sandbox Rabbit** est un bac à sable cellulaire (« falling sand ») : ~49
 matières, chaleur, explosifs, électricité, défis, galerie de mondes partagés et
 bac multijoueur. Client TypeScript sans framework (canvas 2D, simulation dans
 un Web Worker), servi par **un seul** Worker Cloudflare (Hono) qui héberge

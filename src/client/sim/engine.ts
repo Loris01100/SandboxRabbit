@@ -1,7 +1,7 @@
 import {
   ACID, BATTERY, C4, CANDLE, EMBER, EMPTY, FALLOUT, FIRE, GLASS, ICE, LAVA, MATERIALS, METAL,
   FILINGS, HERO, HERO_BODY, HERO_HARM, HERO_HEAD, HERO_LEGS, HERO_SLOTS, MAGNET, MINE, NANITE, NITRO, PILOT, PLANT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL,
-  SALT, SALTWATER, SAND, SEED, SMOKE, SOURCE, SPARK, STEAM, STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
+  RUST, SALT, SALTWATER, SAND, SEED, SMOKE, SODIUM, SOURCE, SPARK, STEAM, STONE, SWITCH, THERMITE, TNT, URANIUM, WATER, WOOD, type MaterialId,
 } from "./materials.ts";
 
 /**
@@ -75,6 +75,15 @@ const BURN = 150;
 const CRITICAL = 3;
 /** Ticks d'emballement avant la détonation : le temps de casser le tas. */
 const MELTDOWN = 120;
+/** Rayon du souffle du sodium : une gerbe, pas une charge — c'est leur nombre qui fait le dégât. */
+const SPLASH = 4;
+/**
+ * Chance par tick qu'un métal mouillé rouille : ~40 s à 60 ticks par seconde
+ * dans l'eau douce, ~8 s dans l'eau salée. Plus vite, un circuit posé près
+ * d'une flaque cassait avant qu'on ait fini de le dessiner.
+ */
+const RUST_FRESH = 1 / 2400;
+const RUST_SALT = 1 / 480;
 /** Rayon du souffle nucléaire. */
 const NUKE = 16;
 /** Portée de l'aimant, en cellules. */
@@ -296,7 +305,7 @@ const PART = 1 << PART_SHIFT;
 
 /** 1 = matière qui peut demander une explosion (`blast`) : si elle n'est plus là au moment de la jouer, l'explosion n'a plus lieu. */
 const EXPLOSIVE = new Uint8Array(256);
-for (const id of [TNT, NITRO, C4, MINE, URANIUM]) EXPLOSIVE[id] = 1;
+for (const id of [TNT, NITRO, C4, MINE, URANIUM, SODIUM]) EXPLOSIVE[id] = 1;
 
 /** Les travaux que `run()` répartit entre les fils, exécutés par `job()`. */
 export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, air: 5, gust: 6, hush: 7, stop: 9 } as const;
@@ -1297,6 +1306,7 @@ export class Engine {
       case NITRO: this.updateNitro(i, x, y); return;
       case C4: this.updateC4(i, x, y); return;
       case MINE: this.updateMine(x, y); return;
+      case SODIUM: this.updateSodium(i, x, y); return;
       case THERMITE: this.updateThermite(i, x, y); return;
       case URANIUM: this.updateUranium(i, x, y); return;
       case FALLOUT: this.updateFallout(i, x, y); return;
@@ -1314,8 +1324,7 @@ export class Engine {
       case RABBIT_BODY: case RABBIT_EYE: case RABBIT_TAIL: this.updatePart(RABBIT_SHAPE, x, y, id); return;
       case HERO: this.updateHero(i, x, y); return;
       case HERO_HEAD: case HERO_BODY: case HERO_LEGS: this.updatePart(HERO_SHAPE, x, y, id); return;
-      // Le métal ne fait que sortir de sa période de repos.
-      case METAL: if (this.life[i] > 0) this.life[i]--; return;
+      case METAL: this.updateMetal(i, x, y); return;
       case GLASS: if (this.gusty) this.shatter(i, x, y); return;
     }
     switch (KIND[id]) {
@@ -1625,6 +1634,22 @@ export class Engine {
     }
   }
 
+  /**
+   * Sodium : son déclencheur est l'eau. Plus léger qu'elle, il flotte — donc
+   * il la touche toujours : une poignée jetée dans un lac part en gerbes, et
+   * chaque grain projeté qui retombe dans l'eau repart à son tour. Sous
+   * l'huile, rien ne l'atteint : c'est comme ça qu'on le garde. Il n'a pas
+   * besoin d'`ACTIVE` : l'eau qui arrive contre lui est une écriture, qui
+   * réveille son bloc.
+   */
+  private updateSodium(i: number, x: number, y: number): void {
+    for (let k = 0; k < 4; k++) {
+      const n = this.get(x + NX[k], y + NY[k]);
+      if (n === WATER || n === SALTWATER) { this.blast(x, y, SPLASH); return; }
+    }
+    this.updatePowder(i, x, y, SODIUM);
+  }
+
   /** Mine : seul ce qui coule appuie dessus, on peut donc la murer sans la faire sauter. */
   private updateMine(x: number, y: number): void {
     const above = y - this.gravity;
@@ -1887,6 +1912,30 @@ export class Engine {
     if (this.decay(i, EMBER, SMOKE)) return;
     this.ignite(x, y, 0.5);
     this.updatePowder(i, x, y, EMBER);
+  }
+
+  /**
+   * Métal : sort de sa période de repos (`life`, voir `RECOVERY`), et rouille
+   * s'il trempe. Le tirage n'a lieu que contre l'eau : un fil sec ne tire rien,
+   * et les parties sans métal mouillé gardent leur suite de tirages. Mouillé,
+   * il tient son bloc éveillé — sinon un fil au fond d'un lac étale s'endort
+   * et ne rouille jamais. La rouille ne conduit pas : un circuit qui trempe
+   * finit coupé.
+   *
+   * ponytail: seule la surface mouillée rouille ; le métal dessous, au contact
+   * de la rouille et pas de l'eau, reste sain. Une barre épaisse est donc
+   * protégée par sa propre rouille, à l'inverse du vrai fer. À revoir si
+   * quelqu'un veut voir une poutre ronger de part en part.
+   */
+  private updateMetal(i: number, x: number, y: number): void {
+    if (this.life[i] > 0) this.life[i]--;
+    for (let k = 0; k < 4; k++) {
+      const n = this.get(x + NX[k], y + NY[k]);
+      if (n !== WATER && n !== SALTWATER) continue;
+      this.wake(i);
+      if (this.rand() < (n === SALTWATER ? RUST_SALT : RUST_FRESH)) this.become(x, y, RUST);
+      return;
+    }
   }
 
   /** Met le métal voisin sous tension, s'il est sorti de sa période de repos. */

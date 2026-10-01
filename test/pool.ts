@@ -14,7 +14,7 @@ import { Engine } from "../src/client/sim/engine.ts";
 import { Pool, type Helper } from "../src/client/sim/pool.ts";
 import { applyGesture } from "../src/client/gestures.ts";
 import { terrain } from "../src/client/terrain.ts";
-import { FIRE, LAVA, NITRO, PILOT, SAND, TNT, URANIUM, WATER, WOOD } from "../src/client/sim/materials.ts";
+import { FIRE, LAVA, METAL, NITRO, PILOT, RUST, SAND, SODIUM, TNT, URANIUM, WATER, WOOD } from "../src/client/sim/materials.ts";
 
 /** `count` fils auxiliaires sous Node, et de quoi les arrêter. */
 function helpers(count: number): { list: Helper[]; stop: () => Promise<void> } {
@@ -39,6 +39,10 @@ function partie(e: Engine): void {
   e.paint(153 * s, 11 * s, 1, LAVA);
   e.rect(100 * s, 5 * s, 101 * s, 6 * s, NITRO);
   e.rect(290 * s, 20 * s, 294 * s, 24 * s, URANIUM);
+  // Gerbes de sodium dans l'eau (explosions différées en nombre), et un fil
+  // qui trempe dessous : la rouille tire au sort dans chaque bloc mouillé.
+  e.rect(225 * s, 1 * s, 235 * s, 3 * s, SODIUM);
+  e.rect(205 * s, 16 * s, 255 * s, 16 * s, METAL);
 }
 
 const signature = (e: Engine) => ({
@@ -65,6 +69,7 @@ for (let t = 0; t < TICKS; t++) {
   if (t % 10 === 0 && seul.press.some((p) => p > 0)) venté++;
 }
 assert.ok(venté > 0, "la partie a soufflé : la pression (`breathe()`) passe aussi par les fils");
+assert.ok(seul.heard.booms > 0 && seul.cells.includes(RUST), "le sodium a sauté et le fil a rouillé : leurs règles passent aussi par les fils");
 assert.deepEqual(signature(multi), signature(seul), `${TICKS} ticks sur 4 fils = ${TICKS} ticks sur 1, au bit près`);
 console.log(`   640×360, ${TICKS} ticks : 1 fil ${(ms1 / TICKS).toFixed(2)} ms/tick, 4 fils ${(ms4 / TICKS).toFixed(2)} ms/tick`);
 

@@ -59,6 +59,8 @@ export const HERO = 51;
 export const HERO_HEAD = 52;
 export const HERO_BODY = 53;
 export const HERO_LEGS = 54;
+export const SODIUM = 55;
+export const RUST = 56;
 
 /**
  * Commandes du héros, un bit chacune (`engine.pilot`, geste `pilot`). Ici
@@ -167,6 +169,8 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [SWITCH]: { id: SWITCH, name: "Interrupteur", kind: "static", density: 9, color: [176, 132, 60], noise: 8, hint: "Cliquez dessus pour ouvrir ou fermer le circuit" },
   [NITROGEN]: { id: NITROGEN, name: "Azote liquide", kind: "liquid", density: 1, color: [214, 240, 250], noise: 10, spread: 2, heat: -190, boil: { at: -60, into: STEAM }, hint: "À -190 °C : gèle tout ce qu'il touche et s'évapore en buée" },
   [NITRO]: { id: NITRO, name: "Nitroglycérine", kind: "liquid", density: 4, color: [208, 196, 116], noise: 8, spread: 1, hint: "Huile instable : la poser ne risque rien, la faire tomber tout casser" },
+  [SODIUM]: { id: SODIUM, name: "Sodium", kind: "powder", density: 3, color: [204, 208, 200], noise: 10, hint: "Plus léger que l'eau, il flotte… et saute au premier contact. Se garde sous l'huile" },
+  [RUST]: { id: RUST, name: "Rouille", kind: "static", density: 8, color: [150, 72, 36], noise: 26, hint: "Le métal resté mouillé : ne conduit plus. L'eau salée la fait venir cinq fois plus vite" },
   [C4]: { id: C4, name: "C4", kind: "static", density: 8, color: [232, 228, 212], noise: 6, hint: "Insensible au feu : ne saute que sous l'étincelle, et entraîne ses voisins" },
   [FIREDAMP]: { id: FIREDAMP, name: "Grisou", kind: "gas", density: 1, color: [128, 172, 126], noise: 14, life: 250, flammable: 1, hint: "Gaz de mine : s'accumule au plafond et part d'un seul coup" },
   [MINE]: { id: MINE, name: "Mine", kind: "static", density: 8, color: [104, 116, 96], noise: 8, hint: "Saute sous le poids de ce qui coule ; on peut la murer sans risque" },
@@ -205,10 +209,10 @@ export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
   { name: "Terrain", ids: [SAND, STONE, WOOD, GLASS, MUD, SALT, FILINGS] },
   { name: "Liquides", ids: [WATER, SALTWATER, OIL, PETROLEUM, TAR, ALCOHOL, ACID, MERCURY, MOLTEN_WAX, MOLTEN_GLASS, CEMENT] },
   { name: "Inflammable", ids: [FIRE, EMBER, LAVA, WAX, CANDLE] },
-  { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, THERMITE, URANIUM] },
+  { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, SODIUM, THERMITE, URANIUM] },
   { name: "Froid", ids: [ICE, SNOW, NITROGEN] },
   { name: "Vivant", ids: [SEED, PLANT, RABBIT, HERO, NANITE] },
-  { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK, MAGNET] },
+  { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK, MAGNET, RUST] },
   { name: "Gaz", ids: [SMOKE, STEAM, FIREDAMP, FALLOUT] },
   { name: "Outils", ids: [SOURCE, EMPTY] },
 ];

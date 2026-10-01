@@ -16,7 +16,7 @@ import {
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
   MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE,
   ACID, STEAM, HERO_HEAD, HERO_BODY, HERO_LEGS,
-  CEMENT, FILINGS, HERO, HERO_HARM, HERO_SLOTS, MAGNET, PILOT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
+  CEMENT, FILINGS, RUST, SODIUM, HERO, HERO_HARM, HERO_SLOTS, MAGNET, PILOT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
 const W = 60, H = 40;
@@ -566,6 +566,63 @@ function count(e: Engine, id: MaterialId): number {
   for (let t = 0; t < 60; t++) e.step();
   // Une seule charge reçoit l'étincelle : les autres sont amorcées de proche en proche.
   assert.equal(count(e, C4), 0, "l'étincelle fait sauter le mur entier");
+}
+
+// Sodium : l'eau le fait sauter, pas le feu ; sous l'huile, il ne risque rien.
+{
+  const sec = engine();
+  sec.rect(0, H - 2, W - 1, H - 1, STONE);
+  sec.rect(20, H - 5, 30, H - 3, SODIUM);
+  for (let x = 20; x <= 30; x++) sec.set(x, H - 6, FIRE);
+  for (let t = 0; t < 60; t++) sec.step();
+  assert.equal(count(sec, SODIUM), 33, "à sec, le feu ne le déclenche pas");
+  assert.equal(sec.heard.booms, 0, "et rien n'a sauté");
+
+  const huile = engine();
+  huile.rect(0, H - 2, W - 1, H - 1, STONE);
+  huile.rect(10, H - 12, 50, H - 3, OIL);
+  huile.rect(28, H - 4, 32, H - 3, SODIUM);
+  for (let t = 0; t < 120; t++) huile.step();
+  assert.equal(count(huile, SODIUM), 10, "gardé sous l'huile, il ne bouge pas");
+
+  const lac = engine();
+  lac.rect(0, H - 2, W - 1, H - 1, STONE);
+  lac.rect(0, H - 10, W - 1, H - 3, WATER);
+  lac.rect(28, 5, 32, 7, SODIUM);
+  for (let t = 0; t < 120 && count(lac, SODIUM) === 15; t++) lac.step();
+  assert.ok(count(lac, SODIUM) < 15, "jeté dans l'eau, il saute");
+  assert.ok(count(lac, WATER) < W * 8, "et emporte de l'eau avec lui");
+  assert.ok(MATERIALS[SODIUM].density < MATERIALS[WATER].density, "plus léger que l'eau : il flotte, donc la touche toujours");
+}
+
+// Rouille : le métal mouillé rouille, plus vite dans l'eau salée, et la rouille ne conduit pas.
+{
+  /** Un fil de métal posé au fond d'un bac rempli de `liquid` (ou à sec) ; rend la rouille après `ticks`. */
+  const trempé = (liquid: MaterialId | null, ticks: number): number => {
+    const e = engine();
+    e.rect(0, H - 2, W - 1, H - 1, STONE);
+    e.rect(5, H - 3, 54, H - 3, METAL);
+    if (liquid !== null) e.rect(0, H - 12, W - 1, H - 4, liquid);
+    for (let t = 0; t < ticks; t++) e.step();
+    return count(e, RUST);
+  };
+  assert.equal(trempé(null, 600), 0, "à sec, le métal ne rouille pas");
+  const douce = trempé(WATER, 600), salée = trempé(SALTWATER, 600);
+  assert.ok(douce > 0, `dans l'eau, il rouille (${douce} cellules en 600 ticks)`);
+  assert.ok(salée > douce * 2, `l'eau salée le ronge bien plus vite (${salée} contre ${douce})`);
+
+  // Un fil rouillé au milieu ne laisse plus passer l'étincelle.
+  const e = engine();
+  for (let x = 10; x < 40; x++) e.set(x, 20, METAL);
+  e.set(25, 20, RUST);
+  e.set(45, 20, TNT);
+  for (let x = 40; x < 45; x++) e.set(x, 20, METAL);
+  e.set(9, 20, BATTERY);
+  for (let t = 0; t < 120; t++) e.step();
+  assert.equal(e.get(45, 20), TNT, "la rouille coupe le circuit : le TNT au bout ne saute pas");
+  e.set(25, 20, METAL);
+  for (let t = 0; t < 120; t++) e.step();
+  assert.notEqual(e.get(45, 20), TNT, "réparé, le fil conduit de nouveau");
 }
 
 // Grisou : la nappe entière s'enflamme, pas seulement la cellule touchée.
@@ -1270,7 +1327,7 @@ function top(e: Engine, id: MaterialId): number {
   };
 
   const empreinte = fingerprint(run(1234));
-  assert.equal(empreinte, "2ea7443b", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
+  assert.equal(empreinte, "ba5208ad", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
   assert.equal(fingerprint(run(1234)), empreinte, "et rejouable : deux fois la même graine, la même grille");
   assert.notEqual(fingerprint(run(9876)), empreinte, "une autre graine donne une autre partie");
 }

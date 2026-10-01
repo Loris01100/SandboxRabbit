@@ -7,7 +7,7 @@ a bougé).
 ## Ajouter une matière
 
 1. Une constante d'id dans [materials.ts](../../src/client/sim/materials.ts),
-   à la suite (la dernière est `HERO_LEGS = 54`). **Ne jamais renuméroter** : les
+   à la suite (la dernière est `RUST = 56`). **Ne jamais renuméroter** : les
    ids sont écrits dans les mondes sauvegardés. Reporter l'id dans la table
    gelée `IDS` de [test/rules.ts](../../test/rules.ts), qui le réclame — c'est
    elle qui interdit la renumérotation.

@@ -416,6 +416,7 @@ explosif = ajouter un déclencheur, sinon c'est du TNT repeint.
 | `NITRO` | choc (chute) |
 | `C4` | étincelle |
 | `MINE` | poids de ce qui coule (poudre / liquide) |
+| `SODIUM` | eau (douce ou salée) au contact ; le feu ne lui fait rien. Densité 3 : il flotte, donc la touche toujours. Petit souffle (`SPLASH` = 4) : c'est le nombre de grains qui fait le dégât, chaque grain projeté qui retombe dans l'eau repart |
 | `FIREDAMP` | volume (gaz `flammable` 1) |
 | `URANIUM` | masse (≥ `CRITICAL` voisins identiques), sans rien d'extérieur |
 | `THERMITE` | l'anti-explosif : perce au lieu de souffler |
@@ -508,6 +509,12 @@ mur, et une voisine qui n'est pas de l'air compte pour la cellule elle-même
   ne s'éteint jamais).
 - Tout ce qui met un fil sous tension passe par `charge()` (étincelle,
   `BATTERY`, `SWITCH` fermé).
+- `METAL` mouillé (eau douce ou salée au contact) rouille : `updateMetal()`
+  tire `RUST_FRESH` (1/2400) ou `RUST_SALT` (1/480) par tick et devient `RUST`,
+  qui ne conduit pas. Le tirage n'a lieu **que** contre l'eau (un fil sec ne
+  tire rien), et le métal mouillé appelle `wake(i)` : sinon un fil au fond
+  d'un lac étale s'endort et ne rouille jamais. Seule la surface mouillée
+  rouille (`ponytail:` d'`updateMetal()`).
 - `SWITCH` ne devient **jamais** une étincelle : il la relaie. Sinon il
   redeviendrait `METAL` à l'extinction et disparaîtrait.
 
