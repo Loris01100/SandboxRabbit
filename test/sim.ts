@@ -11,7 +11,7 @@ import { FlatLight } from "../src/client/sim/flatlight.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../src/client/gestures.ts";
 import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
-import { EXPLORE_SCALE, terrain } from "../src/client/terrain.ts";
+import { EXPLORE_SCALE, STRIP, land, terrain } from "../src/client/terrain.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
@@ -1641,6 +1641,72 @@ function top(e: Engine, id: MaterialId): number {
   let remué = 0;
   for (let i = 0; i < posé.length; i++) if (posé[i] !== x.cells[i]) remué++;
   assert.ok(remué < posé.length / 100, `le monde d'exploration naît au repos (${remué} cellules changées en 100 ticks)`);
+}
+
+/**
+ * `land()`, étape 1 du monde infini (docs/agents/exploration.md) : chaque
+ * cellule ne dépend que de sa position dans le monde. Sinon la fenêtre
+ * glissante rebâtirait un chunk revisité autrement qu'à l'aller, et deux
+ * machines d'un salon, qui n'auraient pas bâti dans le même ordre,
+ * divergeraient.
+ */
+{
+  const W = 1280, H = 720, G = 4217;
+  const bâti = (x0: number, tranches: [number, number][]): Engine => {
+    const e = new Engine(W, H, 1);
+    e.clear();
+    for (const [from, to] of tranches) land(e, G, EXPLORE_SCALE, x0, from, to);
+    return e;
+  };
+  const entier = bâti(0, [[0, W]]);
+  const tirage = new Engine(W, H, 1);
+  const avant = tirage.seed;
+  land(tirage, G, EXPLORE_SCALE, 0, 0, W);
+  assert.equal(tirage.seed, avant, "bâtir une tranche ne consomme aucun tirage du bac");
+
+  const pièces = bâti(0, [3, 0, 4, 1, 2].map((k): [number, number] => [k * STRIP, (k + 1) * STRIP]));
+  assert.deepEqual(pièces.cells, entier.cells, "cinq tranches dans le désordre : la même grille");
+  assert.deepEqual(pièces.life, entier.life, "… les mêmes `life` (lapins compris)");
+  assert.deepEqual(pièces.noise, entier.noise, "… le même grain");
+  assert.deepEqual(pièces.temp, entier.temp, "… la même température");
+
+  // Deux fenêtres décalées coïncident sur leurs colonnes communes, à gauche de zéro comme à droite.
+  for (const x0 of [STRIP, -2 * STRIP]) {
+    const autre = bâti(x0, [[0, W]]);
+    const d = x0 > 0 ? x0 : -x0;
+    let écarts = 0;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W - d; x++) {
+        const ici = x0 > 0 ? entier.cells[y * W + x + d] : entier.cells[y * W + x];
+        const là = x0 > 0 ? autre.cells[y * W + x] : autre.cells[y * W + x + d];
+        if (ici !== là) écarts++;
+      }
+    }
+    assert.equal(écarts, 0, `fenêtre décalée de ${x0} : mêmes colonnes communes`);
+  }
+
+  for (const id of [STONE, SAND, WATER, WOOD, PLANT, PETROLEUM, LAVA, METAL, URANIUM, RABBIT]) {
+    assert.ok(count(entier, id) > 0, `la tranche contient du ${MATERIALS[id].name.toLowerCase()}`);
+  }
+  assert.equal(count(entier, HERO), 0, "pas de héros : c'est au mode de le poser");
+  let ouvertes = 0, amas = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const id = entier.get(x, y);
+      const près = [entier.get(x - 1, y), entier.get(x + 1, y), entier.get(x, y - 1), entier.get(x, y + 1)];
+      // Les colonnes du bord ont leur voisine hors du bac (lue comme de la pierre) : elle compte comme le reste du monde.
+      if ((id === PETROLEUM || id === LAVA) && !près.every((n) => n === id || n === STONE || n === METAL || n === URANIUM)) ouvertes++;
+      if (id === URANIUM && près.includes(URANIUM)) amas++;
+    }
+  }
+  assert.equal(ouvertes, 0, "pétrole et lave enfermés, tranche par tranche");
+  assert.equal(amas, 0, "l'uranium en grains isolés");
+
+  const posé = entier.cells.slice();
+  for (let t = 0; t < 100; t++) entier.step();
+  let remué = 0;
+  for (let i = 0; i < posé.length; i++) if (posé[i] !== entier.cells[i]) remué++;
+  assert.ok(remué < posé.length / 100, `la tranche naît au repos (${remué} cellules changées en 100 ticks)`);
 }
 
 /**

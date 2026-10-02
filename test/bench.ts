@@ -16,6 +16,7 @@
 import { writeFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { FIRE, OIL, SAND, STONE, WATER, WOOD } from "../src/client/sim/materials.ts";
+import { EXPLORE_SCALE, STRIP, land } from "../src/client/terrain.ts";
 
 const TICKS = 300;
 /** Budget du tick en 320×180, en ms. Large : le runner de CI n'est pas cette machine. */
@@ -61,6 +62,19 @@ for (const [w, h] of [[320, 180], [480, 270], [640, 360], [1280, 720], [1920, 10
       String(Math.round(1000 / ms)).padStart(10) +
       `${Math.round(fps)}`.padStart(11),
   );
+}
+
+// Une tranche du monde infini (`land()`, docs/agents/exploration.md) : ce que
+// coûtera chaque chunk qui entre dans la fenêtre. Mesurée, pas budgétée : le
+// mode la bâtira d'avance, hors du tick (étape 3).
+{
+  const e = new Engine(1280, 720, 1);
+  for (let k = 0; k < 3; k++) land(e, 4217, EXPLORE_SCALE, k * STRIP, 0, STRIP);
+  const runs = 10, start = performance.now();
+  for (let k = 0; k < runs; k++) land(e, 4217, EXPLORE_SCALE, (k + 3) * STRIP, 0, STRIP);
+  const ms = (performance.now() - start) / runs;
+  measured[`tranche ${STRIP}×720`] = { value: ms, unit: "ms" };
+  console.log(`\ntranche du monde infini (${STRIP}×720) : ${ms.toFixed(1)} ms`);
 }
 
 if (process.env.BENCH_JSON) writeFileSync(process.env.BENCH_JSON, JSON.stringify(measured));

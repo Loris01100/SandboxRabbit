@@ -1,6 +1,7 @@
 # Mode exploration : monde infini (plan)
 
-**État : plan, rien de bâti au-delà du prototype.** Le bouton Explorer 🧭
+**État : étape 1 faite** (`land()`, voir plus bas), étapes 2 et suivantes à
+faire. Le bouton Explorer 🧭
 (main.ts) fixe l'échelle : décor à `EXPLORE_SCALE` (terrain.ts), vue à
 `EXPLORE_PX` pixels d'écran par cellule. Le monde reste un bac fini de
 1280×720. Ce guide dit comment le rendre infini en largeur, dans quel ordre,
@@ -49,7 +50,37 @@ de veille économisent le calcul, pas la mémoire.
 Chaque étape se livre seule, testée et documentée. Aucune ne change
 l'empreinte du moteur hors du mode : `shift()` n'est jamais appelé ailleurs.
 
-### 1. Générer par tranches de colonnes (terrain.ts, pur)
+### 1. Générer par tranches de colonnes (terrain.ts, pur) — fait
+
+**Fait.** `land()` et `STRIP` (256) dans terrain.ts. Sous-sol et relief
+passent par `plan()`, `surface()` et `under()`, partagés avec `terrain()`, qui
+reste identique au bit près (comparé à l'ancienne version en 320×180, 640×360
+et 1920×1080). test/sim.ts vérifie : cinq tranches dans le désordre = une
+seule passe (cellules, `life`, grain, température), fenêtres décalées de +256
+et de -512 identiques sur leurs colonnes communes, poches fermées, uranium
+isolé, pas de héros, monde au repos, aucun tirage du bac consommé.
+
+Écarts avec le plan :
+- un lapin ne naît que si son corps (colonnes `x - 2 … x + 2`) tient dans son
+  chunk **et** dans la tranche bâtie. Pour une tranche alignée sur `STRIP`,
+  c'est sans effet ; une tranche coupée ailleurs perd les lapins de ses bords.
+  Le reste du monde ne dépend pas du découpage, quel qu'il soit ;
+- un arbre cède la place à un **candidat** des `4 * scale` colonnes à sa
+  gauche (pas à un arbre) : la règle reste locale, sans chaîne de dépendances ;
+- les grappes d'uranium sont sur des coordonnées paires : deux grains ne
+  peuvent pas se toucher, même venus de deux grappes.
+
+**Mesuré** (`npm run bench`, ligne « tranche du monde infini ») : **environ
+35 ms** par tranche de 256×720, loin des 5 ms visés. Presque tout est le
+bruit du sous-sol (`noise()`, environ la moitié d'après le profil, le reste dans les boucles de `land()` et `under()`), le même
+calcul que `terrain()`. Conséquence pour l'étape 3 : la tranche suivante se
+bâtit **d'avance**, pas au tick du décalage (voir plus bas). Ce n'est pas un
+problème de justesse : `land()` est pur, on peut la calculer n'importe quand,
+et même ailleurs que sur le fil du bac. Une piste si ça ne suffit pas :
+garder les valeurs de `lattice()` d'une colonne à l'autre de la maille, sur
+laquelle `noise()` recalcule quatre coins identiques des dizaines de fois.
+
+Le plan d'origine :
 
 Une fonction `land(e, seed, scale, x0, from, to)` bâtit les colonnes
 `[from, to)` de la fenêtre, qui sont les colonnes `x0 + from …` du monde. Le
@@ -113,7 +144,15 @@ Dans sandbox.ts :
   `scale`) : fenêtre 1280×720, `land()` sur toute la largeur, héros posé ;
 - après chaque tick, `due()` ; s'il faut décaler, on encode la bande sortante
   (codec : matière, figé, `life`, température), puis `shift()`, puis on relit
-  la bande entrante ou on la génère (`land()`) ;
+  la bande entrante ou on pose celle qui est déjà bâtie ;
+- bâtir d'avance : une tranche coûte environ 35 ms (étape 1), trois images à
+  60 Hz. Dès que le héros entre dans le chunk qui précède un décalage, on bâtit
+  le chunk suivant **hors de la fenêtre**, par morceaux répartis sur plusieurs
+  ticks ou dans un fil auxiliaire. Il faut donc d'abord séparer `land()` en
+  deux : un calcul qui rend un tampon de colonnes (et la liste des lapins), et
+  la recopie dans le moteur. Le résultat ne dépend pas du moment du calcul ;
+  seul le moment où il est **posé** (au tick du décalage) compte pour le
+  salon ;
 - la décision ne dépend que de la grille : au même tick sur toutes les
   machines, ce qui garde la porte ouverte au salon (étape 7).
 
