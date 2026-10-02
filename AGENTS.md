@@ -49,6 +49,7 @@ pas de linter.
 | [docs/agents/rendu.md](docs/agents/rendu.md) | toucher à `screen.ts` : la chaîne grille → pixel, les textures et les quatre programmes WebGL2, l'éclairage global (*radiance cascades*) et son dimensionnement, la perte de contexte, le secours 2D. |
 | [docs/agents/performance.md](docs/agents/performance.md) | optimiser quoi que ce soit : quoi lancer selon la question, comment profiler, ce qui a déjà payé (et de combien), les pistes laissées de côté. |
 | [docs/agents/tests.md](docs/agents/tests.md) | écrire ou corriger un test, mettre à jour l'empreinte du moteur, comprendre la CI et ses budgets. |
+| [docs/agents/exploration.md](docs/agents/exploration.md) | travailler sur le mode exploration (bouton Explorer, `EXPLORE_SCALE`) : le plan du monde infini en fenêtre glissante, ses étapes et ce que chacune doit prouver. |
 | [docs/navigateur.md](docs/navigateur.md) | écrire ou lancer un test dans un vrai navigateur (Playwright), installer Chromium sur une machine neuve, le reprendre dans un autre projet. |
 | [docs/rust.md](docs/rust.md) | toucher à `rust/` : installer Rust, le prototype WASM de `thermal()`, ses mesures, le déterminisme f64, ce qu'il faudrait pour brancher Rust sur le moteur. |
 
