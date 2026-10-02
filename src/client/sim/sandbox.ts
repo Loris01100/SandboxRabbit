@@ -48,7 +48,7 @@ export type Order =
   | { t: "load"; data: string; ask?: number; quiet?: boolean }
   | { t: "edit"; do: "clear" | "undo" | "redo" | "step" | "snapshot" }
   | { t: "scene"; name: string }
-  | { t: "terrain"; seed: number }
+  | { t: "terrain"; seed: number; scale?: number }
   | { t: "goal"; goal: string | null }
   | { t: "cursor"; x: number; y: number }
   | { t: "clip"; ask: number; x: number; y: number; x2: number; y2: number }
@@ -226,7 +226,7 @@ export class Sandbox {
       case "load": return this.load(o.data, o.ask, o.quiet);
       case "edit": return this.edit(o.do);
       case "scene": return this.scene(o.name);
-      case "terrain": return this.world(o.seed);
+      case "terrain": return this.world(o.seed, o.scale);
       case "goal": {
         const goal = parseGoal(o.goal);
         this.trial = null; // un monde-défi de la galerie n'a pas de classement : sa grille n'est pas bâtie en code
@@ -549,13 +549,16 @@ export class Sandbox {
    * Un monde généré (terrain.ts), à la taille du bac. Même chemin qu'un décor :
    * le rejeu s'arrête, le bac d'avant reste annulable, et la grille entière
    * part aux enregistrements — un invité reçoit le monde, pas la graine.
-   * Une graine hors de 1..`SEEDS` venue de la page est ramenée dedans.
+   * Une graine hors de 1..`SEEDS` venue de la page est ramenée dedans ;
+   * `scale` (mode exploration) aussi, entre 0,5 et 6 — absente ou qui n'est
+   * pas un nombre, le décor suit la taille du bac.
    */
-  private world(seed: number): void {
+  private world(seed: number, scale?: number): void {
     this.play(false);
     this.snapshot();
     this.engine.clear();
-    terrain(this.engine, Math.min(SEEDS, Math.max(1, Math.floor(seed) || 1)));
+    const fixed = typeof scale === "number" && Number.isFinite(scale) ? Math.min(6, Math.max(0.5, scale)) : undefined;
+    terrain(this.engine, Math.min(SEEDS, Math.max(1, Math.floor(seed) || 1)), fixed);
     this.stamp();
     this.won = null;
     this.trial = null;

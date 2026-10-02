@@ -223,6 +223,12 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.deepEqual(sim.engine.cells, avant, "annuler ramène le bac d'avant");
   sim.order({ t: "terrain", seed: 4217 });
   assert.deepEqual(sim.engine.cells, bâti, "la même graine redonne le même monde");
+  sim.order({ t: "terrain", seed: 4217, scale: Number.NaN });
+  assert.deepEqual(sim.engine.cells, bâti, "une échelle qui n'est pas un nombre : le décor suit le bac");
+  sim.order({ t: "terrain", seed: 4217, scale: 1e9 });
+  const borné = sim.engine.cells.slice();
+  sim.order({ t: "terrain", seed: 4217, scale: 6 });
+  assert.deepEqual(sim.engine.cells, borné, "l'échelle venue de la page est bornée à 6");
 }
 
 /** La frame dit où est le héros — la caméra le suit — et se tait quand il n'y en a pas. */

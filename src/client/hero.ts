@@ -2,8 +2,8 @@ import { HERO_HARM, HERO_SLOTS, MATERIALS, PILOT, type MaterialId } from "./sim/
 import { current } from "./palette.ts";
 import { bindings, held } from "./keys.ts";
 import { keyLabel, type Action } from "./ui.ts";
-import { zoom, zoomCentered, zoomInput } from "./view.ts";
-import { WIDTH, cellBox, seen } from "./world.ts";
+import { scaleTo, zoom, zoomCentered, zoomInput } from "./view.ts";
+import { WIDTH, cellBox, onResize, seen } from "./world.ts";
 import { look } from "./sight.ts";
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -53,10 +53,21 @@ export function tighten(): boolean {
   return true;
 }
 
-/** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large) et la barre de statut donne les touches. */
+/**
+ * Pixels d'écran par cellule voulus à l'arrivée du héros (mode exploration),
+ * 0 pour la vue habituelle. Oublié quand le bac change de taille ou de monde
+ * (`closeUp(0)` dans `abandon()` de main.ts) : sinon un héros posé plus tard
+ * dans un bac ordinaire arrivait en gros plan.
+ */
+let close = 0;
+export function closeUp(px: number): void { close = px; }
+onResize.push(() => { close = 0; });
+
+/** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large, ou `close` pixels par cellule) et la barre de statut donne les touches. */
 function meet(): void {
   loose = false;
-  if (zoomInput.checked && zoom < WIDTH / 160) zoomCentered(WIDTH / 160);
+  if (zoomInput.checked && close) scaleTo(close);
+  else if (zoomInput.checked && zoom < WIDTH / 160) zoomCentered(WIDTH / 160);
   const k = (a: Action) => keyLabel(bindings[a]);
   statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("nextHero")} passe au héros suivant, ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
 }

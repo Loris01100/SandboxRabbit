@@ -23,6 +23,14 @@ import { EMPTY, LAVA, METAL, PETROLEUM, PLANT, SAND, STONE, URANIUM, WATER, WOOD
 /** Graines acceptées : ce qu'un joueur tape et retient. */
 export const SEEDS = 999_999;
 
+/**
+ * Échelle du décor en mode exploration : arbres, grottes et lacs gardent la
+ * taille qu'ils ont en 320×180, ×1,5, quelle que soit la grille. Sans elle, un
+ * monde 1280×720 a des arbres quatre fois plus grands, et le héros (sept
+ * cellules) y paraît minuscule même zoomé.
+ */
+export const EXPLORE_SCALE = 1.5;
+
 /** Bruit de valeur en un point entier du réseau, dans [0, 1). Un hachage, pas un état : lisible dans n'importe quel ordre. */
 function lattice(seed: number, x: number, y: number): number {
   let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ Math.imul(seed, 0x9e3779b1);
@@ -51,9 +59,11 @@ function fbm(seed: number, x: number, y: number): number {
 const SEALS = new Set<MaterialId>([STONE, METAL, URANIUM]);
 
 /**
- * Bâtit le monde de la graine `seed` sur un bac vidé. Les distances sont en
- * fraction de la hauteur (`h`) : un monde 1920×1080 est le même que son
- * 320×180, en plus fin et plus large.
+ * Bâtit le monde de la graine `seed` sur un bac vidé. Par défaut, les
+ * distances sont en fraction de la hauteur (`h`) : un monde 1920×1080 est le
+ * même que son 320×180, en plus fin et plus large. `scale` les fixe à la place
+ * (`EXPLORE_SCALE`) : les étages (mer, nappe, pétrole, lave) restent en
+ * fraction de `h`, seules les formes gardent une taille en cellules.
  *
  * Trois passes. Le relief et le sous-sol, colonne par colonne. Puis les
  * poches de pétrole et de lave sont refermées : une cellule qui touche autre
@@ -63,10 +73,10 @@ const SEALS = new Set<MaterialId>([STONE, METAL, URANIUM]);
  * jusqu'à sauter), les arbres, les touffes et les lapins sur le sable sec —
  * et le héros, au sec le plus près du centre.
  */
-export function terrain(e: Engine, seed: number): void {
+export function terrain(e: Engine, seed: number, scale?: number): void {
   const { width: w, height: h } = e;
-  const s = h / 180;
-  /** Côté d'une maille de bruit, en cellules : les formes gardent leur taille relative au bac. */
+  const s = scale ?? h / 180;
+  /** Côté d'une maille de bruit, en cellules : les formes gardent leur taille relative au bac (ou fixe, avec `scale`). */
   const cell = 40 * s;
   const sea = Math.round(h * 0.47);
   const table = Math.round(h * 0.72);

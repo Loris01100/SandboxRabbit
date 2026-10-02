@@ -80,6 +80,15 @@ export function follow([x, y]: [number, number]): void {
   applyView();
 }
 
+/**
+ * Zoome autour du centre pour qu'une cellule fasse `px` pixels d'écran, quelle
+ * que soit la taille du bac : l'échelle du mode exploration. Borné comme
+ * `zoomAt` — sur un écran étroit, la cellule reste plus petite.
+ */
+export function scaleTo(px: number): void {
+  zoomCentered((px * WIDTH) / canvas.offsetWidth);
+}
+
 // Le zoom se coupe : sans lui la molette rend la main à la page, et un bac
 // laissé agrandi ne piège personne — on le remet d'aplomb en décochant.
 export const zoomInput = document.querySelector<HTMLInputElement>("#zoom")!;

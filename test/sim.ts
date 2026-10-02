@@ -11,7 +11,7 @@ import { FlatLight } from "../src/client/sim/flatlight.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../src/client/gestures.ts";
 import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
-import { terrain } from "../src/client/terrain.ts";
+import { EXPLORE_SCALE, terrain } from "../src/client/terrain.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
@@ -1614,6 +1614,33 @@ function top(e: Engine, id: MaterialId): number {
   let bougé = 0;
   for (let i = 0; i < avant.length; i++) if (avant[i] !== a.cells[i]) bougé++;
   assert.ok(bougé < avant.length / 100, `le monde naît au repos (${bougé} cellules changées en 200 ticks)`);
+
+  // Échelle fixe (mode exploration) : `scale` = h / 180 redonne le monde par
+  // défaut au bit près, et un monde 1280×720 à `EXPLORE_SCALE` garde héros,
+  // poches fermées et repos — ses formes sont 2,7 fois plus petites qu'à
+  // l'échelle du bac, rien ne dit que le scellement suit.
+  const fixe = new Engine(640, 360, 1);
+  fixe.clear();
+  terrain(fixe, 4217, 2);
+  assert.deepEqual(fixe.cells, monde(4217).cells, "scale = h / 180 : le monde de toujours");
+  const x = new Engine(1280, 720, 1);
+  x.clear();
+  terrain(x, 4217, EXPLORE_SCALE);
+  assert.ok(count(x, HERO) > 0, "le monde d'exploration a son héros");
+  let fuites = 0;
+  for (let y = 0; y < x.height; y++) {
+    for (let i = 0; i < x.width; i++) {
+      const id = x.get(i, y);
+      if ((id === PETROLEUM || id === LAVA) && ![x.get(i - 1, y), x.get(i + 1, y), x.get(i, y - 1), x.get(i, y + 1)]
+        .every((n) => n === id || n === STONE || n === METAL || n === URANIUM)) fuites++;
+    }
+  }
+  assert.equal(fuites, 0, "à échelle fixe aussi, pétrole et lave restent enfermés");
+  const posé = x.cells.slice();
+  for (let t = 0; t < 100; t++) x.step();
+  let remué = 0;
+  for (let i = 0; i < posé.length; i++) if (posé[i] !== x.cells[i]) remué++;
+  assert.ok(remué < posé.length / 100, `le monde d'exploration naît au repos (${remué} cellules changées en 100 ticks)`);
 }
 
 /**

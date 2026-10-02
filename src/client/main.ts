@@ -1,10 +1,10 @@
 import "./style.css";
 import { EMPTY, MAGNET, MATERIALS, SHORTCUTS, SWITCH, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
-import { SEEDS } from "./terrain.ts";
+import { EXPLORE_SCALE, SEEDS } from "./terrain.ts";
 import { combo, keyOf, read, stored, write, type Action } from "./ui.ts";
 import { bound, held, openSettings } from "./keys.ts";
-import { MOVES, follow, panBy, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
+import { MOVES, follow, panBy, scaleTo, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
 import { current, emit, select } from "./palette.ts";
 import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, soundInput, toolInput } from "./settings.ts";
 import { hear, initSound, setHum } from "./audio.ts";
@@ -12,7 +12,7 @@ import { FILM_LINK, captureFrame, forgetOrigin, initShare, openFilmLink } from "
 import type { Recording } from "./replay.ts";
 import { initRoom, placeCursors, pointAt, relay } from "./lobby.ts";
 import { WIDTH, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, seen, set, type ClipData } from "./world.ts";
-import { STEER, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
+import { STEER, closeUp, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
 /**
@@ -455,12 +455,37 @@ document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", ()
  * bac — c'est en 1920×1080 qu'il y a le plus à explorer.
  */
 const seedInput = document.querySelector<HTMLInputElement>("#seed")!;
-document.querySelector<HTMLButtonElement>("#terrain")!.addEventListener("click", () => {
+function pickSeed(): number {
   const typed = Math.floor(Number(seedInput.value));
-  const seed = typed >= 1 && typed <= SEEDS ? typed : 1 + Math.floor(Math.random() * SEEDS);
+  return typed >= 1 && typed <= SEEDS ? typed : 1 + Math.floor(Math.random() * SEEDS);
+}
+document.querySelector<HTMLButtonElement>("#terrain")!.addEventListener("click", () => {
+  const seed = pickSeed();
   order({ t: "terrain", seed });
   abandon();
   statusEl.textContent = `Monde n° ${seed} — la même graine redonne le même monde. Molette ou + pour zoomer, ZQSD pour se déplacer.`;
+});
+
+/** Pixels d'écran par cellule en mode exploration : le héros (sept cellules) y fait une quarantaine de pixels, comme celui de Terraria. */
+const EXPLORE_PX = 6;
+
+/**
+ * Explorer : prototype du mode exploration, pour juger l'échelle avant de
+ * bâtir les chunks. Un monde 1280×720 dont le décor garde une taille fixe
+ * (`EXPLORE_SCALE`), vu de près sur le héros (`EXPLORE_PX`).
+ * ponytail: le monde reste fini (1280×720, bords murés) et tout le bac est
+ * colorié même hors champ ; à revoir avec la fenêtre glissante.
+ */
+document.querySelector<HTMLButtonElement>("#explore")!.addEventListener("click", () => {
+  const seed = pickSeed();
+  fit(1280);
+  order({ t: "terrain", seed, scale: EXPLORE_SCALE });
+  abandon();
+  closeUp(EXPLORE_PX);
+  // Le héros d'avant a pu laisser place au nouveau sans frame vide : `meet()`
+  // ne serait pas rappelé, on pose donc l'échelle tout de suite.
+  if (zoomInput.checked) scaleTo(EXPLORE_PX);
+  statusEl.textContent = `Exploration, monde n° ${seed}. Molette pour ajuster le zoom.`;
 });
 
 // Surprise : un décor tiré au sort, sans objectif — juste pour regarder.
@@ -561,6 +586,7 @@ function startChallenge(c: Challenge): void {
  * son but et faisait tourner son chrono.
  */
 function abandon(): void {
+  closeUp(0); // le gros plan de l'exploration ne vaut que pour son monde
   forgetOrigin(); // ce n'est plus le monde de la galerie : resauvegardé, il ne sera pas son remix
   if (!challenge) return;
   goalEl.textContent = `${challenge.name} — abandonné.`;
