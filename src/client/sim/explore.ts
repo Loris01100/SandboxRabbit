@@ -24,7 +24,7 @@
  */
 import type { Engine } from "./engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeTemp, encode } from "./codec.ts";
-import { EMPTY, HERO, LAVA, PETROLEUM, PLANT, SAND, STONE, URANIUM, WATER, WOOD, type MaterialId } from "./materials.ts";
+import { EMPTY, HERO, LAVA, MATERIALS, PETROLEUM, PLANT, SAND, STONE, URANIUM, WATER, WOOD, type MaterialId } from "./materials.ts";
 import { SEALS, lattice, plan, surface, under } from "../terrain.ts";
 
 /**
@@ -43,10 +43,36 @@ export const EXPLORE_SCALE = 1.5;
  */
 export const STRIP = 256;
 
-/** Grain du rendu (`noise`) d'une cellule du monde : un hachage, pour qu'un chunk revisité garde le même grain. */
-function grain(x: number, y: number): number {
-  return ((lattice(0x67a1, x, y) * 255) | 0) - 128;
+/** `life` d'une matière tout juste posée, par id : ce qu'écrit `set()` (`MATERIALS[id].life ?? 0`). */
+const BORN = new Uint8Array(256);
+/** Température d'une matière tout juste posée, par id (`spawn`, sinon `heat`) ; NaN : celle de l'air. */
+const WARM = new Float32Array(256).fill(NaN);
+for (const [key, m] of Object.entries(MATERIALS)) {
+  BORN[Number(key)] = m.life ?? 0;
+  WARM[Number(key)] = m.spawn ?? m.heat ?? NaN;
 }
+
+/**
+ * Grain du rendu (`noise`) d'un chunk, `STRIP` colonnes sur `h` rangées, de
+ * gauche à droite puis de haut en bas : un hachage de la position, le même
+ * pour tous les chunks. Un chunk revisité garde ainsi son grain, et le poser
+ * n'est qu'une recopie de rangées. Hacher chaque cellule de chaque chunk
+ * posé coûtait 2 ms d'un glissement ; un motif de grain qui revient toutes
+ * les 256 colonnes ne se voit pas.
+ */
+const GRAINS = new Map<number, Int8Array>();
+function grains(h: number): Int8Array {
+  let g = GRAINS.get(h);
+  if (!g) {
+    g = new Int8Array(STRIP * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < STRIP; x++) g[y * STRIP + x] = ((lattice(0x67a1, x, y) * 255) | 0) - 128;
+    GRAINS.set(h, g);
+  }
+  return g;
+}
+
+/** La colonne `x` du monde dans son chunk, de 0 à `STRIP` - 1 (à gauche de zéro aussi). */
+const inChunk = (x: number): number => x - Math.floor(x / STRIP) * STRIP;
 
 /**
  * Bâtit les colonnes `[from, to)` du bac, qui sont les colonnes `x0 + from …`
@@ -233,17 +259,24 @@ export function join(parts: Raised[]): Raised {
 export function lay(e: Engine, r: Raised, x0: number): void {
   const { width: w } = e, { h } = r;
   const from = Math.max(0, r.a - x0), to = Math.min(w, r.b - x0);
-  const { noise } = e;
+  if (from >= to) return;
+  const { cells, life, frozen, noise } = e, g = grains(h);
   const temp = e.temp, ambient = e.ambient;
-  for (let x = from; x < to; x++) {
-    const col = (x + x0 - r.a) * h;
-    for (let y = 0; y < h; y++) {
-      const i = y * w + x;
-      temp[i] = ambient;
-      e.set(x, y, r.cells[col + y] as MaterialId);
-      noise[i] = grain(x0 + x, y);
+  // Ce que ferait `set()`, sans ses trois lectures de `MATERIALS` ni son
+  // réveil par cellule : 184 000 appels par chunk, la moitié d'un glissement.
+  // Le réveil se fait d'un coup, par colonnes de blocs (`wakeColumns()`).
+  for (let y = 0; y < h; y++) {
+    for (let x = from, col = (from + x0 - r.a) * h + y; x < to; x++, col += h) {
+      const i = y * w + x, id = r.cells[col];
+      cells[i] = id;
+      frozen[i] = 0;
+      life[i] = BORN[id];
+      const t = WARM[id];
+      temp[i] = t === t ? t : ambient; // NaN : la matière n'a pas de température à elle
+      noise[i] = g[y * STRIP + inChunk(x0 + x)];
     }
   }
+  e.wakeColumns(from, to);
   for (let k = 0; k < r.rabbits.length; k += 3) {
     const x = r.rabbits[k] - x0;
     if (x - 2 >= from && x + 2 < to) e.spawnRabbit(x, r.rabbits[k + 1], r.rabbits[k + 2]);
@@ -253,7 +286,13 @@ export function lay(e: Engine, r: Raised, x0: number): void {
 /** Recalcule le grain du rendu des colonnes `[from, to)` du bac (un chunk rangé ne le garde pas). */
 export function regrain(e: Engine, x0: number, from: number, to: number): void {
   const { width: w, height: h, noise } = e;
-  for (let y = 0; y < h; y++) for (let x = from; x < to; x++) noise[y * w + x] = grain(x0 + x, y);
+  const g = grains(h);
+  // Un chunk entier (le cas du glissement) : une recopie par rangée.
+  if (inChunk(x0 + from) === 0 && to - from === STRIP) {
+    for (let y = 0; y < h; y++) noise.set(g.subarray(y * STRIP, (y + 1) * STRIP), y * w + from);
+    return;
+  }
+  for (let y = 0; y < h; y++) for (let x = from; x < to; x++) noise[y * w + x] = g[y * STRIP + inChunk(x0 + x)];
 }
 
 
@@ -268,8 +307,14 @@ export class Explore {
   readonly scale: number;
   /** Colonne du monde qui est la colonne 0 du bac. Multiple de `STRIP`. */
   x0 = -2 * STRIP;
-  /** Chunks sortis de la fenêtre, encodés (codec : matière, figé, `life`, température), par numéro. */
-  readonly kept = new Map<number, string>();
+  /**
+   * Chunks sortis de la fenêtre, par numéro : encodés (codec : matière, figé,
+   * `life`, température), ou encore bruts (`Stash`) le temps que `prepare()`
+   * les encode — l'encodage coûtait 5 ms au tick du glissement. Un chunk qui
+   * va rentrer est au contraire décodé d'avance. Brut ou encodé, il revient
+   * identique : la température brute est déjà arrondie au pas du codec.
+   */
+  readonly kept = new Map<number, string | Stash>();
   /** Le chunk en cours de construction d'avance : son numéro et ses morceaux faits. */
   private early: { c: number; parts: Raised[] } | null = null;
 
@@ -367,11 +412,22 @@ export class Explore {
    */
   prepare(e: Engine): void {
     const x = this.heroX(e);
-    if (x < 0) return;
-    const k = x >= e.width - 2 * STRIP ? e.width / STRIP : x < 2 * STRIP ? -1 : null;
-    if (k === null) return;
-    const c = this.chunk(k);
-    if (this.kept.has(c)) return;
+    const k = x < 0 ? null : x >= e.width - 2 * STRIP ? e.width / STRIP : x < 2 * STRIP ? -1 : null;
+    const c = k === null ? null : this.chunk(k);
+    // Un chunk rangé brut et qui n'est pas sur le point de rentrer : encodé
+    // maintenant, un par image (2 ms), pour ne pas garder 700 Ko par chunk.
+    for (const [n, entry] of this.kept) {
+      if (typeof entry === "string" || n === c) continue;
+      this.kept.set(n, seal(entry));
+      return;
+    }
+    if (c === null) return;
+    const entry = this.kept.get(c);
+    if (entry !== undefined) {
+      // Il va rentrer : décodé d'avance (5 ms), il ne reste au glissement que la recopie.
+      if (typeof entry === "string") this.kept.set(c, open(entry, e.height));
+      return;
+    }
     if (this.early?.c !== c) this.early = { c, parts: [] };
     const { parts } = this.early;
     if (parts.length * PIECE >= STRIP) return;
@@ -385,13 +441,58 @@ export class Explore {
   }
 }
 
-/** Encode les colonnes `[x, x + STRIP)` du bac : matière, figé, `life`, température. */
-function pack(e: Engine, x: number): string {
-  const { width: w, height: h } = e;
-  const clip = e.copy(x, 0, x + STRIP - 1, h - 1);
-  const temp = new Float32Array(STRIP * h);
-  for (let y = 0; y < h; y++) temp.set(e.temp.subarray(y * w + x, y * w + x + STRIP), y * STRIP);
-  return encode(clip.cells, clip.frozen, clip.life, temp);
+/**
+ * Un chunk rangé, pas encore encodé : ses couches, `STRIP` colonnes de large,
+ * et sa température en octets, **arrondie comme le codec** (`heat`). Relu
+ * avant d'être encodé, il revient donc exactement comme il serait revenu
+ * encodé : le résultat ne dépend pas de la cadence des images.
+ */
+export interface Stash {
+  cells: Uint8Array;
+  frozen: Uint8Array;
+  life: Uint8Array;
+  heat: Uint8Array;
+}
+
+/**
+ * Pas et plancher de la température du codec (sim/codec.ts, bloc 4) : gelés
+ * avec son format — un monde enregistré ne se relirait plus sinon. Recopiés
+ * ici pour arrondir un chunk rangé sans l'encoder.
+ */
+const STEP = 8, FLOOR = -60;
+
+/** Range les colonnes `[x, x + STRIP)` du bac, rangée par rangée, sans les encoder. */
+function pack(e: Engine, x: number): Stash {
+  const { width: w, height: h, temp } = e;
+  const n = STRIP * h;
+  const s: Stash = { cells: new Uint8Array(n), frozen: new Uint8Array(n), life: new Uint8Array(n), heat: new Uint8Array(n) };
+  for (let y = 0; y < h; y++) {
+    const from = y * w + x, to = y * STRIP;
+    s.cells.set(e.cells.subarray(from, from + STRIP), to);
+    s.frozen.set(e.frozen.subarray(from, from + STRIP), to);
+    s.life.set(e.life.subarray(from, from + STRIP), to);
+    for (let k = 0; k < STRIP; k++) {
+      const v = Math.round((temp[from + k] - FLOOR) / STEP);
+      s.heat[to + k] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+  }
+  return s;
+}
+
+/** Encode un chunk rangé (codec). La température repart de ses octets : le codec la retrouve au même octet près. */
+function seal(s: Stash): string {
+  const temp = new Float32Array(s.heat.length);
+  for (let i = 0; i < temp.length; i++) temp[i] = s.heat[i] * STEP + FLOOR;
+  return encode(s.cells, s.frozen, s.life, temp);
+}
+
+/** Décode un chunk rangé, haut de `h`. */
+function open(data: string, h: number): Stash {
+  const n = STRIP * h;
+  const temp = decodeTemp(data, n);
+  const heat = new Uint8Array(n);
+  if (temp) for (let i = 0; i < n; i++) heat[i] = (temp[i] - FLOOR) / STEP;
+  return { cells: decode(data, n), frozen: decodeFrozen(data, n), life: decodeLife(data, n) ?? new Uint8Array(n), heat };
 }
 
 /**
@@ -401,10 +502,12 @@ function pack(e: Engine, x: number): string {
  * sur des blocs que `paste()` vient de réveiller — leur prochaine passe de
  * chaleur part donc d'elle. Elle revient arrondie au pas du codec (8 °C).
  */
-function unpack(e: Engine, data: string, x: number): void {
-  const { width: w, height: h } = e;
-  const n = STRIP * h;
-  e.paste({ width: STRIP, height: h, cells: decode(data, n), frozen: decodeFrozen(data, n), life: decodeLife(data, n) ?? new Uint8Array(n) }, x, 0);
-  const temp = decodeTemp(data, n);
-  if (temp) for (let y = 0; y < h; y++) e.temp.set(temp.subarray(y * STRIP, (y + 1) * STRIP), y * w + x);
+function unpack(e: Engine, entry: string | Stash, x: number): void {
+  const { width: w, height: h, temp } = e;
+  const s = typeof entry === "string" ? open(entry, h) : entry;
+  e.paste({ width: STRIP, height: h, cells: s.cells, frozen: s.frozen, life: s.life }, x, 0);
+  for (let y = 0; y < h; y++) {
+    const to = y * w + x, from = y * STRIP;
+    for (let k = 0; k < STRIP; k++) temp[to + k] = s.heat[from + k] * STEP + FLOOR;
+  }
 }

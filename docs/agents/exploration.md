@@ -271,12 +271,11 @@ de la table reste bornée (quelques Ko par chunk au repos).
 ### 4. La page suit l'origine (world.ts, view.ts, hero.ts) — fait
 
 **Fait.**
-- Après un glissement, sandbox.ts appelle `Tracker.whole()` : la frame
-  suivante porte toute la grille, **grain compris**. Avant, le grain ne partait
-  qu'à la première frame d'un moteur, et la page gardait l'ancien, décalé
-  d'un chunk.
-- world.ts relève `origin` dans chaque frame. Quand elle change, il retient
-  de combien la fenêtre a glissé ; `shifted()` le rend, remis à zéro.
+- world.ts relève `origin` dans chaque frame. Quand elle change, il fait
+  glisser son miroir d'autant (`glide()` de render.ts) avant d'y poser les
+  bandes de la frame, et retient le glissement ; `shifted()` le rend, remis à
+  zéro. (Première version : le bac renvoyait toute la grille, voir « Images
+  sautées » plus bas.)
 - Dans la boucle d'image de main.ts : `present()` d'abord, puis
   `slideBy(shifted())` (view.ts), puis `follow()`. La caméra se décale du
   glissement **dans l'image où il est dessiné**. Décalée à l'arrivée de la
@@ -292,8 +291,9 @@ de la table reste bornée (quelques Ko par chunk au repos).
   pour ne rien dire de plus.
 
 Prouvé :
-- test/sandbox.ts : la frame du glissement porte la nouvelle origine, toute
-  la grille et le grain du bac glissé ; la suivante ne renvoie plus le grain ;
+- test/sandbox.ts : un miroir rebâti comme world.ts, de frame en frame
+  (`glide()` puis les bandes), reste la grille du bac (matière, `life`,
+  grain, chaleur) après quatre glissements dans les deux sens ;
 - dans Chromium, à la main (script jetable, pas dans `npm run browser`) :
   caméra décrochée emmenée à droite, un héros posé à la colonne 1100 du bac.
   La fenêtre glisse au tick suivant, le canvas recule de 1 536 px (256 × 6) et
@@ -302,14 +302,47 @@ Prouvé :
   logiciel de la CI : c'est pour ça que ce n'est pas un test permanent ;
 - `npm run browser` toujours vert.
 
-**Mesuré** (Node, 1280×720, chunk entrant bâti d'avance) : la frame du
-glissement coûte **35 à 50 ms** côté Worker, contre environ 13 ms pour une
-frame ordinaire. C'est le tick, le glissement (étape 3 : 14 à 17 ms) et la
-découpe de toute la grille, un tampon de 11 Mo transféré à la page qui le
-recopie dans son miroir. Deux ou trois images sautent à chaque chunk traversé,
-soit tous les 256 pas du héros. Pistes, dans l'ordre : que la page glisse son
-miroir elle-même et ne reçoive que la bande neuve (le plan d'origine
-ci-dessous), puis un `lay()` sans `set()` cellule par cellule.
+#### Images sautées — réglé
+
+Première version : la frame du glissement coûtait **35 à 50 ms** côté
+Worker (Node, un fil), et 26 à 45 ms avec quatre fils auxiliaires, contre
+environ 5 ms pour une frame ordinaire. Deux ou trois images sautaient à chaque
+chunk traversé. En cause : la grille entière renvoyée (11 Mo, grain compris),
+et un glissement de 13 à 30 ms.
+
+Ce qui a été fait, du plus au moins rentable :
+- **La page fait glisser son miroir** (`glide()`) : `Engine.shift()` fait
+  glisser `shown` au lieu de tout marquer, et `Tracker.grained()` ne joint le
+  grain qu'aux bandes de la frame. Seules partent la bande neuve et les
+  bandes qu'ont changées les ticks.
+- **Un chunk sortant est rangé brut** (`Stash`) et encodé par `prepare()` une
+  image plus tard ; **un chunk rangé qui va rentrer est décodé d'avance**.
+  Le codec coûtait 5 ms à l'encodage et 5 ms au décodage, au tick du
+  glissement. La température brute est arrondie comme le codec : brut ou
+  encodé, le chunk revient identique (test/sandbox.ts).
+- **`lay()` écrit directement** dans les tableaux (tables `BORN`, `WARM`) et
+  réveille par colonnes de blocs (`Engine.wakeColumns()`) ; **`paste()`**
+  écrit rangée par rangée et réveille par bloc.
+- **Le grain se répète tous les 256 colonnes** : précalculé une fois, posé par
+  recopie de rangées (2 ms de hachage par chunk en moins).
+- **Pression et élan ne glissent que s'il a soufflé** (`CTL.gust`) : 16 des
+  27 octets par cellule (le décalage passe de 4 à 1,1 ms au bench).
+- **Plus de `seek` dans `shift()`** : deux relectures de toute la grille de
+  moins.
+- **Rien d'autre de lourd dans la frame du glissement** : ni `prepare()`, ni
+  la copie de secours de la grille (`grid`, plusieurs ms en 1280×720), qui
+  attendent la frame suivante.
+
+**Mesuré** (Node, quatre fils auxiliaires, héros qui marche réellement
+jusqu'au seuil, chunk préparé) : le glissement seul passe de 11 à 19 ms à
+**5 à 6 ms** une fois le JIT chaud. La frame du glissement passe de 16 à 25 ms
+à **9 à 13 ms**, sous les 16,7 ms d'une image à 60 Hz ; une frame ordinaire en
+coûte 3 à 4. Les premiers glissements d'une session restent à 15 à 25 ms, le
+temps que le JIT compile ces fonctions : une image peut encore sauter aux
+deux ou trois premiers chunks traversés. Côté page, le glissement du miroir
+recopie 11 Mo et le shader recolorie tout (`repaint`) ; mesuré dans Chromium
+logiciel, l'image à l'écran ne change que de 2,2 % de ses pixels au
+glissement (le héros posé, l'eau qui coule) : le miroir glissé est juste.
 
 Le plan d'origine :
 

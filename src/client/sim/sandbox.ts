@@ -180,6 +180,8 @@ export class Sandbox {
   private voyage: Explore | null = null;
   /** Numéro du dernier départ demandé : un départ dont le module arrive après un autre ordre est oublié. */
   private boarding = 0;
+  /** La fenêtre a glissé pendant cette frame : `prepare()` attend la suivante. */
+  private slid = false;
   /** Le chargement du mode en cours ou fini (`explore()`), pour que les tests l'attendent. */
   arrival: Promise<void> = Promise.resolve();
 
@@ -321,8 +323,12 @@ export class Sandbox {
         if (this.late(start)) break;
       }
     }
-    // Un morceau du chunk qui entrera si le héros continue : 4 ms, hors des ticks.
-    this.voyage?.prepare(this.engine);
+    // Un morceau du chunk qui entrera si le héros continue : 4 ms, hors des
+    // ticks. Pas dans la frame qui vient de glisser : elle a déjà payé le
+    // glissement, et le chunk suivant a 256 pas du héros pour se bâtir.
+    const slid = this.slid;
+    this.slid = false;
+    if (!slid) this.voyage?.prepare(this.engine);
 
     const patches = this.tracker.take();
     const { width: w, height: h } = this.engine;
@@ -367,7 +373,9 @@ export class Sandbox {
 
     if (this.engine.busy > 0) this.touched = true;
     this.sinceGrid += ms;
-    if (this.touched && this.sinceGrid >= GRID * Math.max(1, this.engine.cells.length / GRID_CELLS)) {
+    // Pas dans la frame qui vient de glisser : la copie de secours encode toute
+    // la grille (plusieurs ms en 1280×720), et tombait parfois sur elle.
+    if (this.touched && !slid && this.sinceGrid >= GRID * Math.max(1, this.engine.cells.length / GRID_CELLS)) {
       this.sinceGrid = 0;
       this.touched = false;
       this.send({ t: "grid", full: this.encoded(), w: this.engine.width });
@@ -468,7 +476,10 @@ export class Sandbox {
     this.engine.step();
     // Entre deux ticks, comme l'exige `shift()`. Ni enregistrement ni salon en
     // exploration (refusés) : rien à `stamp()`.
-    if (this.voyage?.slide(this.engine)) this.tracker.whole();
+    if (this.voyage?.slide(this.engine)) {
+      this.tracker.grained();
+      this.slid = true;
+    }
     const ticks = this.stream?.rec.ticks;
     if (ticks !== undefined && ticks % SUM === 0) this.sums.push([ticks, fingerprint(this.engine.cells)]);
   }
@@ -626,6 +637,9 @@ export class Sandbox {
       this.touched = true;
       this.voyage = new Explore(Math.min(SEEDS, Math.max(1, Math.floor(seed) || 1)));
       this.voyage.start(this.engine);
+      // Le grain du monde infini vient de la position (`lay()`), pas du tirage
+      // du moteur : la page garde sinon celui de la première frame du bac.
+      this.tracker.grained();
     }, () => {
       this.send({ t: "say", text: "Exploration indisponible : le module ne s'est pas chargé." });
     });

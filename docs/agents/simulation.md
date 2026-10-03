@@ -258,8 +258,16 @@ Invariants :
   endormi lit l'un ou l'autre) ; `stir`, `awake`, `was`, `hush` d'autant de
   blocs. La bande neuve est vide, à l'ambiante, sans pression ni grain,
   `stir` à 1 et `awake` à 0 : `rouse()` la traite en bloc fraîchement
-  réveillé et y remet les horloges. `hero` glisse (ou passe à -1 s'il sort),
-  `seek` relance `find()`. Un nouveau tableau par cellule ou par bloc qui vit
+  réveillé et y remet les horloges. `shown` (les blocs à redessiner) glisse
+  aussi, sans être remis à 1 : la page fait glisser son miroir d'autant
+  (`glide()` de render.ts) et ne reçoit que la bande neuve et ce qu'ont
+  changé les ticks. Pression et élan ne glissent que si `CTL.gust` vaut 1 :
+  à 0, ils sont nuls partout, dans les deux tampons (un bloc calmé est remis
+  à zéro, un bloc endormi l'est déjà, `puff()` lève le drapeau) — vérifié sur
+  1 102 ticks calmes après 398 ticks d'explosions. `hero` glisse (ou passe à
+  -1 s'il sort, et `find()` le cherche au tick suivant) ; pas de `seek`, qui
+  relisait toute la grille deux fois à chaque glissement — un héros apporté
+  par la bande neuve passe par `paste()`, qui le demande. Un nouveau tableau par cellule ou par bloc qui vit
   d'un tick à l'autre doit être ajouté à `shift()`, sinon il reste en place
   sous la grille qui glisse : test/sim.ts (aller-retour, puis 200 ticks
   comparés à un bac resté en place) et test/pool.ts (1 fil contre 4, fenêtre
@@ -782,10 +790,16 @@ tick en 1920×1080 chargé (`npm run directions`).
   doit faire l'un ou l'autre.
 - `engine.changed()` remet à zéro ce qu'il a rendu : un seul `Tracker` par
   moteur.
-- Le grain (`noise`) ne part qu'avec une frame entière : la première d'un
-  moteur, ou celle que demande `Tracker.whole()`. sandbox.ts l'appelle après
-  chaque glissement de la fenêtre d'exploration (`Engine.shift()`) : le grain
-  a glissé avec la grille, et la page aurait gardé l'ancien, décalé d'un chunk.
+- Le grain (`noise`) ne part qu'avec la première frame d'un moteur (entière),
+  ou dans les bandes d'une frame que demande `Tracker.grained()`. sandbox.ts
+  l'appelle après chaque glissement de la fenêtre d'exploration
+  (`Engine.shift()`) et au départ du mode : la page fait glisser son miroir,
+  grain compris, mais n'a pas celui de la bande neuve. Renvoyer toute la
+  grille à la place coûtait 11 Mo par chunk traversé.
+- `wakeColumns(from, to)` réveille les blocs d'une bande de colonnes, pour qui
+  écrit directement dans les tableaux hors du moteur (`lay()` du mode
+  exploration). `paste()` écrit rangée par rangée et réveille par bloc, au
+  même résultat que cellule par cellule (2,7 ms de moins par chunk relu).
 - `thumbnail()` sert aux vignettes de la galerie ; la lumière autour des
   sources chaudes reste un sous-produit de `temp` (aucun flou).
 

@@ -784,9 +784,12 @@ export class Engine {
    * `CHUNK`. La bande neuve compte pour fraîchement réveillée (`awake` à 0,
    * `stir` à 1) : `rouse()` y remet les horloges.
    *
-   * Tout est à redessiner (`shown`), et le héros piloté est recherché par son
-   * numéro (`seek`) : la bande neuve a pu en apporter, un héros coupé par le
-   * bord en a perdu.
+   * Les blocs à redessiner (`shown`) glissent avec la grille : la page fait
+   * glisser son miroir d'autant. L'index du héros piloté glisse aussi (-1 s'il
+   * sort) ; `find()` le cherche alors au tick suivant. Pas de `seek` : il
+   * relisait toute la grille deux fois (`enlist()`, `find()`) à chaque
+   * glissement. Un héros apporté par la bande neuve passe par `paste()`, qui le
+   * demande lui-même.
    */
   shift(dx: number): void {
     const { width: w, height: h, cols, rows } = this;
@@ -802,7 +805,15 @@ export class Engine {
       }
     };
     const air = this.air;
-    for (const a of [this.cells, this.life, this.frozen, this.clock, this.noise, this.windX, this.windY, this.pressA, this.pressB]) slide(a, w, h, dx, 0);
+    for (const a of [this.cells, this.life, this.frozen, this.clock, this.noise]) slide(a, w, h, dx, 0);
+    // Tant que rien n'a soufflé (`CTL.gust` à 0), pression et élan sont nuls
+    // partout, dans les deux tampons : un bloc qui se calme est remis à zéro
+    // (`airChunk()`, `hushChunk()`), un bloc endormi l'est déjà, et `puff()`
+    // lève le drapeau avec la première pression. Rien à faire glisser : ce
+    // sont 16 des 27 octets par cellule, 2 ms d'un glissement.
+    if (Atomics.load(this.control, CTL.gust) === 1) {
+      for (const a of [this.windX, this.windY, this.pressA, this.pressB]) slide(a, w, h, dx, 0);
+    }
     slide(this.tempA, w, h, dx, air);
     slide(this.tempB, w, h, dx, air);
     const dc = dx / CHUNK;
@@ -811,13 +822,29 @@ export class Engine {
     slide(this.was, cols, rows, dc, 0);
     slide(this.stir, cols, rows, dc, 1);
     slide(this.hush, cols, rows, dc, 1);
-    this.shown.fill(1);
+    // Les blocs à redessiner glissent aussi : la page fait glisser son miroir
+    // du même nombre de colonnes (world.ts) et n'attend que la bande neuve
+    // (`stir`) et ce que les ticks ont changé. Tout redessiner envoyait 11 Mo
+    // à chaque chunk traversé, et sautait deux ou trois images.
+    slide(this.shown, cols, rows, dc, 0);
     const at = this.hero;
     if (at >= 0) {
       const x = at % w - dx;
       this.hero = x >= 0 && x < w ? at - dx : -1;
     }
-    this.seek = true;
+  }
+
+  /**
+   * Réveille les blocs des colonnes `[from, to)`, de haut en bas : ce qu'y
+   * a écrit directement un appelant hors du moteur (`lay()` du mode
+   * exploration, qui pose un chunk entier sans passer par `set()` cellule
+   * par cellule). Ne touche ni à la pression ni aux horloges, contrairement à
+   * `wakeAll()`.
+   */
+  wakeColumns(from: number, to: number): void {
+    const { cols, rows, stir } = this;
+    const c0 = Math.max(0, from >> SHIFT), c1 = Math.min(cols, (to + CHUNK - 1) >> SHIFT);
+    for (let cy = 0; cy < rows; cy++) stir.fill(1, cy * cols + c0, cy * cols + c1);
   }
 
   /** Le bloc de la cellule `i` a changé : il est diffusé à ce tick et balayé au suivant, avec ses voisins. */
@@ -1052,19 +1079,25 @@ export class Engine {
 
   /** Repose un morceau, coin haut-gauche en (cx, cy). Ce qui dépasse est ignoré. */
   paste(clip: Clip, cx: number, cy: number): void {
-    for (let y = 0; y < clip.height; y++) {
-      for (let x = 0; x < clip.width; x++) {
-        if (!this.inBounds(cx + x, cy + y)) continue;
-        const to = this.index(cx + x, cy + y);
-        const from = y * clip.width + x;
-        this.wake(to);
-        this.seek = true;
-        // Un morceau peut venir d'un pair : même filtre que `adopt`.
-        this.cells[to] = MATERIALS[clip.cells[from]] ? clip.cells[from] : EMPTY;
-        this.life[to] = clip.life[from];
-        this.frozen[to] = clip.frozen[from];
+    const { width: w, cells, life, frozen, stir, cols } = this;
+    const x0 = Math.max(0, cx), x1 = Math.min(w, cx + clip.width);
+    const y0 = Math.max(0, cy), y1 = Math.min(this.height, cy + clip.height);
+    if (x0 >= x1 || y0 >= y1) return;
+    // Rangée par rangée, et le réveil par bloc à la fin : cellule par
+    // cellule (`wake()`, `MATERIALS[id]`), un chunk d'exploration relu
+    // (256 × 720) coûtait 2,7 ms d'un glissement.
+    for (let y = y0; y < y1; y++) {
+      const from = (y - cy) * clip.width + (x0 - cx), to = y * w + x0, n = x1 - x0;
+      // Un morceau peut venir d'un pair : même filtre que `adopt`.
+      for (let k = 0; k < n; k++) {
+        const id = clip.cells[from + k];
+        cells[to + k] = KNOWN[id] ? id : EMPTY;
       }
+      life.set(clip.life.subarray(from, from + n), to);
+      frozen.set(clip.frozen.subarray(from, from + n), to);
     }
+    for (let by = y0 >> SHIFT; by <= (y1 - 1) >> SHIFT; by++) stir.fill(1, by * cols + (x0 >> SHIFT), by * cols + ((x1 - 1) >> SHIFT) + 1);
+    this.seek = true;
   }
 
   /** Fige (ou libère) un disque : la matière garde son identité mais ne bouge plus. */

@@ -69,6 +69,27 @@ export function land(m: Mirror, p: Patch): void {
 }
 
 /**
+ * Fait glisser le miroir de `dx` colonnes, comme `Engine.shift()` la grille
+ * du bac (vers la gauche si `dx` > 0) : la fenêtre d'exploration a glissé
+ * (`origin` de la frame). À faire **avant** de poser les bandes de la frame,
+ * qui sont déjà dans la grille glissée et recouvrent la bande libérée — le
+ * bac ne renvoie que la bande neuve et ce que les ticks ont changé, pas toute
+ * la grille. Un glissement plus large que le miroir ne garde rien : les bandes
+ * recouvrent alors tout.
+ */
+export function glide(m: Mirror, dx: number): void {
+  const w = m.width, k = Math.abs(dx);
+  if (k === 0 || k >= w) return;
+  for (const a of [m.cells, m.life, m.frozen, m.noise, m.temp, m.press]) {
+    for (let y = 0; y < m.height; y++) {
+      const r = y * w;
+      if (dx > 0) a.copyWithin(r, r + k, r + w);
+      else a.copyWithin(r + k, r, r + w - k);
+    }
+  }
+}
+
+/**
  * Le suivi des blocs changés, côté Worker. Il ne colorie rien : il découpe
  * dans le moteur les blocs que `engine.changed()` désigne, une bande par
  * rangée de blocs — du premier changé au dernier — et la page les repose
@@ -105,6 +126,8 @@ export class Tracker {
   private readonly engine: Engine;
   private readonly dirty: Uint8Array;
   private full = true;
+  /** Les bandes de la prochaine frame portent leur grain (`grained()`). */
+  private grain = false;
 
   constructor(engine: Engine) {
     this.engine = engine;
@@ -112,13 +135,15 @@ export class Tracker {
   }
 
   /**
-   * La prochaine frame portera toute la grille, grain compris, comme la
-   * première d'un moteur. Après un glissement de la fenêtre d'exploration
-   * (`Engine.shift()`) : tout a bougé, et le grain avec — le grain n'étant
-   * envoyé qu'en entier, la page gardait sinon celui d'avant, décalé.
+   * Les bandes de la prochaine frame porteront leur grain. Après un
+   * glissement de la fenêtre d'exploration (`Engine.shift()`) : la page fait
+   * glisser son miroir, grain compris, mais celui de la bande neuve, elle ne
+   * l'a pas. Le grain ne partait qu'avec une frame entière (la première d'un
+   * moteur) ; en renvoyer une à chaque glissement coûtait 11 Mo et deux ou
+   * trois images sautées. Seules les bandes changées partent, avec leur grain.
    */
-  whole(): void {
-    this.full = true;
+  grained(): void {
+    this.grain = true;
   }
 
   /**
@@ -134,8 +159,9 @@ export class Tracker {
     const { chunk, cols, rows, width: w, height: h, cells, life, frozen, temp, press, noise } = this.engine;
     const { dirty } = this;
     this.engine.changed(dirty);
-    const full = this.full;
+    const full = this.full, grained = full || this.grain;
     if (full) { dirty.fill(1); this.full = false; }
+    this.grain = false;
     // D'abord les rectangles, pour tailler le tampon d'un coup.
     const rects: [number, number, number, number][] = [];
     let total = 0;
@@ -154,7 +180,7 @@ export class Tracker {
     }
     if (total === 0) return [];
     // Les flottants en tête : leurs vues exigent un décalage multiple de 4.
-    const buffer = claim(total * (8 + 3 + (full ? 1 : 0)));
+    const buffer = claim(total * (8 + 3 + (grained ? 1 : 0)));
     let floats = 0, bytes = total * 8;
     const patches: Patch[] = [];
     for (const [x, y0, pw, ph] of rects) {
@@ -167,7 +193,7 @@ export class Tracker {
       };
       floats += n * 8;
       bytes += n * 3;
-      if (full) { p.noise = new Int8Array(buffer, bytes, n); bytes += n; }
+      if (grained) { p.noise = new Int8Array(buffer, bytes, n); bytes += n; }
       for (let r = 0; r < ph; r++) {
         const from = (y0 + r) * w + x, to = r * pw;
         p.cells.set(cells.subarray(from, from + pw), to);

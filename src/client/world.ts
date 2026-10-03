@@ -14,7 +14,7 @@
  * dépend de la taille s'inscrit dans `onResize`.
  */
 import type { Knobs, News, Order } from "./sim/sandbox.ts";
-import { HOURS, land, type Grid, type Mirror, type Tint } from "./sim/render.ts";
+import { HOURS, glide, land, type Grid, type Mirror, type Tint } from "./sim/render.ts";
 import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
 import { watchErrors } from "./errors.ts";
@@ -202,7 +202,17 @@ function blit(frame: Extract<News, { t: "frame" }>): void {
   const m = mirror;
   if (m.ambient !== frame.ambient) { m.ambient = frame.ambient; repaint = true; }
   if (frame.origin !== origin) {
-    if (frame.origin !== null && origin !== null) slid += frame.origin - origin;
+    // La fenêtre d'exploration a glissé : le miroir glisse d'autant, comme la
+    // grille du bac (`Engine.shift()`), avant que les bandes de la frame — la
+    // bande neuve et ce qu'ont changé les ticks — s'y posent. Le bac n'envoie
+    // plus que celles-là : 11 Mo par chunk traversé, c'étaient deux ou trois
+    // images sautées.
+    if (frame.origin !== null && origin !== null) {
+      const dx = frame.origin - origin;
+      slid += dx;
+      glide(m, dx);
+      repaint = true;
+    }
     origin = frame.origin;
   }
   for (const p of frame.patches) {

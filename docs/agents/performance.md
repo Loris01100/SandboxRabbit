@@ -80,6 +80,7 @@ parallèle**. Le reste (micro-optimisations, portage) vient après.
 | Salon chargé au premier clic (room.ts par `import()` de lobby.ts) | page 86 221 → 81 754 octets | [architecture.md](architecture.md#salon-partagé-bac-multijoueur) |
 | `FlatLight` chargé à la demande (sim/flatlight.ts) | page 89 186 → 85 274 octets | [rendu.md](rendu.md#le-secours-2d) |
 | Rayons de `FlatLight` dans un fil à lui (sim/flatlight-worker.ts) : la page ne garde que la collecte | page : ~4,5 ms de rayons à chaque éclairage → collecte 0,3 à 0,9 ms ; la grille passe de 80 à 160 texels de large (rayons ~50 ms, hors de la page) | [rendu.md](rendu.md#le-secours-2d) |
+| Glissement de la fenêtre d'exploration : la page fait glisser son miroir (`glide()`) au lieu de tout recevoir, chunk sortant encodé une image plus tard et chunk rangé décodé d'avance, `lay()` et `paste()` par rangées, grain précalculé, pression glissée seulement s'il a soufflé | frame du glissement (4 fils, héros qui marche) 16–25 → 9–13 ms ; glissement seul 11–19 → 5–6 ms ; décalage au bench 4 → 1,1 ms ; plus de 11 Mo par chunk traversé | [exploration.md](exploration.md#images-sautées--réglé) |
 | Mode exploration chargé à la demande (sim/explore.ts, `import()` dans le Worker, Workers bâtis en modules ES) | moteur 81 647 → 77 456 octets (plafond 81 920) ; `explore-*.js` 4 822 octets, au premier clic sur Explorer | [exploration.md](exploration.md) |
 | Plafond de fils porté de 7 à 14 | bac plein de nanites en 1080p : 28 ms à 7 fils → 19 à 15 (16 cœurs) | `helpers()` de sim/worker.ts |
 

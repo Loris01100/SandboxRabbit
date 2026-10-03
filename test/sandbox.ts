@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
-import { Renderer, land } from "../src/client/sim/render.ts";
+import { Renderer, glide, land, type Mirror } from "../src/client/sim/render.ts";
 import { decode, encode } from "../src/client/sim/codec.ts";
 import { count } from "../src/client/challenges.ts";
 import { verdict } from "../src/client/sim/verdict.ts";
@@ -333,24 +333,72 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.deepEqual(d.cells, s.cells, "bâti d'avance ou au dernier moment : la même fenêtre");
   assert.deepEqual(d.life, s.life, "… lapins compris");
 
-  // Côté protocole : la frame du glissement porte la nouvelle origine et toute
-  // la grille, grain compris — le grain n'arrive qu'en entier, la page aurait
-  // gardé celui d'avant, décalé d'un chunk.
+  // Un chunk rangé est encodé plus tard (`prepare()`) : relu encore brut ou
+  // déjà encodé, il doit revenir pareil, chaleur comprise — sinon le monde
+  // dépendrait de la cadence des images.
+  const [brut, a] = partie(), [scellé, b] = partie();
+  for (const [g, ex] of [[brut, a], [scellé, b]] as const) {
+    for (let t = 0; t < 30; t++) g.step();
+    téléporte(g, 1100);
+    ex.slide(g);
+  }
+  assert.equal(typeof a.kept.get(-2), "object", "au glissement, le chunk sortant est rangé brut");
+  téléporte(scellé, 640);
+  b.prepare(scellé);
+  assert.equal(typeof b.kept.get(-2), "string", "une image plus tard, `prepare()` l'a encodé");
+  for (const [g, ex] of [[brut, a], [scellé, b]] as const) {
+    téléporte(g, 100);
+    ex.slide(g);
+  }
+  assert.deepEqual(scellé.cells, brut.cells, "relu brut ou encodé : la même grille");
+  assert.deepEqual(scellé.life, brut.life, "… le même `life`");
+  assert.deepEqual(scellé.temp, brut.temp, "… la même chaleur, arrondie au pas du codec dans les deux cas");
+
+  // Côté protocole : la page fait glisser son miroir (`glide()`) et n'en reçoit
+  // que la bande neuve et ce qu'ont changé les ticks, grain compris pour ces
+  // bandes. Un miroir refait comme world.ts, frame après frame, doit rester
+  // la grille du bac — sinon la page montre un monde qui n'est pas celui qui
+  // tourne. Avant, chaque glissement renvoyait toute la grille : 11 Mo.
+  // Frames de 20 ms : à ×1, un tick dure 16,7 ms, et une frame de 16 n'en joue parfois aucun.
   const news: News[] = [];
   const sim = new Sandbox(WINDOW_W, WINDOW_H, (n) => news.push(n));
+  const n = WINDOW_W * WINDOW_H;
+  const miroir: Mirror = {
+    width: WINDOW_W, height: WINDOW_H, ambient: 20,
+    cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
+    noise: new Int8Array(n), temp: new Float32Array(n), press: new Float32Array(n),
+  };
+  let vu: number | null = null;
+  const reçoit = (): Extract<News, { t: "frame" }> => {
+    const f = last(news, "frame")!;
+    if (f.origin !== null && vu !== null) glide(miroir, f.origin - vu);
+    vu = f.origin;
+    for (const p of f.patches) land(miroir, p);
+    return f;
+  };
+  sim.frame(20);
+  reçoit();
   sim.order({ t: "explore", seed: G });
   await sim.arrival;
-  sim.frame(16);
-  téléporte(sim.engine, 1100);
-  sim.frame(16);
-  const f = last(news, "frame")!;
-  assert.equal(f.origin, -STRIP, "la frame du glissement porte la nouvelle origine");
-  assert.equal(f.patches.reduce((n, p) => n + p.w * p.h, 0), WINDOW_W * WINDOW_H, "… et toute la grille");
-  assert.ok(f.patches.every((p) => p.noise), "… grain compris");
-  const p = f.patches[0];
-  assert.deepEqual(p.noise!.subarray(0, p.w), sim.engine.noise.subarray(p.y * WINDOW_W + p.x, p.y * WINDOW_W + p.x + p.w), "le grain envoyé est celui du bac glissé");
-  sim.frame(16);
-  assert.ok(last(news, "frame")!.patches.every((p) => !p.noise), "la frame suivante ne renvoie plus le grain");
+  sim.frame(20);
+  reçoit();
+  assert.deepEqual(miroir.noise, sim.engine.noise, "au départ de l'exploration, la page reçoit le grain du monde infini");
+  for (const [x, attendu] of [[1100, -STRIP], [1100, 0], [100, -STRIP], [100, -2 * STRIP]] as const) {
+    téléporte(sim.engine, x);
+    sim.frame(20);
+    const f = reçoit();
+    assert.equal(f.origin, attendu, `héros en ${x} : la fenêtre glisse jusqu'à ${attendu}`);
+    const envoyé = f.patches.reduce((s, p) => s + p.w * p.h, 0);
+    // Ce qu'ont changé les ticks, plus la bande neuve : pas toute la grille. Une frame
+    // ordinaire de ce monde, où l'eau coule, en envoie déjà un tiers.
+    assert.ok(envoyé < n, `le glissement n'envoie pas toute la grille (${envoyé} cellules sur ${n})`);
+    sim.frame(20);
+    reçoit();
+    assert.deepEqual(miroir.cells, sim.engine.cells, `après le glissement vers ${attendu}, le miroir est la grille du bac`);
+    assert.deepEqual(miroir.life, sim.engine.life, "… `life` compris");
+    assert.deepEqual(miroir.noise, sim.engine.noise, "… grain compris");
+    assert.deepEqual(miroir.temp, sim.engine.temp, "… chaleur comprise");
+  }
 }
 
 /** La frame dit où est le héros — la caméra le suit — et se tait quand il n'y en a pas. */
