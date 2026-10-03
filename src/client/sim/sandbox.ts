@@ -50,7 +50,7 @@ export type Order =
   | { t: "edit"; do: "clear" | "undo" | "redo" | "step" | "snapshot" }
   | { t: "scene"; name: string }
   | { t: "terrain"; seed: number }
-  | { t: "explore"; seed: number }
+  | { t: "explore"; seed: number; saved?: string }
   | { t: "goal"; goal: string | null }
   | { t: "cursor"; x: number; y: number }
   | { t: "clip"; ask: number; x: number; y: number; x2: number; y2: number }
@@ -72,7 +72,7 @@ export type Hum = { fire: number; lava: number; rain: number };
 export type News =
   | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number, string] | null; heard: Heard | null; origin: number | null }
   | { t: "stats"; filled: number; hum: Hum }
-  | { t: "grid"; full: string; w: number }
+  | { t: "grid"; full: string; w: number; voyage: boolean }
   | { t: "start"; rec: Recording }
   | ({ t: "turn" } & Turn)
   | { t: "desync" }
@@ -244,7 +244,7 @@ export class Sandbox {
       case "edit": return this.edit(o.do);
       case "scene": return this.scene(o.name);
       case "terrain": return this.world(o.seed);
-      case "explore": return this.explore(o.seed);
+      case "explore": return this.explore(o.seed, o.saved);
       case "goal": {
         const goal = parseGoal(o.goal);
         this.trial = null; // un monde-défi de la galerie n'a pas de classement : sa grille n'est pas bâtie en code
@@ -378,7 +378,10 @@ export class Sandbox {
     if (this.touched && !slid && this.sinceGrid >= GRID * Math.max(1, this.engine.cells.length / GRID_CELLS)) {
       this.sinceGrid = 0;
       this.touched = false;
-      this.send({ t: "grid", full: this.encoded(), w: this.engine.width });
+      // En exploration, la partie entière (sim/explore.ts, `save()`) : la
+      // fenêtre seule reviendrait sans le monde déjà parcouru.
+      const full = this.encoded();
+      this.send({ t: "grid", full: this.voyage ? this.voyage.save(this.engine, full) : full, w: this.engine.width, voyage: this.voyage !== null });
     }
 
     this.sinceTurn += ms;
@@ -610,15 +613,19 @@ export class Sandbox {
    * Ni annulation, ni enregistrement, ni rejeu, ni salon : tous supposent une
    * grille qui ne glisse pas. Les crans d'avant sont oubliés — annuler
    * ramènerait une autre grille sous un mode qui continuerait de glisser.
+   *
+   * `saved` : une partie rangée par la page (copie `grid` d'une visite
+   * d'avant), reprise si elle est lisible et de la même graine ; sinon le
+   * monde neuf de `seed`.
    */
-  private explore(seed: number): void {
+  private explore(seed: number, saved?: string): void {
     if (this.stream) { this.send({ t: "say", text: "Pas d'exploration pendant un salon partagé." }); return; }
     this.leave();
     const ticket = this.boarding;
     // Chargé au premier clic (budget du Worker) : en attendant, le bac
     // continue. Un ordre qui remplace la grille pendant ce temps (`leave()`)
     // change le ticket, et ce départ-là n'a plus lieu.
-    this.arrival = import("./explore.ts").then(({ Explore, WINDOW_W, WINDOW_H }) => {
+    this.arrival = import("./explore.ts").then(({ Explore, WINDOW_W, WINDOW_H, parse }) => {
       if (ticket !== this.boarding) return;
       if (this.stream) { this.send({ t: "say", text: "Pas d'exploration pendant un salon partagé." }); return; }
       if (this.engine.width !== WINDOW_W || this.engine.height !== WINDOW_H) {
@@ -635,8 +642,23 @@ export class Sandbox {
       this.won = null;
       this.trial = null;
       this.touched = true;
-      this.voyage = new Explore(Math.min(SEEDS, Math.max(1, Math.floor(seed) || 1)));
-      this.voyage.start(this.engine);
+      seed = Math.min(SEEDS, Math.max(1, Math.floor(seed) || 1));
+      this.voyage = new Explore(seed);
+      const log = saved === undefined ? null : parse(saved);
+      let back = false;
+      if (log?.seed === seed) {
+        try {
+          put(this.engine, log.grid, null, this.engine.ambient);
+          this.voyage.resume(this.engine, log);
+          back = true;
+        } catch {
+          /* fenêtre illisible : le monde neuf, ci-dessous */
+        }
+      }
+      if (!back) {
+        if (saved !== undefined) this.send({ t: "say", text: `Exploration rangée illisible : monde n° ${seed} tout neuf.` });
+        this.voyage.start(this.engine);
+      }
       // Le grain du monde infini vient de la position (`lay()`), pas du tirage
       // du moteur : la page garde sinon celui de la première frame du bac.
       this.tracker.grained();

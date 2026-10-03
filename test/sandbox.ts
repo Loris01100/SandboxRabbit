@@ -12,10 +12,10 @@ import { Renderer, glide, land, type Mirror } from "../src/client/sim/render.ts"
 import { decode, encode } from "../src/client/sim/codec.ts";
 import { count } from "../src/client/challenges.ts";
 import { verdict } from "../src/client/sim/verdict.ts";
-import { TRIAL_TICKS, fair } from "../src/client/replay.ts";
+import { TRIAL_TICKS, fair, put } from "../src/client/replay.ts";
 import { EMPTY, FIRE, HERO, HERO_BODY, HERO_HEAD, HERO_LEGS, PILOT, SAND, STONE, TNT, WATER } from "../src/client/sim/materials.ts";
 import { Engine } from "../src/client/sim/engine.ts";
-import { EXPLORE_SCALE, Explore, STRIP, WINDOW_H, WINDOW_W, land as build } from "../src/client/sim/explore.ts";
+import { EXPLORE_SCALE, Explore, STRIP, WINDOW_H, WINDOW_W, land as build, parse, type Log } from "../src/client/sim/explore.ts";
 
 const W = 80, H = 45;
 
@@ -399,6 +399,81 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
     assert.deepEqual(miroir.noise, sim.engine.noise, "… grain compris");
     assert.deepEqual(miroir.temp, sim.engine.temp, "… chaleur comprise");
   }
+
+  // Sauvegarder (étape 5) : une partie rangée par `save()` puis reprise par
+  // `resume()` redonne la fenêtre (chaleur au pas du codec), le grain, le
+  // héros piloté, et chaque chunk rangé — même ceux encore bruts au moment
+  // de ranger.
+  const [loin, va] = partie();
+  for (let t = 0; t < 30; t++) loin.step();
+  téléporte(loin, 1100);
+  va.slide(loin);
+  téléporte(loin, 1100);
+  va.slide(loin);
+  assert.equal(va.x0, 0, "deux glissements vers la droite");
+  assert.equal(typeof va.kept.get(-1), "object", "le dernier chunk sorti est encore brut");
+  const fenêtre = encode(loin.cells, loin.frozen, loin.life, loin.temp, loin.names);
+  const rangée = va.save(loin, fenêtre);
+  assert.match(rangée, /^\{"seed":4217,/, "la graine en tête : la page la lit sans tout relire");
+  const log = parse(rangée)!;
+  assert.deepEqual(log.kept.map(([c]) => c), [-1, -2], "les chunks rangés, les plus proches d'abord");
+  const reprise = (l: Log): [Engine, Explore] => {
+    const g = new Engine(WINDOW_W, WINDOW_H, 1);
+    put(g, l.grid, null, g.ambient);
+    const x = new Explore(l.seed, EXPLORE_SCALE);
+    x.resume(g, l);
+    return [g, x];
+  };
+  const [là, revu] = reprise(log);
+  assert.equal(revu.x0, 0, "reprise à la même origine");
+  assert.deepEqual(là.cells, loin.cells, "la même fenêtre");
+  assert.deepEqual(là.life, loin.life, "… le même `life`");
+  assert.deepEqual(là.frozen, loin.frozen, "… le même figé");
+  assert.deepEqual(là.noise, loin.noise, "… le même grain, refait par la position");
+  assert.ok(là.temp.every((t, i) => Math.abs(t - loin.temp[i]) <= 4), "… la chaleur au pas du codec (8 °C)");
+  assert.equal(là.chosen, loin.chosen, "… le même héros piloté");
+  là.step();
+  assert.equal(là.cells[là.hero], HERO, "… retrouvé dès le premier tick");
+  for (const [g, x] of [[loin, va], [là, revu]] as const) {
+    téléporte(g, 100);
+    x.slide(g);
+  }
+  assert.deepEqual(bande(là, 0), bande(loin, 0), "le chunk rangé revient d'une partie reprise comme de la partie d'origine");
+  assert.deepEqual(là.copy(0, 0, STRIP - 1, WINDOW_H - 1).life, loin.copy(0, 0, STRIP - 1, WINDOW_H - 1).life, "… `life` compris");
+  assert.equal(parse("{\"seed\":1}"), null, "une partie incomplète est refusée");
+  assert.equal(parse("pas du JSON"), null, "… et ce qui n'est pas du JSON");
+
+  // Un chunk rangé abîmé dans le stockage local est rebâti par la graine,
+  // au lieu de jeter au tick du glissement.
+  const [abîmé, x2] = reprise({ ...log, kept: [[-1, "%%%"]] });
+  téléporte(abîmé, 100);
+  x2.slide(abîmé);
+  const neuf = new Engine(WINDOW_W, WINDOW_H, 1);
+  neuf.clear();
+  build(neuf, G, EXPLORE_SCALE, -STRIP, 0, WINDOW_W);
+  assert.deepEqual(bande(abîmé, 0), bande(neuf, 0), "un chunk rangé illisible revient tel que la graine le bâtit");
+
+  // Côté protocole : en exploration, la copie de secours `grid` porte la
+  // partie, et l'ordre `explore` avec `saved` la reprend.
+  const rangé = (): Extract<News, { t: "grid" }> | undefined => last(news, "grid");
+  for (let k = 0; k < 200 && !rangé()?.voyage; k++) sim.frame(20);
+  const copie = rangé()!;
+  assert.ok(copie.voyage, "en exploration, la copie de secours est la partie");
+  assert.equal(parse(copie.full)?.x0, -2 * STRIP, "… avec l'origine de la fenêtre");
+  const suite: News[] = [];
+  const repris = new Sandbox(WINDOW_W, WINDOW_H, (m) => suite.push(m));
+  repris.order({ t: "explore", seed: G, saved: copie.full });
+  await repris.arrival;
+  repris.frame(20);
+  assert.equal(last(suite, "frame")!.origin, -2 * STRIP, "la partie reprend à son origine");
+  assert.ok(last(suite, "frame")!.hero, "… avec son héros");
+  assert.equal(last(suite, "say"), undefined, "… sans message");
+  const gâché = new Sandbox(WINDOW_W, WINDOW_H, (m) => suite.push(m));
+  gâché.order({ t: "explore", seed: G, saved: "{abîmé" });
+  await gâché.arrival;
+  gâché.frame(20);
+  assert.match(last(suite, "say")!.text, /illisible/, "une partie illisible est dite");
+  assert.ok(last(suite, "frame")!.hero, "… et le monde neuf part quand même");
 }
 
 /** La frame dit où est le héros — la caméra le suit — et se tait quand il n'y en a pas. */

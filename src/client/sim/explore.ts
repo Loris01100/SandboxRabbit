@@ -380,15 +380,26 @@ export class Explore {
     const into = dx > 0 ? last : 0;
     const c = this.chunk(into);
     const data = this.kept.get(c);
-    if (data !== undefined) {
-      unpack(e, data, into * STRIP);
-      regrain(e, this.x0, into * STRIP, (into + 1) * STRIP);
-      // Rangé de nouveau à sa prochaine sortie, tel qu'il sera devenu.
-      this.kept.delete(c);
-    } else {
-      lay(e, this.built(c, e.height), this.x0);
-    }
+    // Rangé de nouveau à sa prochaine sortie, tel qu'il sera devenu.
+    this.kept.delete(c);
+    if (data !== undefined && this.reread(e, data, into * STRIP)) regrain(e, this.x0, into * STRIP, (into + 1) * STRIP);
+    else lay(e, this.built(c, e.height), this.x0);
     return dx;
+  }
+
+  /**
+   * Repose un chunk rangé ; false s'il est illisible. Venu d'une partie
+   * reprise (`resume()`), il a passé par le stockage local, qu'une autre
+   * version ou un quota plein a pu abîmer : rebâti par la graine plutôt que
+   * de jeter au tick du glissement. `open()` jette avant toute écriture.
+   */
+  private reread(e: Engine, data: string | Stash, x: number): boolean {
+    try {
+      unpack(e, data, x);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Le chunk `c`, bâti d'avance s'il l'a été, sinon bâti maintenant (le reste des morceaux). */
@@ -425,7 +436,13 @@ export class Explore {
     const entry = this.kept.get(c);
     if (entry !== undefined) {
       // Il va rentrer : décodé d'avance (5 ms), il ne reste au glissement que la recopie.
-      if (typeof entry === "string") this.kept.set(c, open(entry, e.height));
+      if (typeof entry === "string") {
+        try {
+          this.kept.set(c, open(entry, e.height));
+        } catch {
+          this.kept.delete(c); // illisible : il sera bâti par la graine
+        }
+      }
       return;
     }
     if (this.early?.c !== c) this.early = { c, parts: [] };
@@ -435,10 +452,88 @@ export class Explore {
     parts.push(raise(this.seed, this.scale, e.height, at, at + PIECE));
   }
 
+  /**
+   * La partie, de quoi la reprendre plus tard (`resume()`) : graine, origine,
+   * héros piloté, la fenêtre (`grid`, encodée par le bac) et les chunks
+   * rangés, les plus proches de la fenêtre d'abord. Au-delà de `SAVE_MAX`
+   * caractères, les plus lointains sont laissés : ils reviendront tels que
+   * la graine les bâtit. La graine en tête, pour que la page la lise sans
+   * tout relire (`savedSeed()` de main.ts).
+   * ponytail: un seul monde rangé, dans le stockage local (environ 5 Mo) ;
+   * IndexedDB, ou ne ranger que les chunks touchés, le jour où ça ne suffit
+   * plus (docs/agents/exploration.md, étape 5).
+   */
+  save(e: Engine, grid: string): string {
+    const mid = this.chunk(e.width / STRIP / 2);
+    const all = [...this.kept].sort((a, b) => Math.abs(a[0] - mid) - Math.abs(b[0] - mid));
+    const kept: [number, string][] = [];
+    let size = grid.length;
+    for (const [n, entry] of all) {
+      const data = typeof entry === "string" ? entry : seal(entry);
+      size += data.length;
+      if (size > SAVE_MAX) break;
+      kept.push([n, data]);
+    }
+    const log: Log = { seed: this.seed, x0: this.x0, chosen: e.chosen, grid, kept };
+    return JSON.stringify(log);
+  }
+
+  /**
+   * Reprend une partie rangée par `save()` : la fenêtre est déjà posée dans
+   * le bac (`put()` de sandbox.ts, qui a jeté si elle était illisible). Le
+   * grain n'est pas rangé : il vient de la position, refait ici.
+   */
+  resume(e: Engine, log: Log): void {
+    this.x0 = log.x0;
+    for (const [n, data] of log.kept) this.kept.set(n, data);
+    for (let x = 0; x < e.width; x += STRIP) regrain(e, this.x0, x, x + STRIP);
+    e.chosen = log.chosen;
+  }
+
   /** Le chunk `c` est-il bâti d'avance, en entier ? (tests) */
   ready(c: number): boolean {
     return this.early?.c === c && this.early.parts.length * PIECE >= STRIP;
   }
+}
+
+/** Une partie rangée (`save()`), telle que la relit `parse()`. */
+export interface Log {
+  seed: number;
+  x0: number;
+  chosen: number;
+  grid: string;
+  kept: [number, string][];
+}
+
+/**
+ * Plafond d'une partie rangée, en caractères : le stockage local tient
+ * environ 5 millions de caractères par site, et les autres clés (le bac, les
+ * records, les mondes publiés) y vivent aussi. Une fenêtre pèse 100 à 200 Ko,
+ * un chunk rangé 10 à 25 : une centaine de chunks.
+ */
+const SAVE_MAX = 3_000_000;
+
+/**
+ * Relit une partie rangée par `save()`, null si ce n'en est pas une. Venue du
+ * stockage local : la forme est vérifiée ici, la fenêtre par `put()`, chaque
+ * chunk à sa relecture (`reread()`).
+ */
+export function parse(text: string): Log | null {
+  let o: unknown;
+  try {
+    o = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof o !== "object" || o === null) return null;
+  const { seed, x0, chosen, grid, kept } = o as Record<string, unknown>;
+  if (!Number.isSafeInteger(seed) || !Number.isSafeInteger(x0) || (x0 as number) % STRIP !== 0
+    || !Number.isInteger(chosen) || (chosen as number) < 0 || (chosen as number) > 255
+    || typeof grid !== "string" || !Array.isArray(kept)) return null;
+  for (const k of kept as unknown[]) {
+    if (!Array.isArray(k) || k.length !== 2 || !Number.isSafeInteger(k[0]) || typeof k[1] !== "string") return null;
+  }
+  return { seed: seed as number, x0: x0 as number, chosen: chosen as number, grid, kept: kept as [number, string][] };
 }
 
 /**
@@ -452,6 +547,8 @@ export interface Stash {
   frozen: Uint8Array;
   life: Uint8Array;
   heat: Uint8Array;
+  /** Le chunk encodé dont il a été décodé (`open()`), s'il l'a été : `seal()` le rend sans réencoder. */
+  data?: string;
 }
 
 /**
@@ -481,6 +578,7 @@ function pack(e: Engine, x: number): Stash {
 
 /** Encode un chunk rangé (codec). La température repart de ses octets : le codec la retrouve au même octet près. */
 function seal(s: Stash): string {
+  if (s.data !== undefined) return s.data;
   const temp = new Float32Array(s.heat.length);
   for (let i = 0; i < temp.length; i++) temp[i] = s.heat[i] * STEP + FLOOR;
   return encode(s.cells, s.frozen, s.life, temp);
@@ -492,7 +590,7 @@ function open(data: string, h: number): Stash {
   const temp = decodeTemp(data, n);
   const heat = new Uint8Array(n);
   if (temp) for (let i = 0; i < n; i++) heat[i] = (temp[i] - FLOOR) / STEP;
-  return { cells: decode(data, n), frozen: decodeFrozen(data, n), life: decodeLife(data, n) ?? new Uint8Array(n), heat };
+  return { cells: decode(data, n), frozen: decodeFrozen(data, n), life: decodeLife(data, n) ?? new Uint8Array(n), heat, data };
 }
 
 /**

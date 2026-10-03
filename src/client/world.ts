@@ -113,10 +113,11 @@ export function listen(fn: (news: News) => void): void {
  * Sauvegarder et partager demandent une grille fraîche (`askGrid`). Elle
  * porte la largeur du bac qui l'a faite : `WIDTH` suit un redimensionnement
  * tout de suite, la copie un quart de seconde plus tard, et ranger l'une sous
- * l'autre cisaillait le bac à la visite suivante.
+ * l'autre cisaillait le bac à la visite suivante. En exploration (`voyage`),
+ * c'est la partie entière, fenêtre et chunks rangés, pas une grille.
  */
-let latest: { width: number; data: string } | null = null;
-export const latestGrid = (): { width: number; data: string } | null => latest;
+let latest: { width: number; data: string; voyage: boolean } | null = null;
+export const latestGrid = (): { width: number; data: string; voyage: boolean } | null => latest;
 
 /** Les questions dont on attend une réponse : un numéro, une promesse. */
 let asked = 0;
@@ -323,7 +324,7 @@ export function lightDetail(width: number): void {
 sim.addEventListener("message", (e: MessageEvent<News>) => {
   const news = e.data;
   if (news.t === "frame") blit(news);
-  if (news.t === "grid") latest = { width: news.w, data: news.full };
+  if (news.t === "grid") latest = { width: news.w, data: news.full, voyage: news.voyage };
   if (news.t === "reply") {
     waiting.get(news.ask)?.(news.value);
     waiting.delete(news.ask);

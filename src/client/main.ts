@@ -2,7 +2,7 @@ import "./style.css";
 import { EMPTY, MAGNET, MATERIALS, SHORTCUTS, SWITCH, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
-import { combo, keyOf, read, stored, write, type Action } from "./ui.ts";
+import { combo, forget, keyOf, read, stored, write, type Action } from "./ui.ts";
 import { bound, held, openSettings } from "./keys.ts";
 import { MOVES, follow, panBy, scaleTo, scroll, slideBy, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
 import { current, emit, select } from "./palette.ts";
@@ -455,10 +455,12 @@ document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", ()
  * bac — c'est en 1920×1080 qu'il y a le plus à explorer.
  */
 const seedInput = document.querySelector<HTMLInputElement>("#seed")!;
-function pickSeed(): number {
+/** La graine tapée, 0 si le champ est vide ou hors de 1..`SEEDS`. */
+function typedSeed(): number {
   const typed = Math.floor(Number(seedInput.value));
-  return typed >= 1 && typed <= SEEDS ? typed : 1 + Math.floor(Math.random() * SEEDS);
+  return typed >= 1 && typed <= SEEDS ? typed : 0;
 }
+const pickSeed = (): number => typedSeed() || 1 + Math.floor(Math.random() * SEEDS);
 document.querySelector<HTMLButtonElement>("#terrain")!.addEventListener("click", () => {
   const seed = pickSeed();
   order({ t: "terrain", seed });
@@ -478,17 +480,31 @@ const EXPLORE_PX = 6;
  * ponytail: tout le bac (1280×720) est colorié et éclairé même hors champ ;
  * étape 6 de docs/agents/exploration.md, si les mesures le demandent.
  */
-document.querySelector<HTMLButtonElement>("#explore")!.addEventListener("click", () => {
-  const seed = pickSeed();
+document.querySelector<HTMLButtonElement>("#explore")!.addEventListener("click", () => explore(typedSeed()));
+
+/**
+ * La partie d'exploration rangée (`save()` de sim/explore.ts), une seule :
+ * reprise par Explorer quand le champ de graine est vide ou porte la sienne,
+ * et au chargement de la page si on l'a quittée en explorant. Une autre
+ * graine part d'un monde neuf, qui la remplacera.
+ */
+const VOYAGE = "sandbox-rabbit:exploration";
+
+/** Explore le monde `typed` (0 : la partie rangée s'il y en a une, sinon un monde au hasard). */
+function explore(typed: number): void {
+  // La graine est en tête de la partie rangée : pas besoin de relire des
+  // mégaoctets de JSON pour savoir si c'est la même.
+  const saved = read(VOYAGE), was = Number(/^\{"seed":(\d+)/.exec(saved ?? "")?.[1] ?? 0);
+  const seed = typed || was || pickSeed(), back = saved !== null && seed === was;
   fit(1280);
-  order({ t: "explore", seed });
+  order({ t: "explore", seed, saved: back ? saved : undefined });
   abandon();
   closeUp(EXPLORE_PX);
   // Le héros d'avant a pu laisser place au nouveau sans frame vide : `meet()`
   // ne serait pas rappelé, on pose donc l'échelle tout de suite.
   if (zoomInput.checked) scaleTo(EXPLORE_PX);
-  statusEl.textContent = `Exploration, monde n° ${seed}. Molette pour ajuster le zoom.`;
-});
+  statusEl.textContent = `Exploration${back ? " reprise" : ""}, monde n° ${seed}. Molette pour ajuster le zoom.`;
+}
 
 // Surprise : un décor tiré au sort, sans objectif — juste pour regarder.
 document.querySelector<HTMLButtonElement>("#surprise")!.addEventListener("click", () => {
@@ -643,6 +659,8 @@ const kept = read(BAC);
 if (location.hash.startsWith(`#${FILM_LINK}`)) void openFilmLink(location.hash.slice(FILM_LINK.length + 1));
 else if (location.hash.length > 1) loadHash(location.hash.slice(1));
 else if (kept) loadWorld(kept);
+// Quittée en explorant (`:bac` effacé) : la partie reprend où elle était.
+else if (read(VOYAGE)) explore(0);
 
 function loadHash(raw: string): void {
   let hash: string;
@@ -677,7 +695,13 @@ addEventListener("visibilitychange", () => {
   // depuis un bac réglé en 480 revenait cisaillé à la visite suivante. Celle
   // de la grille elle-même, pas `WIDTH` : juste après un redimensionnement,
   // la copie est encore celle de l'ancien bac.
-  if (grid) write(BAC, `${grid.width}~${grid.data}`);
+  // En exploration, la partie entière sous sa propre clé : un bac ordinaire
+  // ne sait pas la lire. `:bac` effacé, c'est elle qui reprend à la visite
+  // suivante.
+  if (grid?.voyage) {
+    write(VOYAGE, grid.data);
+    forget(BAC);
+  } else if (grid) write(BAC, `${grid.width}~${grid.data}`);
 });
 
 /* -------------------------------------------------------------------- rejeu */

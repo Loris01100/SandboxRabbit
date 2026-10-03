@@ -1,7 +1,8 @@
 # Mode exploration : monde infini (plan)
 
-**État : étapes 1 à 4 faites** (`land()`, `Engine.shift()`, le mode dans le
-bac, la page qui suit : voir plus bas), étapes 5 et suivantes à faire. Le bouton Explorer 🧭
+**État : étapes 1 à 5 faites** (`land()`, `Engine.shift()`, le mode dans le
+bac, la page qui suit, la sauvegarde locale : voir plus bas), étapes 6 et
+suivantes à faire. Le bouton Explorer 🧭
 (main.ts) fixe l'échelle : décor à `EXPLORE_SCALE` (sim/explore.ts), vue à
 `EXPLORE_PX` pixels d'écran par cellule. Le monde reste un bac fini de
 1280×720. Ce guide dit comment le rendre infini en largeur, dans quel ordre,
@@ -211,9 +212,9 @@ se réduit donc à un aller-retour d'un chunk ; le mécanisme est le même.
   pourrait attendre l'image suivante ;
 - un chunk rangé pèse **environ 20 Ko** (11 à 22), pas quelques centaines
   d'octets comme espéré : relief, grottes et température varient beaucoup sur
-  256×720. Dix chunks traversés font 200 Ko, mille font 20 Mo. À reprendre
-  avec la sauvegarde (étape 5) : ne ranger que les chunks touchés, et
-  rebâtir les autres par la graine ;
+  256×720. Dix chunks traversés font 200 Ko, mille font 20 Mo. La sauvegarde
+  (étape 5) les range tous, dans la limite de 3 millions de caractères ; ne
+  ranger que les chunks touchés reste la piste pour aller plus loin ;
 - le Worker de simulation était passé de 75,8 à 81,6 Ko (plafond de la CI :
   80 Kio, soit 81 920 octets ; il restait 273 octets). **Réglé** : le
   générateur du monde infini (`land()`, `raise()`, `lay()`…) a quitté
@@ -368,7 +369,69 @@ va dans le Worker de simulation (80 Kio, plus large) ; côté page, le mode doit
 tenir en quelques centaines d'octets, ou se charger à la demande comme
 gallery.ts.
 
-### 5. Sauvegarder (local d'abord)
+### 5. Sauvegarder (local d'abord) — fait
+
+**Fait.**
+- sim/explore.ts : `save(e, grid)` rend la partie en JSON — graine **en
+  tête**, `x0`, le héros piloté (`chosen`), la fenêtre encodée par le bac
+  (`grid`, le codec de toujours) et les chunks rangés, les plus proches de
+  la fenêtre d'abord. Un chunk encore brut est encodé à ce moment ; un chunk
+  décodé d'avance garde l'encodage dont il vient (`Stash.data`), rien n'est
+  réencodé. `parse()` vérifie la forme ; `resume()` reprend `x0` et les
+  chunks, refait le grain par la position et rend le héros à piloter.
+- sandbox.ts : en exploration, la copie de secours `grid` porte la partie au
+  lieu de la grille (`voyage: true`). L'ordre `explore` prend un `saved`
+  facultatif : lisible et de la même graine, la partie reprend (`put()` de
+  la fenêtre, puis `resume()`) ; sinon un `say` le dit et le monde neuf
+  part.
+- main.ts : quand l'onglet passe en arrière-plan, la partie va sous
+  `sandbox-rabbit:exploration` et `:bac` est effacé. Au chargement, sans
+  lien ni `:bac`, la partie reprend. Explorer la reprend quand le champ de
+  graine est vide ou porte sa graine (lue en tête du JSON, sans le relire en
+  entier) ; une autre graine part d'un monde neuf, qui remplacera la partie
+  rangée au prochain passage en arrière-plan. Une seule partie rangée.
+
+Prouvé (test/sandbox.ts) :
+- une partie rangée puis reprise redonne la fenêtre (matière, `life`, figé,
+  grain ; chaleur au pas du codec, 8 °C), le héros piloté dès le premier tick,
+  et un chunk rangé revient d'une partie reprise comme de la partie
+  d'origine — y compris un chunk encore brut au moment de ranger ;
+- un chunk rangé illisible revient tel que la graine le bâtit, au lieu de
+  jeter au tick du glissement ; une partie illisible est dite, et le monde
+  neuf part ;
+- côté protocole, la copie `grid` porte la partie, que l'ordre `explore`
+  reprend à son origine avec son héros.
+
+Dans Chromium, à la main (script jetable) : partie de la graine 777, onglet
+mis en arrière-plan, rechargement : la page repart en exploration 1280×720,
+sans erreur ; une autre graine part d'un monde neuf ; le champ vide reprend
+la 777.
+
+**Mesuré** (Node, héros déplacé à la main, chunks traversés vers la droite) :
+une partie pèse 206 000 caractères après 10 chunks, 362 000 après 20,
+655 000 après 40 — **environ 15 000 par chunk**, plus 60 000 à 80 000 pour la
+fenêtre. `save()` coûte moins d'une milliseconde de plus que l'encodage de la
+fenêtre, que la copie de secours faisait déjà (10 ms en 1280×720), et
+`parse()` autant. Budgets : page 85 029 / 86 016 octets (+245), moteur
+78 356 / 81 920 (+353), `explore-*.js` 7 141.
+
+Écarts avec le plan :
+- **plafond de 3 millions de caractères** (`SAVE_MAX`), soit environ deux
+  cents chunks : au-delà, les chunks les plus éloignés ne sont pas rangés et
+  reviendront tels que la graine les bâtit. Le stockage local tient environ
+  5 millions de caractères par site, partagés avec `:bac`, les records et
+  les mondes publiés ; et `write()` d'ui.ts se tait quand le quota est plein
+  — dépassé, c'est toute la partie qui serait perdue, pas les seuls chunks
+  lointains. IndexedDB, ou ne ranger que les chunks touchés, reste à faire
+  le jour où ça ne suffit pas (`ponytail:` de `save()`) ;
+- la partie voyage dans la copie de secours `grid`, comme le bac ordinaire :
+  jusqu'à une seconde de retard en 1280×720. Aucun format de plus dans le
+  codec : la fenêtre et les chunks restent des grilles du codec de toujours,
+  et c'est le JSON qui les assemble ;
+- ni `clock`, ni la pression, ni le vent ne sont rangés, comme pour le bac
+  ordinaire : une explosion en cours au moment de quitter ne reprend pas.
+
+Le plan d'origine :
 
 Un monde infini, c'est la graine, `x0`, la fenêtre et la table des chunks.
 C'est un **nouveau** format, pas un bloc de plus dans le codec : un monde
