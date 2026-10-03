@@ -468,7 +468,7 @@ export class Sandbox {
     this.engine.step();
     // Entre deux ticks, comme l'exige `shift()`. Ni enregistrement ni salon en
     // exploration (refusés) : rien à `stamp()`.
-    this.voyage?.slide(this.engine);
+    if (this.voyage?.slide(this.engine)) this.tracker.whole();
     const ticks = this.stream?.rec.ticks;
     if (ticks !== undefined && ticks % SUM === 0) this.sums.push([ticks, fingerprint(this.engine.cells)]);
   }

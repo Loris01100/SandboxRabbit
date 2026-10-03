@@ -81,6 +81,15 @@ export function follow([x, y]: [number, number]): void {
 }
 
 /**
+ * La fenêtre d'exploration a glissé de `cells` colonnes (`shifted()` de
+ * world.ts) : le bac affiché est parti d'autant vers la gauche, la vue le
+ * suit vers la droite pour que le monde ne bouge pas à l'écran.
+ */
+export function slideBy(cells: number): void {
+  panBy((cells * canvas.offsetWidth * zoom) / WIDTH, 0);
+}
+
+/**
  * Zoome autour du centre pour qu'une cellule fasse `px` pixels d'écran, quelle
  * que soit la taille du bac : l'échelle du mode exploration. Borné comme
  * `zoomAt` — sur un écran étroit, la cellule reste plus petite.

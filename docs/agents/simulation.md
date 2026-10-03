@@ -782,6 +782,10 @@ tick en 1920×1080 chargé (`npm run directions`).
   doit faire l'un ou l'autre.
 - `engine.changed()` remet à zéro ce qu'il a rendu : un seul `Tracker` par
   moteur.
+- Le grain (`noise`) ne part qu'avec une frame entière : la première d'un
+  moteur, ou celle que demande `Tracker.whole()`. sandbox.ts l'appelle après
+  chaque glissement de la fenêtre d'exploration (`Engine.shift()`) : le grain
+  a glissé avec la grille, et la page aurait gardé l'ancien, décalé d'un chunk.
 - `thumbnail()` sert aux vignettes de la galerie ; la lumière autour des
   sources chaudes reste un sous-produit de `temp` (aucun flou).
 

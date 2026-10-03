@@ -3,7 +3,7 @@ import { current } from "./palette.ts";
 import { bindings, held } from "./keys.ts";
 import { keyLabel, type Action } from "./ui.ts";
 import { scaleTo, zoom, zoomCentered, zoomInput } from "./view.ts";
-import { WIDTH, cellBox, onResize, seen } from "./world.ts";
+import { WIDTH, cellBox, onResize, origin, seen } from "./world.ts";
 import { look } from "./sight.ts";
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -103,7 +103,9 @@ function card(name: string): void {
   const most = (n: number) => (n >= 250 ? "250+" : String(n));
   const load = at(HERO_SLOTS.load), bag = MATERIALS[at(HERO_SLOTS.bag) as MaterialId];
   const carried = bag && at(HERO_SLOTS.bag) !== 0 && load > 0 ? `sac : ${load} × ${bag.name.toLowerCase()}` : "sac vide";
-  const facts = `${18 + at(HERO_SLOTS.age)} ans · ${Math.round(grid.temp[y * w + x])} °C · ${most(at(HERO_SLOTS.dug))} cellules creusées · ${carried}`;
+  // En exploration, où il en est dans le monde infini : la colonne du bac ne dit rien, elle change à chaque glissement.
+  const where = origin === null ? "" : ` · colonne ${origin + x} du monde`;
+  const facts = `${18 + at(HERO_SLOTS.age)} ans · ${Math.round(grid.temp[y * w + x])} °C · ${most(at(HERO_SLOTS.dug))} cellules creusées · ${carried}${where}`;
   if (factsEl.textContent !== facts) factsEl.textContent = facts;
 }
 

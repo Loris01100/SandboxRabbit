@@ -201,6 +201,10 @@ function blit(frame: Extract<News, { t: "frame" }>): void {
   }
   const m = mirror;
   if (m.ambient !== frame.ambient) { m.ambient = frame.ambient; repaint = true; }
+  if (frame.origin !== origin) {
+    if (frame.origin !== null && origin !== null) slid += frame.origin - origin;
+    origin = frame.origin;
+  }
   for (const p of frame.patches) {
     land(m, p);
     left = Math.min(left, p.x);
@@ -209,6 +213,24 @@ function blit(frame: Extract<News, { t: "frame" }>): void {
     bottom = Math.max(bottom, p.y + p.h);
   }
   fresh = true;
+}
+
+/** En exploration, la colonne du monde qui est la colonne 0 du bac ; null hors du mode. */
+export let origin: number | null = null;
+/** Colonnes dont la fenêtre d'exploration a glissé depuis le dernier `present()`. */
+let slid = 0;
+
+/**
+ * Colonnes dont la fenêtre a glissé dans ce qu'a posé le dernier `present()`,
+ * remises à zéro. La caméra se décale d'autant **dans la même image** que le
+ * dessin (`slideBy()` de view.ts) : décalée à l'arrivée de la frame, elle
+ * montrait une image l'ancien bac au mauvais endroit ; pas décalée du tout,
+ * elle rattrapait le héros en dix images, la vue filant d'un chunk.
+ */
+export function shifted(): number {
+  const d = slid;
+  slid = 0;
+  return d;
 }
 
 /** Le miroir de la grille, en lecture : ce que voit le héros (sight.ts) s'y calcule. Null avant la première frame. */

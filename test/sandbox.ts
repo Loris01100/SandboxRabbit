@@ -332,6 +332,25 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   sur.slide(s);
   assert.deepEqual(d.cells, s.cells, "bâti d'avance ou au dernier moment : la même fenêtre");
   assert.deepEqual(d.life, s.life, "… lapins compris");
+
+  // Côté protocole : la frame du glissement porte la nouvelle origine et toute
+  // la grille, grain compris — le grain n'arrive qu'en entier, la page aurait
+  // gardé celui d'avant, décalé d'un chunk.
+  const news: News[] = [];
+  const sim = new Sandbox(WINDOW_W, WINDOW_H, (n) => news.push(n));
+  sim.order({ t: "explore", seed: G });
+  await sim.arrival;
+  sim.frame(16);
+  téléporte(sim.engine, 1100);
+  sim.frame(16);
+  const f = last(news, "frame")!;
+  assert.equal(f.origin, -STRIP, "la frame du glissement porte la nouvelle origine");
+  assert.equal(f.patches.reduce((n, p) => n + p.w * p.h, 0), WINDOW_W * WINDOW_H, "… et toute la grille");
+  assert.ok(f.patches.every((p) => p.noise), "… grain compris");
+  const p = f.patches[0];
+  assert.deepEqual(p.noise!.subarray(0, p.w), sim.engine.noise.subarray(p.y * WINDOW_W + p.x, p.y * WINDOW_W + p.x + p.w), "le grain envoyé est celui du bac glissé");
+  sim.frame(16);
+  assert.ok(last(news, "frame")!.patches.every((p) => !p.noise), "la frame suivante ne renvoie plus le grain");
 }
 
 /** La frame dit où est le héros — la caméra le suit — et se tait quand il n'y en a pas. */

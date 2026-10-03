@@ -4,14 +4,14 @@ import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
 import { combo, keyOf, read, stored, write, type Action } from "./ui.ts";
 import { bound, held, openSettings } from "./keys.ts";
-import { MOVES, follow, panBy, scaleTo, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
+import { MOVES, follow, panBy, scaleTo, scroll, slideBy, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
 import { current, emit, select } from "./palette.ts";
 import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, soundInput, toolInput } from "./settings.ts";
 import { hear, initSound, setHum } from "./audio.ts";
 import { FILM_LINK, captureFrame, forgetOrigin, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, placeCursors, pointAt, relay } from "./lobby.ts";
-import { WIDTH, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, seen, set, type ClipData } from "./world.ts";
+import { WIDTH, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, seen, set, shifted, type ClipData } from "./world.ts";
 import { STEER, closeUp, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
@@ -473,10 +473,10 @@ const EXPLORE_PX = 6;
  * Explorer : le mode exploration (sim/explore.ts). Un monde infini en
  * largeur, vu par une fenêtre de 1280×720 (`WINDOW_W` × `WINDOW_H`, recopiés
  * ici : importer sim/explore.ts tirerait le générateur dans la page) qui
- * glisse avec le héros, vu de près (`EXPLORE_PX`).
- * ponytail: la caméra ne compense pas encore le glissement (elle rattrape le
- * héros en quelques images) et tout le bac est colorié même hors champ ;
- * étapes 4 et 6 de docs/agents/exploration.md.
+ * glisse avec le héros, vu de près (`EXPLORE_PX`). La caméra suit chaque
+ * glissement dans l'image même où il est dessiné (`shifted()`, `slideBy()`).
+ * ponytail: tout le bac (1280×720) est colorié et éclairé même hors champ ;
+ * étape 6 de docs/agents/exploration.md, si les mesures le demandent.
  */
 document.querySelector<HTMLButtonElement>("#explore")!.addEventListener("click", () => {
   const seed = pickSeed();
@@ -753,9 +753,13 @@ function frame(now: number): void {
   // affichait 60 fps même quand le Worker n'en livrait que 30.
   // Avec un héros, les touches le pilotent : même décrochée, la vue ne glisse
   // qu'à la souris.
+  // Dessiner d'abord, puis caler la vue : la fenêtre d'exploration a pu
+  // glisser dans ce qui vient d'être posé, et la position du héros avec.
+  if (present()) frames++;
+  const slid = shifted();
+  if (slid) slideBy(slid);
   if (hero) { if (!loose) follow(hero); }
   else if (held.size > 0) scroll();
-  if (present()) frames++;
   beat(now);
   gaze();
   placeCursors();

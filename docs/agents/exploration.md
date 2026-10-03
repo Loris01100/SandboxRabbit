@@ -1,7 +1,7 @@
 # Mode exploration : monde infini (plan)
 
-**État : étapes 1 à 3 faites** (`land()`, `Engine.shift()`, le mode dans le
-bac : voir plus bas), étapes 4 et suivantes à faire. Le bouton Explorer 🧭
+**État : étapes 1 à 4 faites** (`land()`, `Engine.shift()`, le mode dans le
+bac, la page qui suit : voir plus bas), étapes 5 et suivantes à faire. Le bouton Explorer 🧭
 (main.ts) fixe l'échelle : décor à `EXPLORE_SCALE` (sim/explore.ts), vue à
 `EXPLORE_PX` pixels d'écran par cellule. Le monde reste un bac fini de
 1280×720. Ce guide dit comment le rendre infini en largeur, dans quel ordre,
@@ -268,7 +268,50 @@ Si ça se voit, ranger `temp` en brut pour les seuls chunks chauds.
 chunks puis revenir retrouve chaque chunk tel qu'il l'a laissé ; la mémoire
 de la table reste bornée (quelques Ko par chunk au repos).
 
-### 4. La page suit l'origine (world.ts, view.ts, hero.ts)
+### 4. La page suit l'origine (world.ts, view.ts, hero.ts) — fait
+
+**Fait.**
+- Après un glissement, sandbox.ts appelle `Tracker.whole()` : la frame
+  suivante porte toute la grille, **grain compris**. Avant, le grain ne partait
+  qu'à la première frame d'un moteur, et la page gardait l'ancien, décalé
+  d'un chunk.
+- world.ts relève `origin` dans chaque frame. Quand elle change, il retient
+  de combien la fenêtre a glissé ; `shifted()` le rend, remis à zéro.
+- Dans la boucle d'image de main.ts : `present()` d'abord, puis
+  `slideBy(shifted())` (view.ts), puis `follow()`. La caméra se décale du
+  glissement **dans l'image où il est dessiné**. Décalée à l'arrivée de la
+  frame, elle aurait montré une image du bac d'avant au mauvais endroit ; pas
+  décalée du tout, elle rattrapait le héros en une dizaine d'images, et la vue
+  filait d'un chunk. Caméra décrochée comprise : le monde ne bouge pas à
+  l'écran.
+- La fiche du héros donne sa colonne dans le monde (`origin + x`).
+- Pas de désactivation dans le panneau : sandbox.ts refuse déjà, avec un
+  message, annuler, rétablir, enregistrer et rejouer, et le mode s'arrête sur
+  un autre monde, un décor, un chargement, une autre taille ou un salon (étape
+  3). Griser ces contrôles coûterait des octets à la page (marge : 1,5 Ko)
+  pour ne rien dire de plus.
+
+Prouvé :
+- test/sandbox.ts : la frame du glissement porte la nouvelle origine, toute
+  la grille et le grain du bac glissé ; la suivante ne renvoie plus le grain ;
+- dans Chromium, à la main (script jetable, pas dans `npm run browser`) :
+  caméra décrochée emmenée à droite, un héros posé à la colonne 1100 du bac.
+  La fenêtre glisse au tick suivant, le canvas recule de 1 536 px (256 × 6) et
+  le héros reste à 1 004 px à l'écran sur toutes les images suivantes. Faire
+  marcher le héros jusque-là prendrait plusieurs minutes sous le Chromium
+  logiciel de la CI : c'est pour ça que ce n'est pas un test permanent ;
+- `npm run browser` toujours vert.
+
+**Mesuré** (Node, 1280×720, chunk entrant bâti d'avance) : la frame du
+glissement coûte **35 à 50 ms** côté Worker, contre environ 13 ms pour une
+frame ordinaire. C'est le tick, le glissement (étape 3 : 14 à 17 ms) et la
+découpe de toute la grille, un tampon de 11 Mo transféré à la page qui le
+recopie dans son miroir. Deux ou trois images sautent à chaque chunk traversé,
+soit tous les 256 pas du héros. Pistes, dans l'ordre : que la page glisse son
+miroir elle-même et ne reçoive que la bande neuve (le plan d'origine
+ci-dessous), puis un `lay()` sans `set()` cellule par cellule.
+
+Le plan d'origine :
 
 - La frame porte `x0`. Quand il change, la page recopie son miroir avec le
   même décalage et ne reçoit que la bande neuve. Première version permise :

@@ -112,6 +112,16 @@ export class Tracker {
   }
 
   /**
+   * La prochaine frame portera toute la grille, grain compris, comme la
+   * première d'un moteur. Après un glissement de la fenêtre d'exploration
+   * (`Engine.shift()`) : tout a bougé, et le grain avec — le grain n'étant
+   * envoyé qu'en entier, la page gardait sinon celui d'avant, décalé.
+   */
+  whole(): void {
+    this.full = true;
+  }
+
+  /**
    * Les bandes changées depuis l'appel précédent. Toutes découpées dans **un
    * seul tampon** par frame, que la page reçoit sans copie (worker.ts le
    * transfère une fois) : un tableau neuf par bande et par couche, c'était
