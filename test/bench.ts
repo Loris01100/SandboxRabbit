@@ -16,7 +16,7 @@
 import { writeFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { FIRE, OIL, SAND, STONE, WATER, WOOD } from "../src/client/sim/materials.ts";
-import { EXPLORE_SCALE, STRIP, land } from "../src/client/terrain.ts";
+import { EXPLORE_SCALE, STRIP, land } from "../src/client/sim/explore.ts";
 
 const TICKS = 300;
 /** Budget du tick en 320×180, en ms. Large : le runner de CI n'est pas cette machine. */

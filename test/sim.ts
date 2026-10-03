@@ -11,7 +11,8 @@ import { FlatLight } from "../src/client/sim/flatlight.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../src/client/gestures.ts";
 import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
-import { EXPLORE_SCALE, STRIP, land, terrain } from "../src/client/terrain.ts";
+import { terrain } from "../src/client/terrain.ts";
+import { EXPLORE_SCALE, STRIP, land } from "../src/client/sim/explore.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
@@ -2045,7 +2046,7 @@ function top(e: Engine, id: MaterialId): number {
  * source. `Math.sqrt`, correctement arrondie, reste permise ; pour le reste,
  * sim/libm.ts (sin, cos, atan, atan2, exp, log), qui est lue elle aussi.
  */
-for (const fichier of ["../src/client/sim/engine.ts", "../src/client/terrain.ts", "../src/client/sim/libm.ts"]) {
+for (const fichier of ["../src/client/sim/engine.ts", "../src/client/terrain.ts", "../src/client/sim/explore.ts", "../src/client/sim/libm.ts"]) {
   const source = readFileSync(new URL(fichier, import.meta.url), "utf8");
   const approchées = source.match(/Math\.(hypot|sin|cos|tan|asin|acos|atan2?|sinh|cosh|tanh|exp|expm1|log|log1p|log2|log10|pow|cbrt)\b/g);
   assert.equal(approchées, null, `${fichier} n'emploie aucune fonction Math approchée (${approchées?.join(", ")})`);

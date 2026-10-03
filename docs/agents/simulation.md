@@ -278,14 +278,15 @@ Invariants :
   l'attrape que si sa scène réveille la règle fautive ; sinon **aucun test ne
   le voit**. Même règle hors du moteur pour ce qui fait partie de la partie
   (`weather()`). Seule exception : la graine par défaut du constructeur.
-  Le générateur de mondes ([terrain.ts](../../src/client/terrain.ts)) tire,
-  lui, sur un xorshift à lui semé par la graine du monde : un monde est une
+  Le générateur de mondes ([terrain.ts](../../src/client/terrain.ts), et
+  celui du monde infini dans [sim/explore.ts](../../src/client/sim/explore.ts))
+  tire, lui, sur un xorshift à lui semé par la graine du monde : un monde est une
   grille posée d'un coup (`stamp()`), un invité le reçoit tout fait et ne
   rejoue pas sa construction — elle ne doit donc rien prendre au tirage du bac.
 - **Mêmes calculs dans tous les navigateurs.** + − × ÷ et `Math.sqrt` sont
   arrondis exactement par IEEE 754 ; `hypot`, `sin`, `exp`, `pow`, `log`…
   sont « approchés selon l'implémentation » et peuvent différer d'un bit
-  entre Chrome et Firefox. Interdits dans engine.ts et terrain.ts : `disc()`
+  entre Chrome et Firefox. Interdits dans engine.ts, terrain.ts et sim/explore.ts : `disc()`
   employait `hypot`, et un salon mixte pouvait diverger à la première
   explosion. Les tests tournent tous sous V8 et ne le verraient pas — test/sim.ts
   lit donc la source.

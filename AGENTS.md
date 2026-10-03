@@ -85,6 +85,7 @@ src/client/
     worker.ts            entrée du Web Worker, cadence ~60 Hz ; se relance en fils auxiliaires
     sandbox.ts           Sandbox : moteur, rendu, annulation, défis, rejeu ; Order / News
     pool.ts              fils auxiliaires du moteur (mémoire partagée, Atomics)   (pur)
+    explore.ts           mode exploration, chargé au premier clic : générateur du monde infini, fenêtre qui glisse, chunks rangés   (pur)
     engine.ts            l'automate cellulaire (tableaux plats)
     materials.ts         MATERIALS, CATEGORIES, PALETTE, SHORTCUTS
     render.ts            bandes (Tracker), Renderer : matière, vue thermique, vue pression ; vignettes
@@ -114,10 +115,11 @@ reproductible, ids de matière gelés, CSP, cloisonnement de la page,
 **Simulation** ([simulation.md](docs/agents/simulation.md))
 
 - Tout tirage au sort du moteur (et de la météo) passe par `engine.rand()`,
-  **jamais** `Math.random()`. Seule exception : terrain.ts a son propre
-  tirage, semé par la graine — bâtir un monde ne doit pas décaler celui du bac.
+  **jamais** `Math.random()`. Seule exception : terrain.ts et le générateur
+  du monde infini (sim/explore.ts) ont leur propre tirage, semé par la
+  graine — bâtir un monde ne doit pas décaler celui du bac.
 - Pas de fonction `Math` « approchée selon l'implémentation » (`hypot`, `sin`,
-  `exp`, `pow`…) dans engine.ts ni terrain.ts : un bit d'écart entre
+  `exp`, `pow`…) dans engine.ts, terrain.ts ni sim/explore.ts : un bit d'écart entre
   navigateurs fait diverger un salon. `Math.sqrt` est permise ; `sin`, `cos`,
   `atan`, `atan2`, `exp`, `log` viennent de `sim/libm.ts`, déterministes.
   test/sim.ts lit la source et le vérifie.

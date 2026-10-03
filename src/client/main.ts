@@ -1,7 +1,7 @@
 import "./style.css";
 import { EMPTY, MAGNET, MATERIALS, SHORTCUTS, SWITCH, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
-import { EXPLORE_SCALE, SEEDS } from "./terrain.ts";
+import { SEEDS } from "./terrain.ts";
 import { combo, keyOf, read, stored, write, type Action } from "./ui.ts";
 import { bound, held, openSettings } from "./keys.ts";
 import { MOVES, follow, panBy, scaleTo, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
@@ -470,16 +470,18 @@ document.querySelector<HTMLButtonElement>("#terrain")!.addEventListener("click",
 const EXPLORE_PX = 6;
 
 /**
- * Explorer : prototype du mode exploration, pour juger l'échelle avant de
- * bâtir les chunks. Un monde 1280×720 dont le décor garde une taille fixe
- * (`EXPLORE_SCALE`), vu de près sur le héros (`EXPLORE_PX`).
- * ponytail: le monde reste fini (1280×720, bords murés) et tout le bac est
- * colorié même hors champ ; à revoir avec la fenêtre glissante.
+ * Explorer : le mode exploration (sim/explore.ts). Un monde infini en
+ * largeur, vu par une fenêtre de 1280×720 (`WINDOW_W` × `WINDOW_H`, recopiés
+ * ici : importer sim/explore.ts tirerait le générateur dans la page) qui
+ * glisse avec le héros, vu de près (`EXPLORE_PX`).
+ * ponytail: la caméra ne compense pas encore le glissement (elle rattrape le
+ * héros en quelques images) et tout le bac est colorié même hors champ ;
+ * étapes 4 et 6 de docs/agents/exploration.md.
  */
 document.querySelector<HTMLButtonElement>("#explore")!.addEventListener("click", () => {
   const seed = pickSeed();
   fit(1280);
-  order({ t: "terrain", seed, scale: EXPLORE_SCALE });
+  order({ t: "explore", seed });
   abandon();
   closeUp(EXPLORE_PX);
   // Le héros d'avant a pu laisser place au nouveau sans frame vide : `meet()`

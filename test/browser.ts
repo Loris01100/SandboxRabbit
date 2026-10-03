@@ -77,6 +77,16 @@ try {
   await page.waitForTimeout(300);
   assert.deepEqual(errors, [], "le son démarre sans erreur dans la console");
 
+  // Le mode exploration : le Worker de simulation ne charge son module
+  // (`import()` de sim/sandbox.ts) qu'au premier clic sur Explorer. Aucun test
+  // sans navigateur ne passe par ce chargement-là, ni par le Worker en module ES.
+  const voyage = page.waitForResponse((r) => r.url().includes("/sim/explore.ts"), { timeout: 10_000 });
+  await page.evaluate(() => document.querySelector<HTMLButtonElement>("#explore")!.click());
+  assert.ok((await voyage).ok(), "le module d'exploration se charge au premier clic sur Explorer");
+  await page.waitForFunction(() => document.querySelector<HTMLCanvasElement>("#world")!.width === 1280, null, { timeout: 10_000 });
+  await page.waitForTimeout(500);
+  assert.deepEqual(errors, [], "l'exploration démarre sans erreur dans la console");
+
   // Le pilote qui redémarre, simulé par WEBGL_lose_context. Lu dès l'événement
   // `restored`, avant toute frame : un contexte rendu part d'une image vide
   // (0, 0, 0), et seul screen.ts peut y reposer le bac — l'air n'est pas noir.

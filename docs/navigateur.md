@@ -127,7 +127,11 @@ Ce qui est vérifié :
    `#world` quitte les 300 × 150 d'un canvas vide pour la taille de la grille)
    sans aucune erreur dans la console. Puis une touche pressée : le module du
    son (src/client/sound.ts, chargé par audio.ts au premier geste) arrive et
-   crée son contexte audio, toujours sans erreur ;
+   crée son contexte audio, toujours sans erreur. Puis un clic sur Explorer :
+   le Worker de simulation charge le module du mode exploration
+   (src/client/sim/explore.ts, `import()` de sim/sandbox.ts), le bac passe en
+   1280 × 720, sans erreur. C'est le seul test qui passe par ce chargement à
+   la demande dans un vrai Worker ;
 3. **le contexte WebGL se retrouve** : `WEBGL_lose_context` le perd puis le
    rend, et le bac est reposé dès l'événement `webglcontextrestored`, avant
    toute frame (src/client/screen.ts, `restartable()`). `restoreContext()`

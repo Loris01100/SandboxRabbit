@@ -13,7 +13,8 @@ import { Worker } from "node:worker_threads";
 import { Engine } from "../src/client/sim/engine.ts";
 import { Pool, type Helper } from "../src/client/sim/pool.ts";
 import { applyGesture } from "../src/client/gestures.ts";
-import { EXPLORE_SCALE, land, terrain } from "../src/client/terrain.ts";
+import { terrain } from "../src/client/terrain.ts";
+import { EXPLORE_SCALE, land } from "../src/client/sim/explore.ts";
 import { FIRE, LAVA, METAL, NITRO, PILOT, RUST, SAND, SODIUM, TNT, URANIUM, WATER, WOOD } from "../src/client/sim/materials.ts";
 
 /** `count` fils auxiliaires sous Node, et de quoi les arrêter. */

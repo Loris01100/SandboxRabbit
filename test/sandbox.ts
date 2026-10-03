@@ -13,7 +13,9 @@ import { decode, encode } from "../src/client/sim/codec.ts";
 import { count } from "../src/client/challenges.ts";
 import { verdict } from "../src/client/sim/verdict.ts";
 import { TRIAL_TICKS, fair } from "../src/client/replay.ts";
-import { EMPTY, FIRE, HERO, PILOT, SAND, STONE, TNT, WATER } from "../src/client/sim/materials.ts";
+import { EMPTY, FIRE, HERO, HERO_BODY, HERO_HEAD, HERO_LEGS, PILOT, SAND, STONE, TNT, WATER } from "../src/client/sim/materials.ts";
+import { Engine } from "../src/client/sim/engine.ts";
+import { EXPLORE_SCALE, Explore, STRIP, WINDOW_H, WINDOW_W, land as build } from "../src/client/sim/explore.ts";
 
 const W = 80, H = 45;
 
@@ -223,12 +225,113 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.deepEqual(sim.engine.cells, avant, "annuler ramène le bac d'avant");
   sim.order({ t: "terrain", seed: 4217 });
   assert.deepEqual(sim.engine.cells, bâti, "la même graine redonne le même monde");
-  sim.order({ t: "terrain", seed: 4217, scale: Number.NaN });
-  assert.deepEqual(sim.engine.cells, bâti, "une échelle qui n'est pas un nombre : le décor suit le bac");
-  sim.order({ t: "terrain", seed: 4217, scale: 1e9 });
-  const borné = sim.engine.cells.slice();
-  sim.order({ t: "terrain", seed: 4217, scale: 6 });
-  assert.deepEqual(sim.engine.cells, borné, "l'échelle venue de la page est bornée à 6");
+}
+
+/**
+ * Le mode exploration, côté protocole : la frame dit où est la fenêtre dans
+ * le monde (`origin`), et ce qui suppose une grille qui ne glisse pas est
+ * refusé — annuler ramènerait une autre grille sous un mode qui glisse.
+ */
+{
+  const news: News[] = [];
+  const sim = new Sandbox(WINDOW_W, WINDOW_H, (n) => news.push(n));
+  const dit = (): string | undefined => last(news, "say")?.text;
+  sim.order({ t: "explore", seed: 4217 });
+  await sim.arrival; // le mode se charge à la demande (`import()`)
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, -2 * STRIP, "la fenêtre part de deux chunks à gauche du zéro du monde");
+  assert.ok(last(news, "frame")!.hero, "un héros est posé");
+  sim.order({ t: "edit", do: "undo" });
+  assert.equal(dit(), "Pas d'annulation en exploration.", "pas d'annulation");
+  sim.order({ t: "rec", on: true });
+  assert.equal(dit(), "Pas d'enregistrement en exploration.", "pas d'enregistrement");
+  sim.order({ t: "host", on: true });
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, null, "un salon arrête l'exploration");
+  sim.order({ t: "host", on: false });
+  sim.order({ t: "explore", seed: 4217 });
+  sim.order({ t: "terrain", seed: 1 });
+  await sim.arrival;
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, null, "un autre monde, demandé pendant que le mode se charge, l'emporte");
+  sim.order({ t: "explore", seed: 4217 });
+  await sim.arrival;
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, -2 * STRIP, "rechargé, le module repart");
+  sim.order({ t: "terrain", seed: 1 });
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, null, "un autre monde arrête l'exploration");
+
+  const petit = bac();
+  petit.sim.order({ t: "explore", seed: 1 });
+  await petit.sim.arrival;
+  assert.match(last(petit.news, "say")!.text, /1280 × 720/, "un bac d'une autre taille est refusé");
+  petit.sim.frame(16);
+  assert.equal(last(petit.news, "frame")!.origin, null, "… et reste un bac ordinaire");
+}
+
+/**
+ * La fenêtre glisse (sim/explore.ts) : un chunk qui sort est rangé, relu tel
+ * quel quand il revient ; un chunk jamais vu est bâti par la graine ; bâti
+ * d'avance par morceaux ou d'un coup, c'est le même. Le héros est déplacé à
+ * la main : le faire marcher sur 400 cellules prendrait des milliers de ticks.
+ */
+{
+  const G = 4217;
+  /** Enlève le héros et le repose au sec, à partir de la colonne `x` vers la droite ; rend la colonne. */
+  const téléporte = (e: Engine, x: number): number => {
+    for (let i = 0; i < e.cells.length; i++) {
+      const id = e.cells[i];
+      if (id === HERO || id === HERO_HEAD || id === HERO_BODY || id === HERO_LEGS) e.set(i % e.width, (i / e.width) | 0, EMPTY);
+    }
+    for (let at = x; ; at++) {
+      let y = 0;
+      while (e.get(at, y) === EMPTY) y++;
+      if (e.get(at, y) !== WATER && e.spawnHero(at, y - 2) >= 0) return at;
+    }
+  };
+  const partie = (): [Engine, Explore] => {
+    const e = new Engine(WINDOW_W, WINDOW_H, 1);
+    const ex = new Explore(G, EXPLORE_SCALE);
+    assert.ok(ex.start(e) >= 0, "le départ pose un héros");
+    return [e, ex];
+  };
+
+  const [e, ex] = partie();
+  const gauche = e.copy(0, 0, STRIP - 1, WINDOW_H - 1);
+  téléporte(e, 700);
+  assert.equal(ex.slide(e), 0, "dans les trois chunks du milieu, la fenêtre ne bouge pas");
+  téléporte(e, 1100);
+  assert.equal(ex.slide(e), STRIP, "passé le quatrième chunk, elle glisse d'un chunk vers la droite");
+  assert.equal(ex.x0, -STRIP, "… et son origine avec");
+  assert.ok(ex.kept.has(-2), "le chunk sorti est rangé");
+  assert.equal(e.cells[e.hero], HERO, "le héros piloté a glissé avec la grille");
+
+  const témoin = new Engine(WINDOW_W, WINDOW_H, 1);
+  témoin.clear();
+  build(témoin, G, EXPLORE_SCALE, -STRIP, 0, WINDOW_W);
+  const bande = (g: Engine, x: number): Uint8Array => g.copy(x, 0, x + STRIP - 1, WINDOW_H - 1).cells;
+  assert.deepEqual(bande(e, WINDOW_W - STRIP), bande(témoin, WINDOW_W - STRIP), "le chunk jamais vu est bâti par la graine");
+
+  téléporte(e, 100);
+  assert.equal(ex.slide(e), -STRIP, "dans le premier chunk, elle revient d'un chunk");
+  assert.equal(ex.x0, -2 * STRIP, "… à son origine de départ");
+  assert.deepEqual(bande(e, 0), gauche.cells, "le chunk rangé revient tel qu'il était parti");
+  assert.deepEqual(e.copy(0, 0, STRIP - 1, WINDOW_H - 1).life, gauche.life, "… `life` compris");
+  assert.ok(!ex.kept.has(-2), "relu, il n'est plus rangé : il le sera de nouveau à sa sortie");
+
+  // Bâti d'avance (huit morceaux, huit images) ou d'un coup : le même chunk.
+  const [d, avance] = partie(), [s, sur] = partie();
+  téléporte(d, 900);
+  téléporte(s, 900);
+  for (let k = 0; k < 8; k++) avance.prepare(d);
+  assert.ok(avance.ready(3), "dans le quatrième chunk, le chunk de droite se bâtit d'avance");
+  téléporte(d, 1100);
+  téléporte(s, 1100);
+  avance.slide(d);
+  sur.slide(s);
+  assert.deepEqual(d.cells, s.cells, "bâti d'avance ou au dernier moment : la même fenêtre");
+  assert.deepEqual(d.life, s.life, "… lapins compris");
 }
 
 /** La frame dit où est le héros — la caméra le suit — et se tait quand il n'y en a pas. */

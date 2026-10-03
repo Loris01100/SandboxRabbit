@@ -1,8 +1,8 @@
 # Mode exploration : monde infini (plan)
 
-**État : étapes 1 et 2 faites** (`land()`, `Engine.shift()`, voir plus bas),
-étapes 3 et suivantes à faire. Le bouton Explorer 🧭
-(main.ts) fixe l'échelle : décor à `EXPLORE_SCALE` (terrain.ts), vue à
+**État : étapes 1 à 3 faites** (`land()`, `Engine.shift()`, le mode dans le
+bac : voir plus bas), étapes 4 et suivantes à faire. Le bouton Explorer 🧭
+(main.ts) fixe l'échelle : décor à `EXPLORE_SCALE` (sim/explore.ts), vue à
 `EXPLORE_PX` pixels d'écran par cellule. Le monde reste un bac fini de
 1280×720. Ce guide dit comment le rendre infini en largeur, dans quel ordre,
 et ce que chaque étape doit prouver avant la suivante. Le mettre à jour à
@@ -50,9 +50,10 @@ de veille économisent le calcul, pas la mémoire.
 Chaque étape se livre seule, testée et documentée. Aucune ne change
 l'empreinte du moteur hors du mode : `shift()` n'est jamais appelé ailleurs.
 
-### 1. Générer par tranches de colonnes (terrain.ts, pur) — fait
+### 1. Générer par tranches de colonnes (pur) — fait
 
-**Fait.** `land()` et `STRIP` (256) dans terrain.ts. Sous-sol et relief
+**Fait.** `land()` et `STRIP` (256), d'abord dans terrain.ts, aujourd'hui
+dans sim/explore.ts (chargé à la demande, voir l'étape 3). Sous-sol et relief
 passent par `plan()`, `surface()` et `under()`, partagés avec `terrain()`, qui
 reste identique au bit près (comparé à l'ancienne version en 320×180, 640×360
 et 1920×1080). test/sim.ts vérifie : cinq tranches dans le désordre = une
@@ -167,7 +168,74 @@ par `puff()` si on en réinjecte), les cellules de `HERO_SLOTS` (le corps du
 héros ne doit jamais être coupé par la bande sortante : la marge de l'étape 3
 y veille).
 
-### 3. Le mode dans le bac (sandbox.ts, nouveau `sim/explore.ts`)
+### 3. Le mode dans le bac (sandbox.ts, nouveau `sim/explore.ts`) — fait
+
+**Fait.**
+- `land()` est devenue `lay(raise(…))` : `raise()` bâtit hors du bac (pur),
+  `join()` recolle des morceaux, `lay()` pose, `regrain()` refait le grain
+  d'un chunk relu.
+- [sim/explore.ts](../../src/client/sim/explore.ts) : la classe `Explore`.
+  - `start()` bâtit la fenêtre (monde x de -512 à 768) et pose le héros au
+    sec le plus près du milieu.
+  - `slide()`, après chaque tick, glisse d'un chunk quand le héros a passé
+    le quatrième chunk (`x ≥ 1024`) ou est dans le premier (`x < 256`). Le
+    chunk sortant est encodé (codec : matière, figé, `life`, température)
+    dans `kept` ; l'entrant est relu de `kept` (puis en est retiré) ou bâti.
+  - `prepare()`, une fois par frame, bâtit 32 colonnes du chunk suivant dès
+    que le héros est dans le deuxième ou le quatrième chunk.
+- Dans sandbox.ts : l'ordre `explore` (architecture.md). Le prototype
+  (`terrain` avec `scale`) n'existe plus ; le bouton Explorer envoie
+  `explore`. La frame porte `origin`.
+
+Prouvé (test/sandbox.ts) :
+- la fenêtre ne bouge pas tant que le héros reste dans les trois chunks du
+  milieu ;
+- elle glisse d'un chunk au-delà, le chunk sortant est rangé, et le héros
+  reste piloté ;
+- un chunk jamais vu est celui que bâtit la graine ;
+- un chunk rangé revient tel qu'il était parti, `life` compris ;
+- bâti d'avance (huit morceaux) ou au dernier moment : la même fenêtre ;
+- protocole : `origin` dans la frame, et les refus (annuler, enregistrer,
+  bac d'une autre taille). Le mode s'arrête sur un salon ou un autre monde.
+
+Le héros y est déplacé à la main : le faire marcher sur quatre cents cellules
+prendrait des milliers de ticks. Le test « dix chunks aller-retour » du plan
+se réduit donc à un aller-retour d'un chunk ; le mécanisme est le même.
+
+**Mesuré** (en 1280×720, à la main ; pas encore dans le bench) :
+- un glissement coûte **14 à 17 ms** quand le chunk entrant est bâti d'avance,
+  37 ms sinon (62 ms au premier, JIT froid). C'est au-dessus des 12 ms de
+  `SLICE` : une image saute à chaque chunk traversé. Pistes : `lay()` passe par
+  `set()` cellule par cellule (184 000 appels) alors qu'une recopie de rangées
+  suivie d'un réveil des blocs suffirait, et l'encodage du chunk sortant
+  pourrait attendre l'image suivante ;
+- un chunk rangé pèse **environ 20 Ko** (11 à 22), pas quelques centaines
+  d'octets comme espéré : relief, grottes et température varient beaucoup sur
+  256×720. Dix chunks traversés font 200 Ko, mille font 20 Mo. À reprendre
+  avec la sauvegarde (étape 5) : ne ranger que les chunks touchés, et
+  rebâtir les autres par la graine ;
+- le Worker de simulation était passé de 75,8 à 81,6 Ko (plafond de la CI :
+  80 Kio, soit 81 920 octets ; il restait 273 octets). **Réglé** : le
+  générateur du monde infini (`land()`, `raise()`, `lay()`…) a quitté
+  terrain.ts pour sim/explore.ts, que le Worker ne charge qu'au premier ordre
+  `explore` (`import()`). Les Workers sont bâtis en modules ES
+  (`worker.format` de vite.config.ts) : l'IIFE ne savait pas découper. Le
+  moteur fait 77 456 octets (4,4 Ko de marge), `explore-*.js` 4 822, hors
+  budget. Vérifié dans Chromium (`npm run browser`, et à la main sur le
+  bundle de production servi par `wrangler dev` : module chargé au clic,
+  héros posé, aucune erreur). Le code des étapes 4 et 5 côté Worker va dans
+  ce module-là.
+
+Écarts avec le plan :
+- un héros ou un lapin coupé par la bande sortante y perd des cellules : le
+  héros n'y est jamais (il déclenche le glissement à 768 colonnes du bord
+  sortant), un lapin peut y mourir ;
+- un héros rangé dans un chunk revient avec son numéro ; si un autre l'a pris
+  entre-temps, `enlist()` en renumérote un, et son nom peut passer à l'autre ;
+- la grille glissée part en entier dans la frame suivante, mais pas le grain :
+  la page garde celui de la première frame (étape 4).
+
+Le plan d'origine :
 
 `sim/explore.ts`, pur : la graine, l'échelle, l'origine de la fenêtre dans le
 monde (`x0`, en cellules), la table des chunks sortis, et `due(heroX)`, qui dit
