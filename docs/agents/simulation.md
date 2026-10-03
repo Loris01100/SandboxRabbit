@@ -251,6 +251,19 @@ Invariants :
   rejeu ou de salon passe par `put()` → `adopt()` → `wakeAll()`, chez l'hôte
   comme chez l'invité. Un départ qui ne passerait pas par là ferait diverger
   les tirages.
+- **`shift(dx)`** (mode exploration, [exploration.md](exploration.md)) fait
+  glisser la fenêtre de `dx` colonnes, multiple de `CHUNK`, entre deux ticks
+  seulement. Tout glisse avec la grille : `cells`, `life`, `frozen`, `clock`,
+  `noise`, l'élan, et **les deux** tampons de `temp` et de `press` (un bloc
+  endormi lit l'un ou l'autre) ; `stir`, `awake`, `was`, `hush` d'autant de
+  blocs. La bande neuve est vide, à l'ambiante, sans pression ni grain,
+  `stir` à 1 et `awake` à 0 : `rouse()` la traite en bloc fraîchement
+  réveillé et y remet les horloges. `hero` glisse (ou passe à -1 s'il sort),
+  `seek` relance `find()`. Un nouveau tableau par cellule ou par bloc qui vit
+  d'un tick à l'autre doit être ajouté à `shift()`, sinon il reste en place
+  sous la grille qui glisse : test/sim.ts (aller-retour, puis 200 ticks
+  comparés à un bac resté en place) et test/pool.ts (1 fil contre 4, fenêtre
+  qui glisse) l'attraperaient.
 - Un bac au repos a `busy` = 0 : plus un bloc balayé. C'est ce que vérifie
   test/sim.ts (le tirage, lui, avance d'un cran par tick quoi qu'il arrive).
 

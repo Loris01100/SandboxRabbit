@@ -1710,6 +1710,94 @@ function top(e: Engine, id: MaterialId): number {
 }
 
 /**
+ * `shift()`, étape 2 du monde infini : la fenêtre glisse d'un chunk. Sans
+ * glisser **tous** les tableaux (les deux tampons de chaleur et de pression,
+ * les blocs de veille), un bloc endormi se réveillait avec la chaleur d'un
+ * autre endroit, ou ne se réveillait pas sous ce qui venait d'arriver.
+ */
+{
+  // Glisser puis revenir, la bande sortie reposée à la main : tout est à sa place.
+  const W = 640, H = 360, D = 128;
+  const scène = (): Engine => {
+    const e = new Engine(W, H, 5);
+    e.rect(0, 300, W - 1, H - 1, STONE);
+    e.rect(10, 270, 19, 299, STONE);
+    e.rect(101, 270, 110, 299, STONE);
+    e.rect(20, 280, 100, 299, WATER);
+    e.rect(300, 100, 340, 140, SAND);
+    e.rect(400, 280, 440, 299, WOOD);
+    e.paint(420, 279, 2, FIRE);
+    e.rect(560, 40, 600, 90, SAND);
+    e.paint(580, 295, 3, LAVA);
+    for (let t = 0; t < 60; t++) e.step();
+    return e;
+  };
+  const a = scène(), b = scène();
+  const bande = b.copy(0, 0, D - 1, H - 1);
+  const chaud = Array.from({ length: H }, (_, y) => b.temp.slice(y * W, y * W + D));
+  const grain = b.noise.slice();
+  const avant = { cells: b.cells.slice(), life: b.life.slice(), temp: b.temp.slice(), press: b.press.slice(), clock: b.clock.slice() };
+
+  b.shift(D);
+  assert.equal(b.cells[300 * W + 580 - D], avant.cells[300 * W + 580], "la matière glisse de D colonnes vers la gauche");
+  assert.equal(b.temp[295 * W + 580 - D], avant.temp[295 * W + 580], "la chaleur de la lave glisse avec elle");
+  assert.equal(b.cells[300 * W + W - 1], EMPTY, "la bande neuve est vide");
+  assert.equal(b.temp[10 * W + W - 1], b.ambient, "… à l'ambiante");
+  assert.equal(b.noise[10 * W + W - 1], 0, "… sans grain : à l'appelant de le poser");
+  b.shift(-D);
+  b.paste(bande, 0, 0);
+  for (let y = 0; y < H; y++) { b.temp.set(chaud[y], y * W); b.noise.set(grain.subarray(y * W, y * W + D), y * W); }
+  assert.deepEqual(b.cells, avant.cells, "aller-retour : la même matière");
+  assert.deepEqual(b.life, avant.life, "… le même `life`");
+  assert.deepEqual(b.temp, avant.temp, "… la même chaleur");
+  assert.deepEqual(b.press, avant.press, "… la même pression");
+  assert.deepEqual(b.noise, grain, "… le même grain");
+
+  // Et la suite ne s'en ressent pas : le témoin a seulement vu sa bande
+  // réveillée (`paste` sur elle-même), comme `shift()` réveille la sienne.
+  a.paste(a.copy(0, 0, D - 1, H - 1), 0, 0);
+  for (let t = 0; t < 200; t++) { a.step(); b.step(); }
+  assert.deepEqual(b.cells, a.cells, "200 ticks après un aller-retour : la même partie qu'un bac resté en place");
+  assert.deepEqual(b.temp, a.temp, "… la même chaleur");
+  assert.equal(b.seed, a.seed, "… le même tirage");
+
+  assert.throws(() => a.shift(8), "un décalage qui n'est pas un multiple de 16 est refusé");
+  assert.throws(() => a.shift(W), "un décalage d'une fenêtre entière est refusé");
+}
+{
+  // Glisser une fenêtre du monde infini puis bâtir la bande neuve = bâtir la fenêtre d'à côté.
+  const W = 1280, H = 720, G = 4217;
+  const e = new Engine(W, H, 1);
+  e.clear();
+  land(e, G, EXPLORE_SCALE, 0, 0, W);
+  e.shift(STRIP);
+  land(e, G, EXPLORE_SCALE, STRIP, W - STRIP, W);
+  const voisin = new Engine(W, H, 1);
+  voisin.clear();
+  land(voisin, G, EXPLORE_SCALE, STRIP, 0, W);
+  assert.deepEqual(e.cells, voisin.cells, "glisser d'un chunk puis bâtir la bande = la fenêtre d'à côté");
+  assert.deepEqual(e.life, voisin.life, "… lapins compris");
+  assert.deepEqual(e.noise, voisin.noise, "… grain compris");
+  assert.deepEqual(e.temp, voisin.temp, "… chaleur comprise");
+}
+{
+  // Le héros piloté suit le décalage ; coupé par le bord, il est perdu.
+  const W = 320, H = 180;
+  const e = new Engine(W, H, 3);
+  e.rect(0, 100, W - 1, H - 1, STONE);
+  assert.ok(e.spawnHero(200, 98) >= 0, "un héros se pose");
+  e.step();
+  const là = e.hero;
+  e.shift(64);
+  assert.equal(e.hero, là - 64, "l'index du héros glisse avec lui");
+  assert.equal(e.cells[e.hero], HERO, "… et désigne toujours son cœur");
+  e.step();
+  assert.equal(e.cells[e.hero], HERO, "un tick plus tard, il est toujours piloté");
+  e.shift(144);
+  assert.equal(e.hero, -1, "sorti par la gauche, plus de héros piloté");
+}
+
+/**
  * Le héros : il obéit à `pilot` (marcher, grimper une marche, sauter, nager,
  * creuser), meurt comme le lapin, et ses commandes passent par des gestes —
  * donc par le rejeu.

@@ -767,6 +767,59 @@ export class Engine {
     shown.fill(0);
   }
 
+  /**
+   * Fait glisser la fenêtre de `dx` colonnes sur un monde plus large (mode
+   * exploration, docs/agents/exploration.md) : le contenu part de `dx` vers
+   * la gauche (`dx` > 0, la fenêtre avance vers la droite) ou vers la droite.
+   * Les colonnes qui sortent sont perdues — à l'appelant de les avoir
+   * rangées ; celles qui entrent sont vidées (vide, `ambient`, sans pression,
+   * grain nul), à lui de les remplir (`land()`, ou le chunk rangé).
+   *
+   * Entre deux ticks seulement : les tampons du tick (`later`, `held`,
+   * `asked`, mouvements du lapin) y sont vides. Tout le reste glisse avec la
+   * grille, **les deux** tampons de `temp` et de `press` compris : un bloc
+   * endormi lit l'un ou l'autre selon la passe, et n'en glisser qu'un lui
+   * rendait au réveil la chaleur ou la pression d'un autre endroit. Les
+   * blocs de veille glissent d'autant de blocs : `dx` est un multiple de
+   * `CHUNK`. La bande neuve compte pour fraîchement réveillée (`awake` à 0,
+   * `stir` à 1) : `rouse()` y remet les horloges.
+   *
+   * Tout est à redessiner (`shown`), et le héros piloté est recherché par son
+   * numéro (`seek`) : la bande neuve a pu en apporter, un héros coupé par le
+   * bord en a perdu.
+   */
+  shift(dx: number): void {
+    const { width: w, height: h, cols, rows } = this;
+    if (dx === 0) return;
+    if (dx % CHUNK !== 0 || Math.abs(dx) >= w || w % CHUNK !== 0) throw new Error(`décalage de ${dx} colonnes impossible sur ${w}`);
+    /** Glisse chaque rangée de `a` (largeur `n`) de `by` cases, puis remplit la bande libérée de `v`. */
+    const slide = (a: Uint8Array | Int8Array | Float32Array, n: number, lines: number, by: number, v: number): void => {
+      const k = Math.abs(by);
+      for (let y = 0; y < lines; y++) {
+        const r = y * n;
+        if (by > 0) { a.copyWithin(r, r + k, r + n); a.fill(v, r + n - k, r + n); }
+        else { a.copyWithin(r + k, r, r + n - k); a.fill(v, r, r + k); }
+      }
+    };
+    const air = this.air;
+    for (const a of [this.cells, this.life, this.frozen, this.clock, this.noise, this.windX, this.windY, this.pressA, this.pressB]) slide(a, w, h, dx, 0);
+    slide(this.tempA, w, h, dx, air);
+    slide(this.tempB, w, h, dx, air);
+    const dc = dx / CHUNK;
+    // La bande neuve : réveillée, et pas « éveillée au tick d'avant ».
+    slide(this.awake, cols, rows, dc, 0);
+    slide(this.was, cols, rows, dc, 0);
+    slide(this.stir, cols, rows, dc, 1);
+    slide(this.hush, cols, rows, dc, 1);
+    this.shown.fill(1);
+    const at = this.hero;
+    if (at >= 0) {
+      const x = at % w - dx;
+      this.hero = x >= 0 && x < w ? at - dx : -1;
+    }
+    this.seek = true;
+  }
+
   /** Le bloc de la cellule `i` a changé : il est diffusé à ce tick et balayé au suivant, avec ses voisins. */
   private wake(i: number): void {
     const y = (i / this.width) | 0;

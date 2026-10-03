@@ -1,7 +1,7 @@
 # Mode exploration : monde infini (plan)
 
-**État : étape 1 faite** (`land()`, voir plus bas), étapes 2 et suivantes à
-faire. Le bouton Explorer 🧭
+**État : étapes 1 et 2 faites** (`land()`, `Engine.shift()`, voir plus bas),
+étapes 3 et suivantes à faire. Le bouton Explorer 🧭
 (main.ts) fixe l'échelle : décor à `EXPLORE_SCALE` (terrain.ts), vue à
 `EXPLORE_PX` pixels d'écran par cellule. Le monde reste un bac fini de
 1280×720. Ce guide dit comment le rendre infini en largeur, dans quel ordre,
@@ -105,7 +105,41 @@ Ce qui l'empêche aujourd'hui, et ce qu'il faut à la place :
 - poches fermées, monde au repos, comme `terrain()` aujourd'hui ;
 - mesurer le coût d'une tranche de 256×720 (cible : moins de 5 ms).
 
-### 2. Décaler la fenêtre (`Engine.shift(dx)`)
+### 2. Décaler la fenêtre (`Engine.shift(dx)`) — fait
+
+**Fait.** `Engine.shift(dx)` dans engine.ts, décrit dans
+[simulation.md](simulation.md#blocs-de-veille). `dx` doit être un multiple de
+`CHUNK` (16) et plus petit que la largeur, sinon il lève une erreur. Le mode
+utilisera `STRIP` (256).
+
+Prouvé :
+- test/sim.ts : un aller-retour, la bande sortie reposée à la main, redonne
+  matière, `life`, chaleur, pression et grain au bit près. Puis 200 ticks
+  donnent la même partie qu'un bac resté en place, dont on a seulement
+  réveillé la même bande. Une fenêtre décalée d'un chunk dont on bâtit la
+  bande neuve (`land()`) est identique à la fenêtre d'à côté bâtie d'un coup.
+  Le héros piloté glisse avec son index ; sorti par le bord, il est perdu ;
+- test/pool.ts : 300 ticks d'une partie chargée (feu, explosions, pression)
+  avec six décalages de ±128 : 4 fils = 1 fil, au bit près ;
+- l'empreinte de test/sim.ts n'a pas bougé (`shift()` n'est jamais appelé
+  hors du mode) ;
+- `npm run bench`, ligne « décalage de la fenêtre » : **environ 4 ms** en
+  1280×720, sous les 12 ms de `SLICE`. Avec la tranche bâtie d'avance
+  (étape 3), le tick du décalage tient.
+
+Écart avec le plan : il fallait glisser **les deux** tampons de `temp` et de
+`press`, pas seulement le courant. Un bloc endormi a recopié sa chaleur dans
+l'autre tampon et la relit au tick suivant ; une pression calmée est remise
+à zéro dans les deux. N'en glisser qu'un rendait au réveil la chaleur ou la
+pression de l'endroit d'avant.
+
+Restent pour l'étape 3 : un héros ou un lapin coupé par la bande sortante y
+perd des cellules et meurt au tick suivant. C'est au mode de décaler assez
+tôt pour que le héros n'y soit jamais. Un héros d'un chunk rangé revient
+avec son numéro : `seek` relance `enlist()`, qui renumérote en cas de
+doublon.
+
+Le plan d'origine :
 
 `dx` est un multiple de 256, positif ou négatif. Entre deux ticks :
 

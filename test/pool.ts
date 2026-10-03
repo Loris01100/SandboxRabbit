@@ -13,7 +13,7 @@ import { Worker } from "node:worker_threads";
 import { Engine } from "../src/client/sim/engine.ts";
 import { Pool, type Helper } from "../src/client/sim/pool.ts";
 import { applyGesture } from "../src/client/gestures.ts";
-import { terrain } from "../src/client/terrain.ts";
+import { EXPLORE_SCALE, land, terrain } from "../src/client/terrain.ts";
 import { FIRE, LAVA, METAL, NITRO, PILOT, RUST, SAND, SODIUM, TNT, URANIUM, WATER, WOOD } from "../src/client/sim/materials.ts";
 
 /** `count` fils auxiliaires sous Node, et de quoi les arrêter. */
@@ -80,6 +80,29 @@ partie(autre);
 partie(témoin);
 for (let t = 0; t < 200; t++) { autre.step(); témoin.step(); }
 assert.deepEqual(signature(autre), signature(témoin), "rebranché sur un autre moteur (changement de taille), même résultat");
+
+// La fenêtre du monde infini glisse en pleine partie (`shift()`, docs/agents/exploration.md) :
+// feu, souffle et chutes à cheval sur le décalage, bande neuve bâtie par `land()`.
+const glissé = new Engine(W, H, 11), repère = new Engine(W, H, 11);
+await pool.bind(glissé);
+partie(glissé);
+partie(repère);
+let x0 = 0;
+for (let t = 0; t < 300; t++) {
+  if (t % 50 === 25) {
+    const dx = t % 100 === 25 ? 128 : -128;
+    x0 += dx;
+    for (const e of [glissé, repère]) {
+      e.shift(dx);
+      if (dx > 0) land(e, 4217, EXPLORE_SCALE, x0, W - dx, W);
+      else land(e, 4217, EXPLORE_SCALE, x0, 0, -dx);
+    }
+  }
+  glissé.step();
+  repère.step();
+}
+assert.ok(glissé.heard.booms > 0, "la partie qui glisse a soufflé");
+assert.deepEqual(signature(glissé), signature(repère), "une fenêtre qui glisse : 4 fils = 1 fil, au bit près");
 
 pool.release();
 await stop();

@@ -75,6 +75,14 @@ for (const [w, h] of [[320, 180], [480, 270], [640, 360], [1280, 720], [1920, 10
   const ms = (performance.now() - start) / runs;
   measured[`tranche ${STRIP}×720`] = { value: ms, unit: "ms" };
   console.log(`\ntranche du monde infini (${STRIP}×720) : ${ms.toFixed(1)} ms`);
+
+  // Le décalage lui-même (`shift()`), sans la tranche : ce qu'il coûte au tick où il tombe.
+  for (let k = 0; k < 3; k++) { e.shift(STRIP); e.shift(-STRIP); }
+  const t0 = performance.now();
+  for (let k = 0; k < runs; k++) { e.shift(STRIP); e.shift(-STRIP); }
+  const slid = (performance.now() - t0) / (2 * runs);
+  measured[`décalage 1280×720`] = { value: slid, unit: "ms" };
+  console.log(`décalage de la fenêtre (1280×720, ${STRIP} colonnes) : ${slid.toFixed(1)} ms`);
 }
 
 if (process.env.BENCH_JSON) writeFileSync(process.env.BENCH_JSON, JSON.stringify(measured));
