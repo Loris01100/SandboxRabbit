@@ -214,7 +214,7 @@ export function sin(x: number): number {
     if (ix < 0x3e500000) return x; // |x| < 2^-26
     return kSin(x, 0, 0);
   }
-  if (ix >= 0x7ff00000 || !remPio2(x)) return NaN;
+  if (ix >= 0x7ff00000 || !remPio2(x)) return Number.NaN;
   switch (n & 3) {
     case 0: return kSin(y0, y1, 1);
     case 1: return kCos(y0, y1);
@@ -230,7 +230,7 @@ export function cos(x: number): number {
     if (ix < 0x3e46a09e) return 1; // |x| < 2^-27·√2
     return kCos(x, 0);
   }
-  if (ix >= 0x7ff00000 || !remPio2(x)) return NaN;
+  if (ix >= 0x7ff00000 || !remPio2(x)) return Number.NaN;
   switch (n & 3) {
     case 0: return kCos(y0, y1);
     case 1: return -kSin(y0, y1, 1);

@@ -105,7 +105,7 @@ assert.equal(atan2(0, -1), Math.PI);
 assert.ok(Object.is(atan2(-0, 1), -0), "atan2(-0, 1) = -0");
 assert.equal(atan2(1, 0), Math.PI / 2);
 assert.equal(atan2(-Infinity, -Infinity), -3 * Math.PI / 4);
-assert.ok(Number.isNaN(sin(Infinity)) && Number.isNaN(cos(NaN)), "sin(∞), cos(NaN) = NaN");
+assert.ok(Number.isNaN(sin(Infinity)) && Number.isNaN(cos(Number.NaN)), "sin(∞), cos(NaN) = NaN");
 // La limite assumée (`ponytail:` de remPio2) : au-delà de 2^20·π/2, NaN plutôt qu'une réduction fausse.
 assert.ok(Number.isNaN(sin(1_700_000)) && Number.isNaN(cos(-1e300)), "au-delà de 1,6 million : NaN");
 

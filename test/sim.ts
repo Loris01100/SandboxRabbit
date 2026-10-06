@@ -233,7 +233,7 @@ function count(e: Engine, id: MaterialId): number {
   e.setFrozen(30, 20, 1e9, true);
   assert.ok(Date.now() - debut < 500, "un rayon d'un milliard ne fait pas boucler le moteur");
   assert.equal(count(e, SAND), W * H, "et il peint quand même toute la grille");
-  e.paint(30, 20, NaN, WATER);
+  e.paint(30, 20, Number.NaN, WATER);
   e.paint(30, 20, -5, WATER);
   assert.equal(count(e, SAND), W * H, "un rayon NaN ou négatif ne peint rien");
 }

@@ -646,7 +646,7 @@ function jouer(s: ReturnType<typeof salon>, frames: number): void {
     { ticks: 5, beats: [], sums: 7 },
     { ticks: 5, beats: [], sums: [3] },
     { ticks: 5, beats: [{ at: 0, g: { t: "clip", x: 0, y: 0, w: 1, h: 1, cells: "!!", life: "" } }], sums: [] },
-    { ticks: NaN, beats: "x", sums: [] },
+    { ticks: Number.NaN, beats: "x", sums: [] },
   ];
   for (const t of junk) assert.doesNotThrow(() => { s.invité.order({ t: "turn", ...t } as never); s.invité.frame(16); }, `l'invité encaisse ${JSON.stringify(t)}`);
   assert.doesNotThrow(() => s.invité.order({ t: "follow", rec: { v: 1, w: W, h: H, grid: 5 } as never }), "un départ illisible aussi");

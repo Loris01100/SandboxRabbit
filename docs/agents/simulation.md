@@ -8,6 +8,10 @@ ne sont gardés par **aucun** test visible, seulement par l'empreinte globale
 
 ## État
 
+La valeur sentinelle NaN s'écrit `Number.NaN` dans le code et les tests :
+elle marque notamment une température non définie et une valeur de cache
+encore non initialisée. Cette écriture ne change pas les calculs ni le déterminisme.
+
 Les conversions vers un entier utilisent `Math.trunc()` : coordonnées de
 cellules, indices de blocs, grain du rendu et réductions d'argument de libm.ts.
 Ces valeurs restent dans la plage des entiers signés de 32 bits. Les masques

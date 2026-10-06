@@ -64,7 +64,7 @@ function snapshot(e: Inner): State {
 /** Les tables des matières que lit la chaleur, dérivées de materials.ts comme dans engine.ts. */
 function tables(): { f32s: Float32Array; u8s: Uint8Array } {
   const f32s = new Float32Array(768), u8s = new Uint8Array(768);
-  f32s.fill(NaN, 0, 256).fill(Infinity, 256, 512).fill(-Infinity, 512);
+  f32s.fill(Number.NaN, 0, 256).fill(Infinity, 256, 512).fill(-Infinity, 512);
   for (const key of Object.keys(MATERIALS)) {
     const m = MATERIALS[Number(key)];
     if (m.heat !== undefined) f32s[m.id] = m.heat;

@@ -227,7 +227,7 @@ const FACING_LEFT = 128;
 const KINDS = { empty: 0, static: 1, powder: 2, liquid: 3, gas: 4 } as const;
 const KIND = new Uint8Array(256);
 const DENSITY = new Float32Array(256);
-const HEAT = new Float32Array(256).fill(NaN); // NaN = ne chauffe pas
+const HEAT = new Float32Array(256).fill(Number.NaN); // NaN = ne chauffe pas
 const BOIL_AT = new Float32Array(256).fill(Infinity);
 const BOIL_INTO = new Uint8Array(256);
 const FREEZE_AT = new Float32Array(256).fill(-Infinity);
@@ -553,7 +553,7 @@ export class Engine {
   private air = AMBIENT;
   /** 1 = matière qui ne chauffe pas et ne change pas d'état à l'ambiante `calmAt` (voir `flat()`). */
   private readonly calm = new Uint8Array(256);
-  private calmAt = NaN;
+  private calmAt = Number.NaN;
   /** Côté d'un bloc de veille, en cellules : le rendu redessine par blocs lui aussi. */
   readonly chunk = CHUNK;
   /** Blocs de veille par rangée et par colonne (voir `CHUNK`). */

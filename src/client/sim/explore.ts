@@ -46,10 +46,10 @@ export const STRIP = 256;
 /** `life` d'une matière tout juste posée, par id : ce qu'écrit `set()` (`MATERIALS[id].life ?? 0`). */
 const BORN = new Uint8Array(256);
 /** Température d'une matière tout juste posée, par id (`spawn`, sinon `heat`) ; NaN : celle de l'air. */
-const WARM = new Float32Array(256).fill(NaN);
+const WARM = new Float32Array(256).fill(Number.NaN);
 for (const [key, m] of Object.entries(MATERIALS)) {
   BORN[Number(key)] = m.life ?? 0;
-  WARM[Number(key)] = m.spawn ?? m.heat ?? NaN;
+  WARM[Number(key)] = m.spawn ?? m.heat ?? Number.NaN;
 }
 
 /**
