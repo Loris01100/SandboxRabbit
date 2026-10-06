@@ -129,7 +129,7 @@ function rle(cells: Uint8Array): string {
 
 /** Des octets (une chaîne binaire) en base64 url, sans `=`. */
 function url(binary: string): string {
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 /**

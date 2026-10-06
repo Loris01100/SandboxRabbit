@@ -468,6 +468,9 @@ répond 500.
 
 [src/client/sim/codec.ts](../../src/client/sim/codec.ts) — RLE + base64 url,
 jusqu'à cinq blocs séparés par `.` : `matière[.figé[.life.temp[.noms]]]`.
+Le codec et `pack()` de replay.ts retirent le remplissage Base64 avec
+`replaceAll("=", "")`, sans expression régulière : `btoa()` ne produit
+des `=` qu'en fin de chaîne. Le format sauvegardé reste identique.
 Le cinquième n'est pas une grille : les noms donnés aux héros
 (`engine.names`), JSON `[[numéro, nom], …]` en base64 url, absent si personne
 n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de noms),
