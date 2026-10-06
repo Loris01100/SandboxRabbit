@@ -97,7 +97,9 @@ tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
 6. `thermal()`, en trois passes par bloc de veille éveillé ou écrit : les
    sources (`heat`) tirent leur cellule vers leur température
    (`heatChunk`), puis diffusion (`CONDUCTION`), retour vers `ambient`
-   (`COOLING`) et changements d'état `boil` / `freeze` (`diffuseChunk`),
+   (`COOLING`) et changements d'état `boil` / `freeze` (`diffuseChunk`,
+   ligne par ligne dans `diffuseRow`, chaque voisine lue par `side()` ; ne
+   pas changer l'ordre des quatre additions, que le prototype Rust recopie),
    puis recopie des blocs refroidis (`settleChunk`). Les tampons s'échangent.
 7. `breathe()` : la pression de l'air, sautée tant que rien n'a soufflé.
    Voir [Pression et vent](#pression-et-vent).

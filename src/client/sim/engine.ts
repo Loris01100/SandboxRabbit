@@ -377,6 +377,16 @@ function pulled(cells: Uint8Array, temp: Float32Array, j: number): number {
   return !Number.isNaN(heat) ? Math.fround(t + (heat - t) * 0.5) : t;
 }
 
+/**
+ * La voisine `j` d'une cellule de température `t`, pour la diffusion : `t`
+ * hors de la grille (`inside` faux, `j` n'est alors jamais lu), `pulled()`
+ * si elle est dans un bloc endormi (`asleep`), sa température sinon.
+ */
+function side(cells: Uint8Array, temp: Float32Array, j: number, t: number, inside: boolean, asleep: boolean): number {
+  if (!inside) return t;
+  return asleep ? pulled(cells, temp, j) : temp[j];
+}
+
 /** Mélange 32 bits (finale de murmur3) : une graine par bloc et par tick, tirée de celle du tick, sans suite partagée. */
 function mix(h: number): number {
   h ^= h >>> 16;
@@ -2294,7 +2304,7 @@ export class Engine {
 
   /** Passe 2 : diffusion du bloc `c` vers l'autre tampon, changements d'état, et le bloc dit s'il est refroidi (`awake[c] = 2`). */
   private diffuseChunk(c: number): void {
-    const { width: w, height: h, cells, temp, tempNext, ambient, awake, stir } = this;
+    const { width: w, height: h, tempNext, ambient, awake, stir } = this;
     const x0 = (c % this.cols) << SHIFT, y0 = Math.trunc(c / this.cols) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
     const cols = this.cols;
@@ -2307,26 +2317,41 @@ export class Engine {
     }
     let still = true;
     for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; x++) {
-        const i = y * w + x;
-        const t = temp[i];
-        const sum =
-          (y > 0 ? (y === y0 && upAsleep ? pulled(cells, temp, i - w) : temp[i - w]) : t) +
-          (y < h - 1 ? (y === y1 - 1 && downAsleep ? pulled(cells, temp, i + w) : temp[i + w]) : t) +
-          (x > 0 ? (x === x0 && leftAsleep ? pulled(cells, temp, i - 1) : temp[i - 1]) : t) +
-          (x < w - 1 ? (x === x1 - 1 && rightAsleep ? pulled(cells, temp, i + 1) : temp[i + 1]) : t);
-        const next = t + CONDUCTION * (sum - 4 * t) + COOLING * (ambient - t);
-        tempNext[i] = next;
-        const id = cells[i];
-        const heat = HEAT[id];
-        const moved = next - (!Number.isNaN(heat) ? 2 * t - heat : t);
-        if (moved > STILL || moved < -STILL) still = false;
-        if (next > BOIL_AT[id]) this.convert(i, BOIL_INTO[id]);
-        else if (next < FREEZE_AT[id]) this.convert(i, FREEZE_INTO[id]);
-      }
+      const up = y === y0 && upAsleep, down = y === y1 - 1 && downAsleep;
+      if (!this.diffuseRow(y, x0, x1, up, down, leftAsleep, rightAsleep)) still = false;
     }
     if (still) awake[c] = 2;
     else stir[c] = 1;
+  }
+
+  /**
+   * Une ligne de `diffuseChunk()`, de x0 à x1 : `up` / `down` disent si la
+   * ligne voisine est dans un bloc endormi, `left` / `right` si la colonne
+   * d'à côté l'est (lue par `pulled()`). Rend vrai si aucune cellule n'a
+   * varié de plus de `STILL`. L'ordre des quatre additions est celui du
+   * prototype Rust (mode 0) : le changer décalerait la chaleur d'un bit.
+   */
+  private diffuseRow(y: number, x0: number, x1: number, up: boolean, down: boolean, left: boolean, right: boolean): boolean {
+    const { width: w, height: h, cells, temp, tempNext, ambient } = this;
+    let still = true;
+    for (let x = x0; x < x1; x++) {
+      const i = y * w + x;
+      const t = temp[i];
+      const sum =
+        side(cells, temp, i - w, t, y > 0, up) +
+        side(cells, temp, i + w, t, y < h - 1, down) +
+        side(cells, temp, i - 1, t, x > 0, x === x0 && left) +
+        side(cells, temp, i + 1, t, x < w - 1, x === x1 - 1 && right);
+      const next = t + CONDUCTION * (sum - 4 * t) + COOLING * (ambient - t);
+      tempNext[i] = next;
+      const id = cells[i];
+      const heat = HEAT[id];
+      const moved = next - (Number.isNaN(heat) ? t : 2 * t - heat);
+      if (moved > STILL || moved < -STILL) still = false;
+      if (next > BOIL_AT[id]) this.convert(i, BOIL_INTO[id]);
+      else if (next < FREEZE_AT[id]) this.convert(i, FREEZE_INTO[id]);
+    }
+    return still;
   }
 
   /**
