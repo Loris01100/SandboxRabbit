@@ -522,6 +522,9 @@ variable privée de son module, pour voir immédiatement un changement de
 matière, de touche, de zoom, de rayon ou de taille sans pouvoir la réassigner
 depuis un autre module.
 
+Le dimensionnement du canvas dans view.ts lit les valeurs CSS numériques
+avec `Number.parseFloat()` (marges internes et hauteur maximale).
+
 ### Classement des défis
 
 Pour les défis **livrés** (`CHALLENGES`), pas les mondes-défis de la galerie :

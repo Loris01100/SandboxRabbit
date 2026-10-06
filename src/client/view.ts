@@ -132,12 +132,12 @@ function fitCanvas(): void {
   if (!whole) { applyView(); return; }
   const cs = getComputedStyle(stage), mine = getComputedStyle(canvas);
   const border = canvas.clientLeft * 2; // border-box : la bordure est dans la largeur
-  const boxW = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - border;
+  const boxW = stage.clientWidth - Number.parseFloat(cs.paddingLeft) - Number.parseFloat(cs.paddingRight) - border;
   // Sur téléphone, la scène prend la hauteur du bac, bornée par `max-height`
   // en pixels (40vh) : c'est elle qu'on lit, pas la scène, qui la suivrait.
   const boxH = (mine.maxHeight.endsWith("px")
-    ? parseFloat(mine.maxHeight)
-    : stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) - border;
+    ? Number.parseFloat(mine.maxHeight)
+    : stage.clientHeight - Number.parseFloat(cs.paddingTop) - Number.parseFloat(cs.paddingBottom)) - border;
   const k = wholeScale(boxW, boxH, worldState.width, worldState.height, devicePixelRatio);
   if (k > 0) {
     canvas.style.width = `${(worldState.width * k) / devicePixelRatio + border}px`;
