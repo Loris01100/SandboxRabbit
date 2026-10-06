@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       # Seules les dépendances livrées au navigateur comptent : une alerte sur
       # vite ou wrangler n'atteint personne, et le bruit ferait ignorer la marche.
       - run: npm audit --omit=dev --audit-level=high

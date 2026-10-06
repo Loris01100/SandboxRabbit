@@ -155,7 +155,9 @@ blocs changés (`engine.changed()`) à la place du bac.
 [.github/workflows/ci.yml](../../.github/workflows/ci.yml), à chaque push et PR,
 Node 24 :
 
-1. `npm ci`
+1. `npm ci --ignore-scripts` — les scripts de cycle de vie des paquets ne
+   s'exécutent pas à l'installation ; les commandes de build et de test sont
+   lancées explicitement dans les étapes suivantes.
 2. `npm audit --omit=dev --audit-level=high` — seules les dépendances livrées
    au navigateur comptent (aujourd'hui : `hono`).
 3. `npm run build`
