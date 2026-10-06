@@ -413,6 +413,18 @@ function count(e: Engine, id: MaterialId): number {
   }
 }
 
+// Désamorçage : des grains isolés suffisent, mais trois voisines, même en diagonale, forment un amas.
+{
+  const c = CHALLENGES.find((c) => c.name === "Désamorçage")!;
+  const e = new Engine(32, 32, 1234);
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 10; x++) e.set(x * 3, y * 3, URANIUM);
+  assert.equal(c.won(e), true, "80 grains isolés, y compris au bord, désamorcent le tas");
+  e.set(1, 0, URANIUM);
+  e.set(0, 1, URANIUM);
+  e.set(1, 1, URANIUM);
+  assert.equal(c.won(e), false, "trois voisines dont une diagonale suffisent à reformer un amas");
+}
+
 // Les décors surprises se posent et tiennent quelques secondes sans exploser
 // la grille (une scène qui se vide toute seule n'est pas une scène).
 {

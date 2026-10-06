@@ -80,6 +80,10 @@ le pourtour d'`explode()` comme `TNT` et `C4`.
 
 ## Ajouter un défi
 
+Pour une condition d'amas, `clumped()` de challenges.ts compte les cellules
+ayant assez de voisines identiques ; `neighbors()` examine les huit alentour,
+diagonales comprises, sans compter le centre. « Désamorçage » utilise ce comptage.
+
 **Sans code** : sauvegarder un monde avec un objectif depuis l'UI (`goal` de la
 forme `ge:<id>:<n>` ou `lt:<id>:<n>`). Il apparaît dans la galerie marqué 🎯.
 

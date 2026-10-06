@@ -27,19 +27,23 @@ function floor(e: Engine, y: number): void {
   for (let x = 0; x < e.width; x++) for (let d = 0; d < 4; d++) e.set(x, y + d, STONE);
 }
 
+/** Voisines d'`id` parmi les huit alentour, sans compter la cellule centrale. */
+function neighbors(e: Engine, x: number, y: number, id: MaterialId): number {
+  let mass = 0;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if ((dx || dy) && e.get(x + dx, y + dy) === id) mass++;
+    }
+  }
+  return mass;
+}
+
 /** Cellules d'`id` ayant au moins `least` voisines identiques (les huit alentour). */
 function clumped(e: Engine, id: MaterialId, least: number): number {
   let n = 0;
   for (let y = 0; y < e.height; y++) {
     for (let x = 0; x < e.width; x++) {
-      if (e.get(x, y) !== id) continue;
-      let mass = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if ((dx || dy) && e.get(x + dx, y + dy) === id) mass++;
-        }
-      }
-      if (mass >= least) n++;
+      if (e.get(x, y) === id && neighbors(e, x, y, id) >= least) n++;
     }
   }
   return n;
