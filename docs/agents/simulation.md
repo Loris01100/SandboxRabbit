@@ -10,7 +10,9 @@ ne sont gardés par **aucun** test visible, seulement par l'empreinte globale
 
 La valeur sentinelle NaN s'écrit `Number.NaN` dans le code et les tests :
 elle marque notamment une température non définie et une valeur de cache
-encore non initialisée. Cette écriture ne change pas les calculs ni le déterminisme.
+encore non initialisée. Les vérifications passent par `Number.isNaN()`
+(ou sa négation), sans comparer une valeur avec elle-même. Ces écritures ne
+changent pas les calculs ni le déterminisme.
 
 Les conversions vers un entier utilisent `Math.trunc()` : coordonnées de
 cellules, indices de blocs, grain du rendu et réductions d'argument de libm.ts.

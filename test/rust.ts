@@ -460,7 +460,7 @@ ${name} (pression) — ${W}×${H}, ${(awake * 100).toFixed(0)} % des blocs évei
     const t1 = performance.now();
     for (let i = 0; i < N; i++) {
       const r = ours(xs[i], ys[i]);
-      if (Object.is(r, out[i]) || (r !== r && out[i] !== out[i])) continue;
+      if (Object.is(r, out[i]) || (Number.isNaN(r) && Number.isNaN(out[i]))) continue;
       if (!differ) first = `${name}(${op === 5 ? `${ys[i]}, ` : ""}${xs[i]}) : ${r} contre ${out[i]}`;
       differ++;
     }

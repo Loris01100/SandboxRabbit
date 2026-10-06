@@ -30,8 +30,8 @@ function rank(x: number): bigint {
 
 /** Écart en ulp entre deux résultats ; 0 si tous deux NaN. */
 function ulps(a: number, b: number): bigint {
-  if (a !== a && b !== b) return 0n;
-  if (a !== a || b !== b) return 1n << 60n;
+  if (Number.isNaN(a) && Number.isNaN(b)) return 0n;
+  if (Number.isNaN(a) || Number.isNaN(b)) return 1n << 60n;
   const d = rank(a) - rank(b);
   return d < 0n ? -d : d;
 }

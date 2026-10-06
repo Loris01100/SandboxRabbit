@@ -254,7 +254,7 @@ export function atan(x: number): number {
   const sign = ix >>> 31;
   ix &= 0x7fffffff;
   if (ix >= 0x44100000) { // |x| ≥ 2^66
-    if (x !== x) return x;
+    if (Number.isNaN(x)) return x;
     const z = ATANHI[3] + make(0x03800000, 0); // + 2^-120 : le « inexact » de musl, sans effet sur l'arrondi
     return sign ? -z : z;
   }
@@ -284,7 +284,7 @@ const PI_LO = 1.2246467991473531772E-16;
 
 /** Angle du point (x, y), dans [-π, π], au bit près de musl. Attention à l'ordre : `atan2(y, x)`. */
 export function atan2(y: number, x: number): number {
-  if (x !== x || y !== y) return x + y;
+  if (Number.isNaN(x) || Number.isNaN(y)) return x + y;
   let ix = high(x);
   const lx = low(x);
   let iy = high(y);
@@ -345,7 +345,7 @@ export function exp(x: number): number {
   const sign = hx >>> 31;
   hx &= 0x7fffffff;
   if (hx >= 0x4086232b) { // |x| ≥ 708,39…
-    if (x !== x) return x;
+    if (Number.isNaN(x)) return x;
     if (x > 709.782712893383973096) return x * two(1023); // débordement : +∞
     if (x < -745.13321910194110842) return 0;
   }

@@ -374,7 +374,7 @@ const Shareable: new (bytes: number) => ArrayBufferLike =
 function pulled(cells: Uint8Array, temp: Float32Array, j: number): number {
   const heat = HEAT[cells[j]];
   const t = temp[j];
-  return heat === heat ? Math.fround(t + (heat - t) * 0.5) : t;
+  return !Number.isNaN(heat) ? Math.fround(t + (heat - t) * 0.5) : t;
 }
 
 /** Mélange 32 bits (finale de murmur3) : une graine par bloc et par tick, tirée de celle du tick, sans suite partagée. */
@@ -2287,7 +2287,7 @@ export class Engine {
         const heat = HEAT[cells[i]];
         // Une source tire vers sa température sans l'imposer : une flamme peut
         // encore faire fondre la glace qu'elle touche. (NaN = ne chauffe pas.)
-        if (heat === heat) temp[i] += (heat - temp[i]) * 0.5;
+        if (!Number.isNaN(heat)) temp[i] += (heat - temp[i]) * 0.5;
       }
     }
   }
@@ -2319,7 +2319,7 @@ export class Engine {
         tempNext[i] = next;
         const id = cells[i];
         const heat = HEAT[id];
-        const moved = next - (heat === heat ? 2 * t - heat : t);
+        const moved = next - (!Number.isNaN(heat) ? 2 * t - heat : t);
         if (moved > STILL || moved < -STILL) still = false;
         if (next > BOIL_AT[id]) this.convert(i, BOIL_INTO[id]);
         else if (next < FREEZE_AT[id]) this.convert(i, FREEZE_INTO[id]);
@@ -2348,7 +2348,7 @@ export class Engine {
     if (this.calmAt !== ambient) {
       for (let id = 0; id < 256; id++) {
         const heat = HEAT[id];
-        calm[id] = heat !== heat && !(ambient > BOIL_AT[id]) && !(ambient < FREEZE_AT[id]) ? 1 : 0;
+        calm[id] = Number.isNaN(heat) && !(ambient > BOIL_AT[id]) && !(ambient < FREEZE_AT[id]) ? 1 : 0;
       }
       this.calmAt = ambient;
     }

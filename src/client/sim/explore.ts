@@ -272,7 +272,7 @@ export function lay(e: Engine, r: Raised, x0: number): void {
       frozen[i] = 0;
       life[i] = BORN[id];
       const t = WARM[id];
-      temp[i] = t === t ? t : ambient; // NaN : la matière n'a pas de température à elle
+      temp[i] = !Number.isNaN(t) ? t : ambient; // NaN : la matière n'a pas de température à elle
       noise[i] = g[y * STRIP + inChunk(x0 + x)];
     }
   }
