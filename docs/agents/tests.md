@@ -25,6 +25,9 @@ Le test des encadrés de raccourcis dans test/ui.ts compare leurs actions à
 `npm run pile` ne cherche un nom de bundle qu'au début d'une suite de lettres,
 chiffres, traits de soulignement ou tirets : une longue suite sans position
 valide n'est pas reparcourue depuis chacun de ses caractères.
+Lors du remplacement des positions, le préfixe d'URL n'est recherché qu'au
+début d'un fragment délimité par un blanc ou `(` ; les noms de fichiers
+gardent la même garde contre les tentatives répétées à chaque caractère.
 
 `npm run drift` et `npm run loc` appellent Git par un chemin absolu fixe,
 sans recherche dans

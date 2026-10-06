@@ -94,7 +94,7 @@ if (process.argv[1]?.endsWith("pile.ts")) {
   if (missing.length) console.error(`Absents de ce build (autre commit ?) : ${missing.join(", ")}`);
   for (const raw of stack.split("\n")) {
     // L'URL entière part avec : `https://…/assets/index-….js:1:2` devient `src/…ts:3:4`.
-    const out = raw.replace(/(?:[^\s(]*\/)?([\w-]+\.js):(\d+):(\d+)/g, (all, file: string, l: string, c: string) => {
+    const out = raw.replace(/(?:(?<![^\s(])[^\s(]*\/)?(?<![\w-])([\w-]+\.js):(\d+):(\d+)/g, (all, file: string, l: string, c: string) => {
       const map = maps.get(file);
       const at = map && locate(map, Number(l), Number(c));
       if (!at) return all;
