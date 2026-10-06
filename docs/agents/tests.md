@@ -162,7 +162,8 @@ Node 24 :
    au navigateur comptent (aujourd'hui : `hono`).
 3. `npm run build`
 4. `npm run check`
-5. `npx playwright install --with-deps chromium` puis `npm run browser`
+5. `node node_modules/playwright/cli.js install --with-deps chromium` puis `npm run browser`
+   — appel direct du paquet installé par `npm ci`, sans téléchargement de paquet à la demande.
    ([docs/navigateur.md](../navigateur.md)) — SwiftShader tient lieu de carte
    graphique sur le runner.
 6. `npm run bench` — **tick ≤ 4 ms en 320×180** (surchargeable par

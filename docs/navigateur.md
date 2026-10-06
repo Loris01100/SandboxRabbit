@@ -74,10 +74,12 @@ Chromium en vie, et le script ne rend jamais la main.
 ## En CI (GitHub Actions)
 
 ```yaml
-- run: npx playwright install --with-deps chromium
+- run: node node_modules/playwright/cli.js install --with-deps chromium
 - run: npm run browser
 ```
 
+L'appel direct utilise le paquet installé par `npm ci --ignore-scripts` :
+il ne peut pas installer un paquet npm à la demande comme `npx`.
 `--with-deps` installe aussi les bibliothèques système de Chromium (le runner
 Ubuntu ne les a pas). Pas de cache à mettre en place : le téléchargement prend
 quelques secondes sur le runner.

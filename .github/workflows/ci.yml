@@ -29,7 +29,7 @@ jobs:
       - run: npm run check
       # Le shader WebGL2 contre Renderer, et la page qui charge sans erreur :
       # rien d'autre ne les voit. Chromium seul, avec ses bibliothèques système.
-      - run: npx playwright install --with-deps chromium
+      - run: node node_modules/playwright/cli.js install --with-deps chromium
       - run: npm run browser
       # Le tick a été porté de 1,6 à 0,7 ms : ce budget est ce qui empêche de le
       # reperdre sans s'en apercevoir. Il est large exprès (le runner partagé
