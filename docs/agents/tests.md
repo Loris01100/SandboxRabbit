@@ -5,6 +5,9 @@
 Les faux bindings `ASSETS.fetch` et `RL.limit` de test/api.ts renvoient des
 promesses résolues, comme les bindings qu'ils remplacent, sans `async` inutile.
 
+Le test des encadrés de raccourcis dans test/ui.ts compare leurs actions à
+`ACTIONS` après un tri explicite avec `localeCompare(..., "fr")` des deux listes.
+
 | Commande | Ce qu'elle vérifie |
 | --- | --- |
 | `npm run typecheck` | **quatre** projets tsc : `tsconfig.json` (client, lib DOM), `tsconfig.worker.json` (Worker, types générés, pas de DOM), `tsconfig.test.json` (tout `test/` sauf api.ts : types Node + DOM) et `tsconfig.test-worker.json` (test/api.ts : types Node + Worker). Node exécute les tests **sans** vérifier leurs types : sans ces deux derniers, un champ disparu n'y était vu qu'à l'exécution, et jamais dans test/gpu.ts, qui ne tourne pas en CI |
