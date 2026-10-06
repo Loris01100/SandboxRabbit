@@ -10,6 +10,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const GENERATED = ["package-lock.json", "worker-configuration.d.ts"];
+// Un chemin fixe évite qu'un dossier du PATH fournisse un faux Git.
+const GIT = process.platform === "win32" ? "C:/Program Files/Git/cmd/git.exe" : "/usr/bin/git";
 
 /** À quel poste compter un fichier. Le premier motif qui accroche gagne. */
 const GROUPS: [string, RegExp][] = [
@@ -22,7 +24,7 @@ const GROUPS: [string, RegExp][] = [
   ["docs", /\.md$/],
 ];
 
-const files = execFileSync("git", ["ls-files"], { encoding: "utf8" })
+const files = execFileSync(GIT, ["ls-files"], { encoding: "utf8" })
   .split("\n")
   .filter((f) => f && !GENERATED.includes(f) && !/\.(png|jpe?g|gif|ico|webp|woff2?)$/.test(f));
 
