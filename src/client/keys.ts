@@ -37,6 +37,11 @@ export const keyState = {
  */
 export const held = new Map<string, Action>();
 
+/** Retient l'action de la touche à l'appui, même si ses raccourcis changent ensuite. */
+export function hold(key: string, action: Action): void {
+  held.set(key, action);
+}
+
 const bindingsEl = document.querySelector<HTMLDivElement>("#bindings")!;
 const keysMenuEl = document.querySelector<HTMLElement>("#keys-menu")!;
 /** L'action qui attend sa nouvelle touche, ou null. */

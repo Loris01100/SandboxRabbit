@@ -208,8 +208,10 @@ simplement le bouton du panneau.
 `combo()` écrit l'événement en combinaison (`Ctrl+z`, `Ctrl+Maj+z`, `g` :
 Cmd vaut Ctrl, Maj ne compte qu'avec Ctrl ou Alt, puisque les chiffres AZERTY
 la demandent), et `keyState.bound`, la table combinaison → action de `keymap()`, la
-traduit. Les actions tenues (`MOVES` / `STEER`) vont dans `held`, rangées par
-touche nue : relâchée avec ou sans Ctrl, elle se retrouve. Les flèches, A / W
+traduit. Les actions tenues (`MOVES` / `STEER`) vont dans `held` via `hold()`
+de keys.ts, rangées par touche nue : relâchée avec ou sans Ctrl, elle se
+retrouve. Une réassignation vide ces actions pour ne pas garder une ancienne
+commande enfoncée. Les flèches, A / W
 et Ctrl+Maj+Z restent des alias tant qu'aucune action ne les prend. Une
 touche prise par une autre action s'échange avec elle (`rebind()`) ; Tab,
 Entrée, Échap et les modificateurs seuls (`RESERVED`) sont refusés. Un

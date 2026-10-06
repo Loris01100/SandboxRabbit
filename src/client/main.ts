@@ -3,7 +3,7 @@ import { EMPTY, MAGNET, MATERIALS, SHORTCUTS, SWITCH, type MaterialId } from "./
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
 import { combo, forget, keyOf, read, stored, write, type Action } from "./ui.ts";
-import { keyState, held, openSettings } from "./keys.ts";
+import { keyState, held, hold, openSettings } from "./keys.ts";
 import { MOVES, follow, panBy, scaleTo, scroll, slideBy, viewState, zoomAt, zoomCentered, zoomInput } from "./view.ts";
 import { paletteState, select } from "./palette.ts";
 import { airmapInput, settingsState, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, soundInput, toolInput } from "./settings.ts";
@@ -55,7 +55,7 @@ addEventListener("keydown", (e) => {
   // Espace mettait le bac en pause pendant qu'on choisissait un monde.
   if (document.querySelector("dialog[open]")) return;
   const move = moveKey(e);
-  if (move) { held.set(keyOf(e.key), move); steer(); e.preventDefault(); return; }
+  if (move) { hold(keyOf(e.key), move); steer(); e.preventDefault(); return; }
   const action = keyState.bound[combo(e)];
   if (!action) return;
   e.preventDefault();
