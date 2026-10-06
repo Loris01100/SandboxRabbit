@@ -279,8 +279,8 @@ export function atan(x: number): number {
   return sign ? -r : r;
 }
 
-const PI = 3.1415926535897931160E+00;
-const PI_LO = 1.2246467991473531772E-16;
+const PI = Math.PI;
+const PI_LO = 1.2246467991473532e-16;
 
 /** Angle du point (x, y), dans [-π, π], au bit près de musl. Attention à l'ordre : `atan2(y, x)`. */
 export function atan2(y: number, x: number): number {

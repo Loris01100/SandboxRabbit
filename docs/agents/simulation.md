@@ -321,7 +321,9 @@ Invariants :
   les mêmes bits partout. C'est la copie ligne à ligne de musl, telle que la
   porte la crate Rust `libm` (0.2.16) : `npm run rust` exige les mêmes bits
   sur un million d'arguments par fonction, et un moteur Rust appellerait la
-  crate. Mesuré : `sin` et `cos` de V8 diffèrent de musl d'un ulp sur 1 % des
+  crate. `PI` utilise `Math.PI`, `PI_LO` une écriture décimale raccourcie :
+  leurs valeurs binaires restent celles de musl.
+  Mesuré : `sin` et `cos` de V8 diffèrent de musl d'un ulp sur 1 % des
   arguments — deux implémentations correctes, pas les mêmes bits. Limites :
   pas de `pow` (`exp(y * log(x))` est déterministe aussi, à ~1e-13 près), et
   `sin` / `cos` rendent NaN au-delà de |x| ≈ 1,6 million (`ponytail:` de
