@@ -119,38 +119,40 @@ const COLUMNS = "id, name, width, height, data, created_at AS createdAt, views, 
 
 function memoryStore(): Store {
   return {
-    async list() {
-      return kept([...memory.values()], 50).map(shown);
+    list() {
+      return Promise.resolve(kept([...memory.values()], 50).map(shown));
     },
-    async get(id) {
+    get(id) {
       const world = memory.get(id);
-      return world ? shown(world) : null;
+      return Promise.resolve(world ? shown(world) : null);
     },
-    async save(world) {
+    save(world) {
       memory.set(world.id, world);
+      return Promise.resolve();
     },
-    async remove(id, token) {
+    remove(id, token) {
       const world = memory.get(id);
       // Un monde d'avant les jetons (ou d'un autre visiteur) ne se supprime pas.
-      if (!world || !world.token || world.token !== token) return false;
-      return memory.delete(id);
+      if (!world || !world.token || world.token !== token) return Promise.resolve(false);
+      return Promise.resolve(memory.delete(id));
     },
-    async see(id, viewer) {
+    see(id, viewer) {
       const world = memory.get(id);
-      if (!world || sighted.has(`${id}|${viewer}`)) return;
+      if (!world || sighted.has(`${id}|${viewer}`)) return Promise.resolve();
       sighted.add(`${id}|${viewer}`);
       world.views++;
+      return Promise.resolve();
     },
-    async like(id, voter) {
+    like(id, voter) {
       const world = memory.get(id);
-      if (!world) return null;
+      if (!world) return Promise.resolve(null);
       if (!voted.has(`${id}|${voter}`)) {
         voted.add(`${id}|${voter}`);
         world.likes = (world.likes ?? 0) + 1;
       }
-      return world.likes ?? 0;
+      return Promise.resolve(world.likes ?? 0);
     },
-    async purge(keep) {
+    purge(keep) {
       const alive = kept([...memory.values()], keep);
       for (const world of memory.values()) if (!alive.includes(world)) memory.delete(world.id);
       for (const set of [voted, sighted]) for (const key of set) if (!memory.has(key.split("|")[0])) set.delete(key);
@@ -159,12 +161,14 @@ function memoryStore(): Store {
         for (const e of entries.filter((x) => x.challenge === name).sort(faster).slice(0, BOARD)) best.add(e);
       }
       for (let i = entries.length - 1; i >= 0; i--) if (!best.has(entries[i])) entries.splice(i, 1);
+      return Promise.resolve();
     },
-    async board(challenge) {
-      return entries.filter((e) => e.challenge === challenge).sort(faster).slice(0, BOARD);
+    board(challenge) {
+      return Promise.resolve(entries.filter((e) => e.challenge === challenge).sort(faster).slice(0, BOARD));
     },
-    async enter(entry) {
+    enter(entry) {
       entries.push(entry);
+      return Promise.resolve();
     },
   };
 }
@@ -178,7 +182,7 @@ function d1Store(db: D1Database): Store {
         .all<World>();
       return results;
     },
-    async get(id) {
+    get(id) {
       return db
         .prepare(`SELECT ${COLUMNS} FROM worlds WHERE id = ?`)
         .bind(id)

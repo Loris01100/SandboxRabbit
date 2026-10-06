@@ -14,7 +14,7 @@ const env = {} as never;
 
 /** Faux binding ASSETS : de quoi vérifier ce que le Worker ajoute au statique. */
 const assets = {
-  ASSETS: { fetch: async () => new Response("<!doctype html>", { headers: { "content-type": "text/html" } }) },
+  ASSETS: { fetch: () => Promise.resolve(new Response("<!doctype html>", { headers: { "content-type": "text/html" } })) },
 } as never;
 const json = (body: unknown) => ({
   method: "POST",
@@ -111,7 +111,7 @@ const body = async <T,>(res: Response | Promise<Response>): Promise<T> => (await
 // boucle de GET ne le hisse pas en tête des plus vus.
 {
   const { id } = await body<Monde>(app.request("/api/worlds", json(monde), env));
-  const saturé = { RL: { limit: async () => ({ success: false }) } } as never;
+  const saturé = { RL: { limit: () => Promise.resolve({ success: false }) } } as never;
   assert.equal((await app.request(`/api/worlds/${id}`, {}, saturé)).status, 200, "servi malgré le débit");
   assert.equal((await body<Monde>(app.request(`/api/worlds/${id}`, {}, saturé))).views, 0, "sans vue comptée");
 }
@@ -262,7 +262,7 @@ assert.equal((await app.request("/api/room/public", {}, env)).status, 503);
     assert.deepEqual(logged, [{ message: "erreur joueur", report: "page : TypeError: x is undefined", agent: "Testeur/1.0" }]);
     assert.equal((await beacon("")).status, 400, "rapport vide refusé");
     assert.equal((await beacon("x".repeat(16 * 1024 + 1))).status, 413, "rapport trop lourd refusé");
-    const saturé = { RL: { limit: async () => ({ success: false }) } } as never;
+    const saturé = { RL: { limit: () => Promise.resolve({ success: false }) } } as never;
     assert.equal((await beacon("encore", saturé)).status, 429, "au-delà du débit, refusé");
     assert.equal(logged.length, 1, "seul le premier rapport est écrit");
   } finally {

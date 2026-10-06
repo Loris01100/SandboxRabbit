@@ -434,6 +434,10 @@ et `npm run preview`, eux, ont un D1 local (`/api/health` répond `d1`) : y
 appliquer les migrations avec `--local`, sinon une route sur une table neuve
 répond 500.
 
+Toutes les méthodes de `Store` renvoient une promesse : le bouchon mémoire
+utilise `Promise.resolve()` pour ses résultats immédiats, tandis que D1
+renvoie ou attend les promesses des requêtes.
+
 - Le `token` de suppression est tiré côté serveur, rendu **une seule fois** par
   le `POST`, et ne sort d'aucune lecture (`shown()` en mémoire, colonnes
   nommées dans les `SELECT` D1). Ne jamais écrire `SELECT *`.
