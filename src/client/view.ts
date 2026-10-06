@@ -166,4 +166,4 @@ new ResizeObserver(() => {
 
 // Redimensionner remet la vue d'aplomb. Les crans d'annulation et
 // l'enregistrement en cours, eux, sont vidés par le bac lui-même.
-onResize.push(() => { fitCanvas(); zoomAt(0, 0, 1); });
+onResize(() => { fitCanvas(); zoomAt(0, 0, 1); });

@@ -61,7 +61,7 @@ export function tighten(): boolean {
  */
 let close = 0;
 export function closeUp(px: number): void { close = px; }
-onResize.push(() => { close = 0; });
+onResize(() => { close = 0; });
 
 /** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large, ou `close` pixels par cellule) et la barre de statut donne les touches. */
 function meet(): void {

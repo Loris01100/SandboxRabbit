@@ -531,6 +531,10 @@ depuis un autre module.
 Le dimensionnement du canvas dans view.ts lit les valeurs CSS numériques
 avec `Number.parseFloat()` (marges internes et hauteur maximale).
 
+La vue et le héros s'abonnent aux changements de taille via `onResize(callback)`
+de world.ts. Ce module garde la liste privée et appelle les abonnés après
+la mise à jour des dimensions et l'envoi de l'ordre `size`.
+
 ### Classement des défis
 
 Pour les défis **livrés** (`CHALLENGES`), pas les mondes-défis de la galerie :

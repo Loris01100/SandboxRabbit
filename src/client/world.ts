@@ -52,7 +52,12 @@ export function cellBox(): { left: number; top: number; sx: number; sy: number }
 }
 
 /** Rappelés après un redimensionnement : vue, marquee, etc. */
-export const onResize: (() => void)[] = [];
+const resizeListeners: (() => void)[] = [];
+
+/** S'abonne au redimensionnement de la grille. */
+export function onResize(fn: () => void): void {
+  resizeListeners.push(fn);
+}
 
 const sim = new Worker(new URL("./sim/worker.ts", import.meta.url), { type: "module" });
 watchErrors(sim);
@@ -357,5 +362,5 @@ export function resize(width: number, height: number, keep = false): void {
   WIDTH = width;
   HEIGHT = height;
   order({ t: "size", w: width, h: height, keep });
-  for (const listener of onResize) listener();
+  for (const listener of resizeListeners) listener();
 }
