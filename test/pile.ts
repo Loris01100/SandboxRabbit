@@ -73,7 +73,7 @@ export function locate(map: SourceMap, line: number, column: number): { source: 
 // Lancé comme commande (pas importé par un test).
 if (process.argv[1]?.endsWith("pile.ts")) {
   const stack = process.argv.slice(2).join(" ") || readFileSync(0, "utf8");
-  const cited = [...new Set([...stack.matchAll(/([\w-]+\.js):\d+:\d+/g)].map((m) => m[1]))];
+  const cited = [...new Set([...stack.matchAll(/(?<![\w-])([\w-]+\.js):\d+:\d+/g)].map((m) => m[1]))];
   if (cited.length === 0) {
     console.error("Aucune position `fichier.js:ligne:colonne` dans cette pile.");
     process.exit(1);

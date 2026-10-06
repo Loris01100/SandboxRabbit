@@ -16,6 +16,10 @@
 | `npm run rust` | compile [rust/](../../rust/) en WASM puis lance [test/rust.ts](../../test/rust.ts) : `thermal()` et la pression (`breathe()`, élan de l'air compris : `windX`, `windY`) en JavaScript contre leurs versions Rust, temps et égalité au bit près ; sim/libm.ts contre la crate Rust `libm`, mêmes bits exigés. Demande Rust installé ([docs/rust.md](../rust.md)) ; hors CI |
 | `npm run pile` | pas un test : retraduit une pile d'erreur de production dans les sources ([test/pile.ts](../../test/pile.ts), la pile sur l'entrée standard). Reconstruit le client avec ses cartes de sources (`SOURCEMAP=hidden`), les lit puis les efface de `dist/`. Recette dans [recettes.md](recettes.md#décoder-une-pile-de-production) ; son décodeur est testé par test/ui.ts |
 
+`npm run pile` ne cherche un nom de bundle qu'au début d'une suite de lettres,
+chiffres, traits de soulignement ou tirets : une longue suite sans position
+valide n'est pas reparcourue depuis chacun de ses caractères.
+
 `npm run drift` et `npm run loc` appellent Git par un chemin absolu fixe,
 sans recherche dans
 `PATH` : `C:/Program Files/Git/cmd/git.exe` sous Windows, `/usr/bin/git`
