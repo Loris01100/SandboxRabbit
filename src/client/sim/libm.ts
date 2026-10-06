@@ -384,7 +384,7 @@ export function log(x: number): number {
   let k = 0;
   if (hx < 0x00100000 || hx >>> 31) { // sous-normal, zéro ou négatif
     if (((hx & 0x7fffffff) | lx) === 0) return -1 / (x * x); // log(±0) = -∞
-    if (hx >>> 31) return (x - x) / 0; // log(négatif) = NaN
+    if (hx >>> 31) return Number.NaN; // log(négatif) = NaN
     k -= 54;
     x *= make(0x43500000, 0); // × 2^54
     hx = high(x);

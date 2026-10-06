@@ -13,6 +13,8 @@ elle marque notamment une température non définie et une valeur de cache
 encore non initialisée. Les vérifications passent par `Number.isNaN()`
 (ou sa négation), sans comparer une valeur avec elle-même. Ces écritures ne
 changent pas les calculs ni le déterminisme.
+Dans libm.ts, le logarithme d'un nombre négatif renvoie directement
+`Number.NaN` ; les cas `+0` et `-0` restent traités avant et renvoient `-Infinity`.
 
 Les conversions vers un entier utilisent `Math.trunc()` : coordonnées de
 cellules, indices de blocs, grain du rendu et réductions d'argument de libm.ts.
