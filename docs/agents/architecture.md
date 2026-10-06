@@ -110,6 +110,10 @@ quelque chose du bac depuis la page.
 le bac en `localStorage` n'attend donc jamais le Worker (important quand
 l'onglet part en arrière-plan).
 
+Le choix d'une graine aléatoire et du décor « Surprise » dans main.ts utilise
+`crypto.getRandomValues()`. La graine saisie reste prioritaire ; ces tirages
+côté page ne consomment pas le tirage déterministe du moteur.
+
 ## Le chemin d'un coup de pinceau
 
 ```

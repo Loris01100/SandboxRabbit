@@ -439,7 +439,7 @@ document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", ()
 const seedInput = document.querySelector<HTMLInputElement>("#seed")!;
 document.querySelector<HTMLButtonElement>("#terrain")!.addEventListener("click", () => {
   const typed = Math.floor(Number(seedInput.value));
-  const seed = typed >= 1 && typed <= SEEDS ? typed : 1 + Math.floor(Math.random() * SEEDS);
+  const seed = typed >= 1 && typed <= SEEDS ? typed : 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 0x1_0000_0000 * SEEDS);
   order({ t: "terrain", seed });
   abandon();
   statusEl.textContent = `Monde n° ${seed} — la même graine redonne le même monde. Molette ou + pour zoomer, ZQSD pour se déplacer.`;
@@ -447,7 +447,7 @@ document.querySelector<HTMLButtonElement>("#terrain")!.addEventListener("click",
 
 // Surprise : un décor tiré au sort, sans objectif — juste pour regarder.
 document.querySelector<HTMLButtonElement>("#surprise")!.addEventListener("click", () => {
-  const scene = SCENES[Math.floor(Math.random() * SCENES.length)];
+  const scene = SCENES[Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 0x1_0000_0000 * SCENES.length)];
   fit(320);
   order({ t: "scene", name: scene.name });
   abandon();
