@@ -120,6 +120,9 @@ sans `goal` ni `won`.
    [gestures.ts](../../src/client/gestures.ts) — une valeur JSON sérialisable.
 2. Son `case` dans `applyGesture(engine, g)`. **Les champs viennent peut-être
    d'un pair de salon** : filtrer les ids par `known()`, borner les tailles.
+   Si le geste demande plus d'une ligne de vérifications, le confier à une
+   fonction à part, comme `rename()` et `paste()` : `applyGesture` reste
+   alors une simple table d'aiguillage.
 3. Côté page, l'émettre par `gesture(g)` de main.ts, jamais par
    `order({t:"do"})` direct — sinon le salon ne le voit pas.
 

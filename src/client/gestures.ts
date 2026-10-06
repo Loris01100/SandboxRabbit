@@ -62,14 +62,7 @@ export function applyGesture(engine: Engine, g: Gesture): void {
   // Passer au héros suivant : c'est le moteur qui sait lequel, dans l'ordre
   // de la grille — un geste, pour que le rejeu et le salon suivent.
   if (g.t === "hero") { engine.nextHero(); return; }
-  if (g.t === "name") {
-    // Un nom vide rend celui d'origine.
-    const name = cleanName(g.name);
-    if (!(Number.isSafeInteger(g.id) && g.id > 0 && g.id < 256)) return;
-    if (name) engine.names.set(g.id, name);
-    else engine.names.delete(g.id);
-    return;
-  }
+  if (g.t === "name") { rename(engine, g); return; }
   if (g.t === "pilot") {
     const id = (g.keys >> 8) & 255;
     engine.pilot = (Math.trunc(g.keys) & 63) | (placeable(id) ? id << 8 : 0);
@@ -83,14 +76,23 @@ export function applyGesture(engine: Engine, g: Gesture): void {
     case "frozen": engine.setFrozen(g.x, g.y, g.r, g.on); return;
     // Un seul message pour les deux bascules : la cellule dit laquelle c'est.
     case "toggle": engine.toggleSwitch(g.x, g.y); engine.toggleMagnet(g.x, g.y); return;
-    case "clip": {
-      const n = g.w * g.h;
-      // Un morceau plus grand que le bac ne vient pas d'un pair honnête.
-      if (!whole(g.w, g.h) || !(n > 0) || n > engine.cells.length) return;
-      engine.paste({ width: g.w, height: g.h, cells: decode(g.cells, n), frozen: decodeFrozen(g.cells, n), life: decode(g.life, n) }, g.x, g.y);
-      return;
-    }
+    case "clip": paste(engine, g); return;
   }
+}
+
+/** Renomme un héros ; un nom vide rend celui d'origine. */
+function rename(engine: Engine, g: Extract<Gesture, { t: "name" }>): void {
+  if (!(Number.isSafeInteger(g.id) && g.id > 0 && g.id < 256)) return;
+  const name = cleanName(g.name);
+  if (name) engine.names.set(g.id, name);
+  else engine.names.delete(g.id);
+}
+
+/** Colle un morceau ; un morceau plus grand que le bac ne vient pas d'un pair honnête. */
+function paste(engine: Engine, g: Extract<Gesture, { t: "clip" }>): void {
+  const n = g.w * g.h;
+  if (!whole(g.w, g.h) || !(n > 0) || n > engine.cells.length) return;
+  engine.paste({ width: g.w, height: g.h, cells: decode(g.cells, n), frozen: decodeFrozen(g.cells, n), life: decode(g.life, n) }, g.x, g.y);
 }
 
 /** Chance d'un éclair par tick, par niveau de météo : ~1 toutes les 5 s à l'orage, ~1 par seconde au gros orage. */
