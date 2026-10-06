@@ -576,6 +576,9 @@ qui porte un `goal` devient un `Challenge` par `challengeOf()`.
 
 ### Rejeu exporté
 
+Le champ fichier masqué `#film-file` est nommé par le bouton « Ouvrir un
+rejeu » (`aria-labelledby="film-open"`), qui ouvre le sélecteur de fichier.
+
 Aussi dans share.ts. « Lien du rejeu » et « Fichier du rejeu » demandent le
 film au bac (`askFilm()`) : le fichier est le JSON du `Recording`
 (`bac-….rejeu.json`), le lien le porte compressé — `pack()` de replay.ts,
