@@ -189,7 +189,8 @@ import { decode, locate } from "./pile.ts";
   // baisse plus ; un curseur de trop ne réglerait rien (audio.ts l'ignore).
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const curseurs = [...html.matchAll(/data-mix="(\w+)"/g)].map((m) => m[1]);
-  assert.deepEqual(curseurs.sort(), [...MIX].sort(), "chaque famille de sons a son curseur dans l'onglet Son");
+  const order = (a: string, b: string) => a.localeCompare(b);
+  assert.deepEqual(curseurs.sort(order), [...MIX].sort(order),"chaque famille de sons a son curseur dans l'onglet Son");
 }
 
 // Recherche de la galerie et couleurs des joueurs d'un salon.
