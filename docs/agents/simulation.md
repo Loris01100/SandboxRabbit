@@ -26,6 +26,11 @@ Scalaires : `gravity` (±1), `wind` (-1..1), `ambient` (°C, réglage de scène 
 ensuite), `seed` et `scan` (état du xorshift, sens du balayage). `gravity` et
 `ambient` sont des accesseurs : les changer réveille tout le bac.
 
+Sans graine explicite, le constructeur tire un entier de 32 bits avec
+`crypto.getRandomValues()` ; une graine nulle devient 1. Les tirages pendant
+la simulation restent ceux de `engine.rand()` (xorshift32), reproductibles
+à graine identique pour le rejeu et le salon.
+
 Blocs de veille (privés, un octet par bloc de 16×16) : `stir` (bloc écrit ou
 tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
 `was` (`awake` du tick d'avant). Voir [Blocs de veille](#blocs-de-veille).

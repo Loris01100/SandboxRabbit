@@ -457,7 +457,7 @@ export class Engine {
    * celle d'un fil auxiliaire (pool.ts), qui ne fait que les travaux qu'on lui
    * confie (`job()`), réglages recopiés de `params` (`sync()`).
    */
-  constructor(width: number, height: number, seed = (Math.random() * 0x1_0000_0000) >>> 0, memory?: Memory) {
+  constructor(width: number, height: number, seed = crypto.getRandomValues(new Uint32Array(1))[0], memory?: Memory) {
     // Un xorshift32 meurt sur 0 : toute graine nulle devient 1.
     this.state = seed >>> 0 || 1;
     this.width = width;
