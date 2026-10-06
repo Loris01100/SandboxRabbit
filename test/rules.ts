@@ -254,7 +254,7 @@ assert.ok(!code("src/worker/app.ts").includes("cloudflare:workers"),
   // La liste en prose, entre les deux seuls accents graves du passage.
   const listé = readme.split("outils) : `")[1].split("`")[0].split("/").map((n) => n.trim().toLowerCase());
   const palette = PALETTE.map((id) => MATERIALS[id].name.toLowerCase());
-  assert.deepEqual([...listé].sort(), [...palette].sort(), "le README liste exactement les entrées de la palette");
+  assert.deepEqual([...listé].sort((a, b) => a.localeCompare(b, "fr")), [...palette].sort((a, b) => a.localeCompare(b, "fr")), "le README liste exactement les entrées de la palette");
 }
 
 console.log("ok — règles d'architecture conformes");
