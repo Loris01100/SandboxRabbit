@@ -35,7 +35,7 @@ export function encode(cells: Uint8Array, frozen?: Uint8Array, life?: Uint8Array
   // Les blocs sont positionnels : garder `life` impose d'écrire le figé, même vide.
   if (life && temp) {
     blocks.push(rle(frozen ?? new Uint8Array(cells.length)), rle(life), rle(bytes(temp)));
-    if (names?.size) blocks.push(url(String.fromCharCode(...new TextEncoder().encode(JSON.stringify([...names])))));
+    if (names?.size) blocks.push(url(String.fromCodePoint(...new TextEncoder().encode(JSON.stringify([...names])))));
   } else if (frozen?.some(Boolean)) {
     blocks.push(rle(frozen));
   }
@@ -122,7 +122,7 @@ function rle(cells: Uint8Array): string {
   push(id, run);
   let binary = "";
   for (let i = 0; i < out.length; i += 4096) {
-    binary += String.fromCharCode(...out.slice(i, i + 4096));
+    binary += String.fromCodePoint(...out.slice(i, i + 4096));
   }
   return url(binary);
 }

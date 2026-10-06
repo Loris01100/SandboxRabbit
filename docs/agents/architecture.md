@@ -473,6 +473,8 @@ jusqu'à cinq blocs séparés par `.` : `matière[.figé[.life.temp[.noms]]]`.
 Le codec et `pack()` de replay.ts retirent le remplissage Base64 avec
 `replaceAll("=", "")`, sans expression régulière : `btoa()` ne produit
 des `=` qu'en fin de chaîne. Le format sauvegardé reste identique.
+Les octets sont convertis en chaîne binaire avec `String.fromCodePoint()` :
+leurs valeurs entre 0 et 255 gardent exactement les mêmes caractères pour `btoa()`.
 Le cinquième n'est pas une grille : les noms donnés aux héros
 (`engine.names`), JSON `[[numéro, nom], …]` en base64 url, absent si personne
 n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de noms),

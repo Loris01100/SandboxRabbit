@@ -376,7 +376,7 @@ export async function pack(rec: Recording): Promise<string> {
   const stream = new Blob([JSON.stringify(rec)]).stream().pipeThrough(new CompressionStream("deflate-raw"));
   const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
   let binary = "";
-  for (let i = 0; i < bytes.length; i += 4096) binary += String.fromCharCode(...bytes.subarray(i, i + 4096));
+  for (let i = 0; i < bytes.length; i += 4096) binary += String.fromCodePoint(...bytes.subarray(i, i + 4096));
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 

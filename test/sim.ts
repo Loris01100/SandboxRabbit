@@ -167,7 +167,7 @@ function count(e: Engine, id: MaterialId): number {
   assert.ok(encode(new Uint8Array(W * H)).length < 12, "un monde vide tient en une poignée d'octets");
   // Format d'avant l'échappe (paires id/longueur, longueurs 1..255) : toujours lisible.
   assert.deepEqual(
-    [...decode(btoa(String.fromCharCode(2, 3, 1, 2)), 5)],
+    [...decode(btoa(String.fromCodePoint(2, 3, 1, 2)), 5)],
     [2, 2, 2, 1, 1],
     "les mondes enregistrés avant l'échappe se relisent",
   );
