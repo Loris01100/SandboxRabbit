@@ -29,6 +29,8 @@ import { join } from "node:path";
 const BASE = process.env.DRIFT_BASE ?? "origin/main";
 const ROUNDS = Number(process.env.DRIFT_ROUNDS ?? 3);
 const MAX = Number(process.env.DRIFT_MAX ?? 0.3);
+// Un chemin fixe évite qu'un dossier du PATH fournisse un faux Git.
+const GIT = process.platform === "win32" ? "C:/Program Files/Git/cmd/git.exe" : "/usr/bin/git";
 /** Sous ce temps, l'écart est du bruit de mesure, pas du code. */
 const FLOOR: Record<string, number> = { ms: 0.5, "ns/cellule": 50 };
 
@@ -37,7 +39,7 @@ type Measures = Record<string, { value: number; unit: string }>;
 const scratch = mkdtempSync(join(tmpdir(), "drift-"));
 const folder = existsSync(BASE);
 const base = folder ? BASE : join(scratch, "base");
-if (!folder) execFileSync("git", ["worktree", "add", "--detach", base, BASE], { stdio: "ignore" });
+if (!folder) execFileSync(GIT, ["worktree", "add", "--detach", base, BASE], { stdio: "ignore" });
 
 /** Fait tourner `script` dans `cwd` et rend ses mesures, ou null si la version n'en écrit pas. */
 function measure(cwd: string, script: "bench" | "stress", round: number, side: string): Measures | null {
@@ -83,7 +85,7 @@ try {
     }
   }
 } finally {
-  if (!folder) execFileSync("git", ["worktree", "remove", "--force", base], { stdio: "ignore" });
+  if (!folder) execFileSync(GIT, ["worktree", "remove", "--force", base], { stdio: "ignore" });
   rmSync(scratch, { recursive: true, force: true });
 }
 
