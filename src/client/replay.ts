@@ -384,7 +384,7 @@ export async function pack(rec: Recording): Promise<string> {
 export async function unpack(text: string): Promise<Recording | null> {
   try {
     const binary = atob(text.replaceAll("-", "+").replaceAll("_", "/"));
-    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    const bytes = Uint8Array.from(binary, (c) => c.codePointAt(0)!);
     const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
     const chunks: Uint8Array[] = [];
     let size = 0;

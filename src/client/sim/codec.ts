@@ -93,7 +93,7 @@ export function decodeNames(data: string): Map<number, string> {
   if (!block) return names;
   try {
     const raw = atob(block.replaceAll("-", "+").replaceAll("_", "/"));
-    const list: unknown = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, (c) => c.charCodeAt(0))));
+    const list: unknown = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, (c) => c.codePointAt(0)!)));
     if (!Array.isArray(list)) return names;
     for (const pair of list) {
       if (!Array.isArray(pair)) continue;
@@ -143,11 +143,11 @@ function unrle(data: string, size: number): Uint8Array {
   const cells = new Uint8Array(size);
   let at = 0;
   for (let i = 0; i + 1 < binary.length; ) {
-    const id = binary.charCodeAt(i);
-    let run = binary.charCodeAt(i + 1);
+    const id = binary.codePointAt(i)!;
+    let run = binary.codePointAt(i + 1)!;
     i += 2;
     if (run === 0) {
-      run = binary.charCodeAt(i) | (binary.charCodeAt(i + 1) << 8);
+      run = (binary.codePointAt(i) ?? 0) | ((binary.codePointAt(i + 1) ?? 0) << 8);
       i += 2;
     }
     cells.fill(id, at, Math.min(at + run, size));
