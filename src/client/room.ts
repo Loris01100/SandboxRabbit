@@ -39,7 +39,7 @@
  * Ce module ne connaît ni le bouton Pause ni le sélecteur de taille : il les
  * demande par des rappels, sinon il faudrait importer main.ts et boucler.
  */
-import { HEIGHT, WIDTH, cellBox, listen, order } from "./world.ts";
+import { worldState, cellBox, listen, order } from "./world.ts";
 import type { Gesture } from "./gestures.ts";
 import { peerColor, read, write } from "./ui.ts";
 import { MATERIALS } from "./sim/materials.ts";
@@ -206,7 +206,7 @@ export function placeCursors(): void {
   for (const p of players.values()) {
     if (!p.el) continue;
     // Une grille d'une autre taille (le temps d'un nouveau départ) : on ne sait pas où il est.
-    const away = p.x < 0 || p.x >= WIDTH || p.y >= HEIGHT;
+    const away = p.x < 0 || p.x >= worldState.width || p.y >= worldState.height;
     p.el.hidden = away;
     if (!away) p.el.style.transform = `translate(${c.left - stage.left + (p.x + 0.5) * c.sx}px, ${c.top - stage.top + (p.y + 0.5) * c.sy}px)`;
   }
@@ -369,8 +369,8 @@ function join(name: string): void {
     }
     if (msg.type === "start" && !host && msg.rec && typeof msg.rec === "object") {
       const { w, h } = msg.rec;
-      if (w !== WIDTH || h !== HEIGHT) onSize(w, h);
-      if (w !== WIDTH || h !== HEIGHT) return;
+      if (w !== worldState.width || h !== worldState.height) onSize(w, h);
+      if (w !== worldState.width || h !== worldState.height) return;
       order({ t: "follow", rec: msg.rec });
     }
     if (msg.type === "turn" && !host && typeof msg.ticks === "number" && Array.isArray(msg.beats) && Array.isArray(msg.sums)) {

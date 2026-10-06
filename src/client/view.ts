@@ -1,6 +1,6 @@
 import { held } from "./keys.ts";
 import { clampPan, panAfterZoom, wholeScale, type Action } from "./ui.ts";
-import { HEIGHT, WIDTH, canvas, onResize } from "./world.ts";
+import { worldState, canvas, onResize } from "./world.ts";
 
 /**
  * La vue du bac : zoom et décalage, posés en transformation CSS sur le canvas.
@@ -8,7 +8,9 @@ import { HEIGHT, WIDTH, canvas, onResize } from "./world.ts";
  * passe par `cellBox()` de world.ts, qui en tient compte — bordure grossie
  * par le zoom comprise.
  */
-export let zoom = 1;
+let zoom = 1;
+/** Le zoom courant est lu par la page et modifié par les fonctions de vue. */
+export const viewState = { get zoom() { return zoom; } };
 let panX = 0;
 let panY = 0;
 
@@ -75,8 +77,8 @@ export function scroll(): void {
 export function follow([x, y]: [number, number]): void {
   if (zoom === 1) return;
   const w = canvas.offsetWidth, h = canvas.offsetHeight;
-  panX += (w / 2 - ((x + 0.5) / WIDTH) * w * zoom - panX) * 0.2;
-  panY += (h / 2 - ((y + 0.5) / HEIGHT) * h * zoom - panY) * 0.2;
+  panX += (w / 2 - ((x + 0.5) / worldState.width) * w * zoom - panX) * 0.2;
+  panY += (h / 2 - ((y + 0.5) / worldState.height) * h * zoom - panY) * 0.2;
   applyView();
 }
 
@@ -86,7 +88,7 @@ export function follow([x, y]: [number, number]): void {
  * suit vers la droite pour que le monde ne bouge pas à l'écran.
  */
 export function slideBy(cells: number): void {
-  panBy((cells * canvas.offsetWidth * zoom) / WIDTH, 0);
+  panBy((cells * canvas.offsetWidth * zoom) / worldState.width, 0);
 }
 
 /**
@@ -95,7 +97,7 @@ export function slideBy(cells: number): void {
  * `zoomAt` — sur un écran étroit, la cellule reste plus petite.
  */
 export function scaleTo(px: number): void {
-  zoomCentered((px * WIDTH) / canvas.offsetWidth);
+  zoomCentered((px * worldState.width) / canvas.offsetWidth);
 }
 
 // Le zoom se coupe : sans lui la molette rend la main à la page, et un bac
@@ -136,10 +138,10 @@ function fitCanvas(): void {
   const boxH = (mine.maxHeight.endsWith("px")
     ? parseFloat(mine.maxHeight)
     : stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) - border;
-  const k = wholeScale(boxW, boxH, WIDTH, HEIGHT, devicePixelRatio);
+  const k = wholeScale(boxW, boxH, worldState.width, worldState.height, devicePixelRatio);
   if (k > 0) {
-    canvas.style.width = `${(WIDTH * k) / devicePixelRatio + border}px`;
-    canvas.style.height = `${(HEIGHT * k) / devicePixelRatio + border}px`;
+    canvas.style.width = `${(worldState.width * k) / devicePixelRatio + border}px`;
+    canvas.style.height = `${(worldState.height * k) / devicePixelRatio + border}px`;
   }
   applyView();
 }

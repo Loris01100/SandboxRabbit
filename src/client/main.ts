@@ -3,16 +3,16 @@ import { EMPTY, MAGNET, MATERIALS, SHORTCUTS, SWITCH, type MaterialId } from "./
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
 import { combo, forget, keyOf, read, stored, write, type Action } from "./ui.ts";
-import { bound, held, openSettings } from "./keys.ts";
-import { MOVES, follow, panBy, scaleTo, scroll, slideBy, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
-import { current, emit, select } from "./palette.ts";
-import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, soundInput, toolInput } from "./settings.ts";
+import { keyState, held, openSettings } from "./keys.ts";
+import { MOVES, follow, panBy, scaleTo, scroll, slideBy, viewState, zoomAt, zoomCentered, zoomInput } from "./view.ts";
+import { paletteState, select } from "./palette.ts";
+import { airmapInput, settingsState, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, soundInput, toolInput } from "./settings.ts";
 import { hear, initSound, setHum } from "./audio.ts";
 import { FILM_LINK, captureFrame, forgetOrigin, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
 import { initRoom, placeCursors, pointAt, relay } from "./lobby.ts";
-import { WIDTH, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, seen, set, shifted, type ClipData } from "./world.ts";
-import { STEER, closeUp, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
+import { worldState, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, seen, set, shifted, type ClipData } from "./world.ts";
+import { STEER, closeUp, gaze, heroState, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
 /**
@@ -44,7 +44,7 @@ let recording = false;
 let guest = false;
 const FOLLOW = "Vous suivez l'hôte : c'est lui qui mène le bac.";
 
-// Raccourcis : chaque combinaison devient une action (`bound`, touches
+// Raccourcis : chaque combinaison devient une action (`keyState.bound`, touches
 // réassignables dans la fenêtre des raccourcis).
 addEventListener("keydown", (e) => {
   // Un champ a le focus (le nombre d'un objectif, un curseur, la galerie) :
@@ -56,7 +56,7 @@ addEventListener("keydown", (e) => {
   if (document.querySelector("dialog[open]")) return;
   const move = moveKey(e);
   if (move) { held.set(keyOf(e.key), move); steer(); e.preventDefault(); return; }
-  const action = bound[combo(e)];
+  const action = keyState.bound[combo(e)];
   if (!action) return;
   e.preventDefault();
   if (action.startsWith("mat")) { select(SHORTCUTS[Number(action.slice(3)) - 1]); return; }
@@ -79,7 +79,7 @@ addEventListener("keydown", (e) => {
       return;
     case "zoomIn": case "zoomOut": {
       if (!zoomInput.checked) return;
-      zoomCentered(zoom * (action === "zoomIn" ? 1.5 : 1 / 1.5));
+      zoomCentered(viewState.zoom * (action === "zoomIn" ? 1.5 : 1 / 1.5));
       return;
     }
     // Taille du pinceau : le réglage le plus repris, et il fallait redéplier son
@@ -126,12 +126,12 @@ function toCell(e: PointerEvent): { x: number; y: number } {
 const dragging = (): boolean => toolInput.value === "copy" || toolInput.value === "rect";
 
 /** Le pinceau pose une créature de taille fixe (le lapin), pas un disque. */
-const placesCreature = (): boolean => toolInput.value === "paint" && MATERIALS[current].creature === true;
+const placesCreature = (): boolean => toolInput.value === "paint" && MATERIALS[paletteState.current].creature === true;
 
 /** Un coup de pinceau, plus son reflet si la symétrie est cochée. */
 function paintAt(x: number, y: number): void {
   dab(x, y);
-  if (mirrorInput.checked) dab(WIDTH - 1 - x, y);
+  if (mirrorInput.checked) dab(worldState.width - 1 - x, y);
 }
 
 /* ------------------------------------------------------- repères à l'écran */
@@ -146,7 +146,7 @@ const cellSize = (): number => cellBox().sx;
 function showRing(e: PointerEvent): void {
   if (e.pointerType === "touch") return; // sous le doigt, personne ne le verrait
   // Une créature a sa taille, le rayon du pinceau n'y fait rien : le cercle le dit.
-  const d = (placesCreature() ? 4 : brush * 2 + 1) * cellSize();
+  const d = (placesCreature() ? 4 : settingsState.brush * 2 + 1) * cellSize();
   ringEl.hidden = false;
   ringEl.style.width = `${d}px`;
   ringEl.style.height = `${d}px`;
@@ -179,8 +179,8 @@ const CLICK = 4;
  * et poser n'existent qu'avec un héros.
  */
 function moveKey(e: KeyboardEvent): Action | null {
-  const action = bound[combo(e)];
-  if (!action || !(action in MOVES || (hero && action in STEER))) return null;
+  const action = keyState.bound[combo(e)];
+  if (!action || !(action in MOVES || (heroState.position && action in STEER))) return null;
   if (e.key.startsWith("Arrow") && (e.target as HTMLElement | null)?.closest?.("button")) return null;
   return action;
 }
@@ -229,7 +229,7 @@ function gesture(g: Gesture): void {
 // Renommer le héros suivi est un geste : le rejeu le rejoue, le salon le
 // relaie, le monde sauvegardé le garde. Entrée valide et rend les touches.
 nameInput.addEventListener("change", () => {
-  if (heroId) gesture({ t: "name", id: heroId, name: nameInput.value });
+  if (heroState.id) gesture({ t: "name", id: heroState.id, name: nameInput.value });
 });
 document.querySelector<HTMLButtonElement>("#hero-next")!.addEventListener("click", () => gesture({ t: "hero" }));
 nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") nameInput.blur(); });
@@ -239,22 +239,22 @@ function dab(x: number, y: number): void {
   if (toolInput.value !== "paint") {
     // Les outils qui se tracent en glissant s'appliquent au relâchement.
     if (dragging()) return;
-    gesture({ t: "frozen", x, y, r: brush, on: toolInput.value === "freeze" });
+    gesture({ t: "frozen", x, y, r: settingsState.brush, on: toolInput.value === "freeze" });
     return;
   }
-  const kind = MATERIALS[current].kind;
+  const kind = MATERIALS[paletteState.current].kind;
   const density = kind === "liquid" || kind === "gas" ? 0.35 : 1;
   // Gomme sélective : on n'efface que la dernière matière choisie avant la gomme.
-  const only = current === EMPTY && onlyInput.checked ? emit : undefined;
-  gesture({ t: "paint", x, y, r: brush, id: current, d: density, over: !keepInput.checked, only });
+  const only = paletteState.current === EMPTY && onlyInput.checked ? paletteState.emit : undefined;
+  gesture({ t: "paint", x, y, r: settingsState.brush, id: paletteState.current, d: density, over: !keepInput.checked, only });
 }
 
 /** Le rectangle tracé, plus son reflet si la symétrie est cochée. */
 function rectTo(a: { x: number; y: number }, b: { x: number; y: number }): void {
   const over = !keepInput.checked;
-  gesture({ t: "rect", x: a.x, y: a.y, x2: b.x, y2: b.y, id: current, over });
+  gesture({ t: "rect", x: a.x, y: a.y, x2: b.x, y2: b.y, id: paletteState.current, over });
   if (mirrorInput.checked) {
-    gesture({ t: "rect", x: WIDTH - 1 - a.x, y: a.y, x2: WIDTH - 1 - b.x, y2: b.y, id: current, over });
+    gesture({ t: "rect", x: worldState.width - 1 - a.x, y: a.y, x2: worldState.width - 1 - b.x, y2: b.y, id: paletteState.current, over });
   }
 }
 
@@ -294,7 +294,7 @@ canvas.addEventListener("pointerdown", (e) => {
   // Pipette : la matière vue par la dernière frame, pas une lecture du moteur
   // (il est sur l'autre fil). C'est la cellule sous le curseur, donc la bonne.
   if (e.altKey) { const id = under(p); if (id !== null) select(id); return; }
-  if (e.button === 2) { snapshot(); gesture({ t: "fill", x: p.x, y: p.y, id: current }); return; }
+  if (e.button === 2) { snapshot(); gesture({ t: "fill", x: p.x, y: p.y, id: paletteState.current }); return; }
   canvas.setPointerCapture(e.pointerId);
   // Les deux outils qui se tracent en glissant. « Copier » ne modifie rien, et
   // « Rectangle » ne s'applique qu'au relâchement : le cran d'annulation est
@@ -308,7 +308,7 @@ canvas.addEventListener("pointerdown", (e) => {
   snapshot();
   // Cliquer un interrupteur (ou un aimant) déjà posé le bascule au lieu d'en reposer un.
   const at = under(p);
-  if ((current === SWITCH && at === SWITCH) || (current === MAGNET && at === MAGNET)) {
+  if ((paletteState.current === SWITCH && at === SWITCH) || (paletteState.current === MAGNET && at === MAGNET)) {
     gesture({ t: "toggle", x: p.x, y: p.y });
     return;
   }
@@ -342,7 +342,7 @@ canvas.addEventListener("pointermove", (e) => {
       // ce même milieu : un seul geste pour les deux.
       loosen(); // au doigt aussi, déplacer la vue la décroche du héros
       panBy(now.x - pinch.x, now.y - pinch.y);
-      zoomAt(now.x, now.y, zoom * (now.gap / pinch.gap));
+      zoomAt(now.x, now.y, viewState.zoom * (now.gap / pinch.gap));
       pinch = now;
       return;
     }
@@ -537,7 +537,7 @@ function load(data: string, width?: number, quiet = false): Promise<boolean> {
     fit(width);
     // `fit` refuse une largeur absente du menu : mieux vaut ne rien charger
     // qu'afficher une bouillie.
-    if (width !== WIDTH) {
+    if (width !== worldState.width) {
       statusEl.textContent = "Monde fait pour une autre taille de grille.";
       return Promise.resolve(false);
     }
@@ -693,7 +693,7 @@ addEventListener("visibilitychange", () => {
   const grid = latestGrid();
   // Sa largeur avec, comme dans un lien : sans elle, un défi (320) rangé
   // depuis un bac réglé en 480 revenait cisaillé à la visite suivante. Celle
-  // de la grille elle-même, pas `WIDTH` : juste après un redimensionnement,
+  // de la grille elle-même, pas `worldState.width` : juste après un redimensionnement,
   // la copie est encore celle de l'ancien bac.
   // En exploration, la partie entière sous sa propre clé : un bac ordinaire
   // ne sait pas la lire. `:bac` effacé, c'est elle qui reprend à la visite
@@ -723,7 +723,7 @@ const playbackButton = document.querySelector<HTMLButtonElement>("#replay")!;
 function playFilm(): void {
   if (!film) return;
   // Les scènes ont leur taille : un rejeu 480 dans un bac 320 se décalerait.
-  if (film.w !== WIDTH) fit(film.w);
+  if (film.w !== worldState.width) fit(film.w);
   // Un rejeu en pause ne se verrait pas avancer.
   running = true;
   set({ running });
@@ -782,7 +782,7 @@ function frame(now: number): void {
   if (present()) frames++;
   const slid = shifted();
   if (slid) slideBy(slid);
-  if (hero) { if (!loose) follow(hero); }
+  if (heroState.position) { if (!heroState.loose) follow(heroState.position); }
   else if (held.size > 0) scroll();
   beat(now);
   gaze();

@@ -3,9 +3,15 @@ import { pushRecent } from "./ui.ts";
 import { set } from "./world.ts";
 
 /** Matière du pinceau. Ne change que par `select()`. */
-export let current: MaterialId = SAND;
+let current: MaterialId = SAND;
 /** Matière qu'une source crachera : le moteur la garde aussi, le panneau la relit. */
-export let emit: MaterialId = WATER;
+let emit: MaterialId = WATER;
+
+/** Choix courants, modifiés uniquement par select(). */
+export const paletteState = {
+  get current() { return current; },
+  get emit() { return emit; },
+};
 
 export const paletteEl = document.querySelector<HTMLDivElement>("#palette")!;
 const hintEl = document.querySelector<HTMLParagraphElement>("#hint")!;

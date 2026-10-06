@@ -7,7 +7,7 @@
  * deux gestes dont il a besoin (charger une grille, lancer un défi) plutôt que
  * d'importer main.ts, ce qui bouclerait.
  */
-import { HEIGHT, WIDTH, askFilm, askGrid, canvas } from "./world.ts";
+import { worldState, askFilm, askGrid, canvas } from "./world.ts";
 import { FILM_MAX, pack, parse, unpack, type Recording } from "./replay.ts";
 import { EMPTY, MATERIALS, PALETTE } from "./sim/materials.ts";
 import { type Challenge } from "./challenges.ts";
@@ -129,7 +129,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      name, width: WIDTH, height: HEIGHT, data,
+      name, width: worldState.width, height: worldState.height, data,
       goal: goalOp.value ? `${goalOp.value}:${goalId.value}:${goalN.value}` : null,
       parent: origin?.id ?? null,
     }),
@@ -149,7 +149,7 @@ document.querySelector<HTMLButtonElement>("#save")!.addEventListener("click", as
 // bac 320 se décale d'une ligne à chaque rangée. Le `~` n'est pas échappé par
 // `encodeURIComponent`, et le codec n'en produit jamais.
 document.querySelector<HTMLButtonElement>("#share")!.addEventListener("click", async () => {
-  location.hash = encodeURIComponent(`${WIDTH}~${await askGrid()}`);
+  location.hash = encodeURIComponent(`${worldState.width}~${await askGrid()}`);
   try {
     await navigator.clipboard.writeText(location.href);
     statusEl.textContent = "Lien copié.";
@@ -224,8 +224,8 @@ function download(blob: Blob, extension: string): void {
 /** Le bac agrandi ×4 sans lissage : un rendu à la taille de la grille est illisible. */
 function upscale(): HTMLCanvasElement {
   const big = document.createElement("canvas");
-  big.width = WIDTH * 4;
-  big.height = HEIGHT * 4;
+  big.width = worldState.width * 4;
+  big.height = worldState.height * 4;
   return big;
 }
 

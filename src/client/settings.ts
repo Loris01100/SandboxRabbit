@@ -1,13 +1,15 @@
 import { MATERIALS, type MaterialId } from "./sim/materials.ts";
 import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
-import { current, paletteEl, select } from "./palette.ts";
+import { paletteState, paletteEl, select } from "./palette.ts";
 import { soundMix, soundOn, soundVolume } from "./audio.ts";
 import { savedValue, stored, write } from "./ui.ts";
 import { wholePixels, zoomInput } from "./view.ts";
-import { WIDTH, airView, hour, light, lightDetail, limitFps, resize, screen, set } from "./world.ts";
+import { worldState, airView, hour, light, lightDetail, limitFps, resize, screen, set } from "./world.ts";
 
 /** Rayon du pinceau, en cellules. */
-export let brush = 5;
+let brush = 5;
+/** Le rayon courant reste lisible après un changement du curseur. */
+export const settingsState = { get brush() { return brush; } };
 export const brushInput = document.querySelector<HTMLInputElement>("#brush")!;
 const brushValue = document.querySelector<HTMLOutputElement>("#brush-value")!;
 brushInput.addEventListener("input", () => {
@@ -58,7 +60,7 @@ sizeInput.addEventListener("input", () => {
  * Une largeur qui n'est pas au menu est refusée — le lien vient d'ailleurs.
  */
 export function fit(w: number): void {
-  if (w === WIDTH) return;
+  if (w === worldState.width) return;
   if (![...sizeInput.options].some((o) => o.value === String(w))) return;
   resize(w, (w * 9) / 16, true);
   sizeInput.value = String(w);
@@ -166,7 +168,7 @@ const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";
 
 function remember(): void {
-  const state: Record<string, string | number | boolean> = { current };
+  const state: Record<string, string | number | boolean> = { current: paletteState.current };
   for (const el of SAVED) state[el.id] = isCheck(el) ? el.checked : el.value;
   write(SETTINGS, JSON.stringify(state));
 }

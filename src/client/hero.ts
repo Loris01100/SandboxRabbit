@@ -1,22 +1,22 @@
 import { HERO_HARM, HERO_SLOTS, MATERIALS, PILOT, type MaterialId } from "./sim/materials.ts";
-import { current } from "./palette.ts";
-import { bindings, held } from "./keys.ts";
+import { paletteState } from "./palette.ts";
+import { keyState, held } from "./keys.ts";
 import { keyLabel, type Action } from "./ui.ts";
-import { scaleTo, zoom, zoomCentered, zoomInput } from "./view.ts";
-import { WIDTH, cellBox, onResize, origin, seen } from "./world.ts";
+import { scaleTo, viewState, zoomCentered, zoomInput } from "./view.ts";
+import { worldState, cellBox, onResize, seen } from "./world.ts";
 import { look } from "./sight.ts";
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 
 /** Position du héros dans la dernière frame, en cellules ; null sans héros. Avec lui, les touches le pilotent et la caméra le suit. */
-export let hero: [number, number] | null = null;
+let hero: [number, number] | null = null;
 /**
  * Caméra décrochée du héros : elle reste où on l'a mise, le héros vit sa vie
  * hors champ. Glisser au clic du milieu la décroche (sans ça, la vue revient
  * sur lui à l'image suivante et on ne peut rien regarder d'autre) ; un clic du
  * milieu sans bouger la raccroche.
  */
-export let loose = false;
+let loose = false;
 /** Commandes envoyées en dernier (bits de `PILOT`) : un geste ne part que quand elles changent. */
 let piloted = 0;
 
@@ -33,7 +33,7 @@ export const STEER: Partial<Record<Action, number>> = {
 export function pilot(): number | null {
   let keys = 0;
   if (hero) for (const action of held.values()) keys |= STEER[action] ?? 0;
-  if (keys & PILOT.place) keys |= current << 8;
+  if (keys & PILOT.place) keys |= paletteState.current << 8;
   if (keys === piloted) return null;
   piloted = keys;
   return keys;
@@ -67,8 +67,8 @@ onResize.push(() => { close = 0; });
 function meet(): void {
   loose = false;
   if (zoomInput.checked && close) scaleTo(close);
-  else if (zoomInput.checked && zoom < WIDTH / 160) zoomCentered(WIDTH / 160);
-  const k = (a: Action) => keyLabel(bindings[a]);
+  else if (zoomInput.checked && viewState.zoom < worldState.width / 160) zoomCentered(worldState.width / 160);
+  const k = (a: Action) => keyLabel(keyState.bindings[a]);
   statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("nextHero")} passe au héros suivant, ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
 }
 
@@ -80,7 +80,14 @@ const hpEl = document.querySelector<HTMLMeterElement>("#hero-hp")!;
 const hpValueEl = document.querySelector<HTMLOutputElement>("#hero-hp-value")!;
 const factsEl = document.querySelector<HTMLParagraphElement>("#hero-facts")!;
 /** Numéro du héros suivi (`HERO_SLOTS.name`), 0 sans héros : c'est lui que vise le geste `name`. */
-export let heroId = 0;
+let heroId = 0;
+
+/** État suivi, lisible par la page ; seules les fonctions de ce module le modifient. */
+export const heroState = {
+  get position() { return hero; },
+  get loose() { return loose; },
+  get id() { return heroId; },
+};
 
 /**
  * Remplit la fiche du héros suivi : son nom vient de la frame (les noms
@@ -104,7 +111,7 @@ function card(name: string): void {
   const load = at(HERO_SLOTS.load), bag = MATERIALS[at(HERO_SLOTS.bag) as MaterialId];
   const carried = bag && at(HERO_SLOTS.bag) !== 0 && load > 0 ? `sac : ${load} × ${bag.name.toLowerCase()}` : "sac vide";
   // En exploration, où il en est dans le monde infini : la colonne du bac ne dit rien, elle change à chaque glissement.
-  const where = origin === null ? "" : ` · colonne ${origin + x} du monde`;
+  const where = worldState.origin === null ? "" : ` · colonne ${worldState.origin + x} du monde`;
   const facts = `${18 + at(HERO_SLOTS.age)} ans · ${Math.round(grid.temp[y * w + x])} °C · ${most(at(HERO_SLOTS.dug))} cellules creusées · ${carried}${where}`;
   if (factsEl.textContent !== facts) factsEl.textContent = facts;
 }
@@ -137,7 +144,7 @@ const sightImg = sightCtx.createImageData(1, sightEl.height);
 export function nextView(): void {
   view = (view + 1) % VIEWS.length;
   sightEl.dataset.view = VIEWS[view];
-  statusEl.textContent = `Vue ${VIEW_NAMES[view]}${hero ? "" : " — elle attend un héros (Vivant → Héros)"}. ${keyLabel(bindings.view)} pour changer.`;
+  statusEl.textContent = `Vue ${VIEW_NAMES[view]}${hero ? "" : " — elle attend un héros (Vivant → Héros)"}. ${keyLabel(keyState.bindings.view)} pour changer.`;
 }
 
 const haloEl = document.querySelector<HTMLDivElement>("#halo")!;

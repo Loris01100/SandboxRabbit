@@ -21,9 +21,15 @@ document.querySelector<HTMLButtonElement>("#settings-open")!.addEventListener("c
 
 /** Touches choisies par le joueur (fenêtre des raccourcis), gardées d'une visite à l'autre. */
 const KEYS = "sandbox-rabbit:touches";
-export let bindings = parseBindings(read(KEYS));
+let bindings = parseBindings(read(KEYS));
 /** De la touche à l'action, refait à chaque changement de `bindings`. */
-export let bound = keymap(bindings);
+let bound = keymap(bindings);
+
+/** Les raccourcis courants restent lisibles après une réassignation. */
+export const keyState = {
+  get bindings() { return bindings; },
+  get bound() { return bound; },
+};
 
 /**
  * Touches de direction, de creusage ou de pose tenues, avec l'action qu'elles

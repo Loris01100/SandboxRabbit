@@ -9,8 +9,8 @@
  * fait colorier par la carte graphique (screen.ts), ce qui laisse le panneau,
  * le zoom et le pinceau fluides pendant qu'une explosion occupe l'autre fil.
  *
- * `WIDTH`/`HEIGHT` sont **réassignés** par `resize()` et importés comme
- * liaisons vivantes (`import { WIDTH }`) : personne n'a à se rebrancher. Ce qui
+ * La taille de `worldState` est relue après chaque `resize()` : personne
+ * n'a à se rebrancher. Ce qui
  * dépend de la taille s'inscrit dans `onResize`.
  */
 import type { Knobs, News, Order } from "./sim/sandbox.ts";
@@ -24,8 +24,15 @@ export const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
 /** Ce qui colorie le canvas : WebGL2, sinon 2D (screen.ts). */
 export const screen = createScreen(canvas);
 
-export let WIDTH = 320;
-export let HEIGHT = 180;
+let WIDTH = 320;
+let HEIGHT = 180;
+
+/** Dimensions et origine courantes, modifiées seulement par ce module. */
+export const worldState = {
+  get width() { return WIDTH; },
+  get height() { return HEIGHT; },
+  get origin() { return origin; },
+};
 
 /**
  * Où sont les cellules à l'écran : coin de la première et taille d'une
@@ -227,7 +234,7 @@ function blit(frame: Extract<News, { t: "frame" }>): void {
 }
 
 /** En exploration, la colonne du monde qui est la colonne 0 du bac ; null hors du mode. */
-export let origin: number | null = null;
+let origin: number | null = null;
 /** Colonnes dont la fenêtre d'exploration a glissé depuis le dernier `present()`. */
 let slid = 0;
 

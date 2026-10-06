@@ -144,7 +144,7 @@ quelque chose du bac depuis la page.
 `latestGrid()` rend la dernière nouvelle `grid` reçue, avec sa largeur :
 sauvegarder ou ranger le bac en `localStorage` n'attend donc jamais le Worker
 (important quand l'onglet part en arrière-plan). La largeur est celle de la
-grille, pas `WIDTH` : juste après un redimensionnement, la copie est encore
+grille, pas `worldState.width` : juste après un redimensionnement, la copie est encore
 celle de l'ancien bac, et la ranger sous la nouvelle largeur la cisaillait.
 
 Le choix d'une graine aléatoire et du décor « Surprise » dans main.ts utilise
@@ -183,7 +183,7 @@ prochain changement de touches. Quand la frame porte un héros (`hero`), les
 touches de direction, de creusage et de pose le pilotent au lieu de déplacer la vue,
 et `follow()` (view.ts) recentre la caméra sur lui à chaque image (un cinquième du
 chemin, bornes comprises). À son apparition la vue zoome à ~160 cellules de
-large (`meet()` de hero.ts, appelé par `track()` à chaque frame). Glisser au clic du milieu (ou pincer) passe `loose` à vrai (`loosen()`) :
+large (`meet()` de hero.ts, appelé par `track()` à chaque frame). Glisser au clic du milieu (ou pincer) passe `heroState.loose` à vrai (`loosen()`) :
 `follow()` ne tourne plus, la vue reste où on l'a mise ; un clic du milieu
 sans bouger (moins de `CLICK` pixels) la raccroche (`tighten()`), et `meet()` aussi.
 
@@ -207,7 +207,7 @@ Mondes, et « recommencer le dernier défi » (`lastChallenge`), cliquent
 simplement le bouton du panneau.
 `combo()` écrit l'événement en combinaison (`Ctrl+z`, `Ctrl+Maj+z`, `g` :
 Cmd vaut Ctrl, Maj ne compte qu'avec Ctrl ou Alt, puisque les chiffres AZERTY
-la demandent), et `bound`, la table combinaison → action de `keymap()`, la
+la demandent), et `keyState.bound`, la table combinaison → action de `keymap()`, la
 traduit. Les actions tenues (`MOVES` / `STEER`) vont dans `held`, rangées par
 touche nue : relâchée avec ou sans Ctrl, elle se retrouve. Les flèches, A / W
 et Ctrl+Maj+Z restent des alias tant qu'aucune action ne les prend. Une
@@ -487,12 +487,12 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
 | [main.ts](../../src/client/main.ts) | souris, raccourcis, défis, rejeu, chargement du bac, boucle rAF, câblage de tout le DOM | non |
-| [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`hero`, relevée par `track()`), fiche de l'encadré Héros (`card()` : nom, santé, âge, température, cellules creusées et sac (« sac : N × matière »), et en exploration sa colonne dans le monde (`origin` + x) lus dans le miroir ; `nameInput`, `heroId`), cadre `#halo` autour du héros piloté dans les vues de côté (`mark()`, repère posé sur la scène, pas dans le rendu), caméra décrochée (`loose`), gros plan du mode exploration (`closeUp(px)` : `meet()` pose `px` pixels par cellule au lieu de 160 cellules de large ; remis à 0 par `abandon()` de main.ts et par un changement de taille), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
-| [palette.ts](../../src/client/palette.ts) | palette des matières et six récentes ; `select()`, qui tient `current` et `emit` (matière des sources) | non |
-| [settings.ts](../../src/client/settings.ts) | contrôles du panneau (pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage), ceux des onglets Graphismes (limite d'images par seconde, échelle entière, finesse de l'éclairage) et Son (case, volume général, un curseur `data-mix` par famille de sons) de la fenêtre Paramètres, et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
-| [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `slideBy(cells)` (la fenêtre d'exploration a glissé : la vue la suit pour que le monde ne bouge pas à l'écran), `scaleTo(px)` (zoom qui donne `px` pixels d'écran par cellule, quelle que soit la taille du bac : le mode exploration), `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan`. Échelle entière (`wholePixels()`, Paramètres › Graphismes) : `fitCanvas()` pose largeur **et** hauteur du canvas au plus grand multiple entier, en pixels physiques, qui tient dans la scène (`wholeScale` d'ui.ts) — ou étire si l'arrondi coûte plus d'un quart de la taille ; refait à chaque changement de taille de la scène (`ResizeObserver`, différé d'une image : sur téléphone la scène suit la hauteur du bac) et de la grille | non |
-| [keys.ts](../../src/client/keys.ts) | touches réassignables (`bindings`, `bound`), touches tenues (`held`), fenêtre Paramètres (`openSettings()`, onglet Raccourcis) | non |
-| [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), `origin` (en exploration, la colonne du monde qui est la colonne 0 du bac, relevée dans chaque frame ; quand elle change, le miroir glisse d'autant, `glide()`) et `shifted()` (de combien la fenêtre a glissé dans ce que vient de poser `present()`, remis à zéro : main.ts le passe à `slideBy()` avant `follow()`), porte vers le Worker, miroir de la grille (lu par `seen()`), `cellBox()` : où sont les cellules à l'écran, bordure du canvas exclue (le zoom la grossit) — tout passage cellule ↔ pixel (clic, sélection, cadre du héros) passe par lui | non |
+| [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`heroState.position`, relevée par `track()`), fiche de l'encadré Héros (`card()` : nom, santé, âge, température, cellules creusées et sac (« sac : N × matière »), et en exploration sa colonne dans le monde (`worldState.origin` + x) lus dans le miroir ; `nameInput`, `heroState.id`), cadre `#halo` autour du héros piloté dans les vues de côté (`mark()`, repère posé sur la scène, pas dans le rendu), caméra décrochée (`heroState.loose`), gros plan du mode exploration (`closeUp(px)` : `meet()` pose `px` pixels par cellule au lieu de 160 cellules de large ; remis à 0 par `abandon()` de main.ts et par un changement de taille), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
+| [palette.ts](../../src/client/palette.ts) | palette des matières et six récentes ; `select()`, qui tient `paletteState.current` et `paletteState.emit` (matière des sources) | non |
+| [settings.ts](../../src/client/settings.ts) | contrôles du panneau (`settingsState.brush` : rayon courant du pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage), ceux des onglets Graphismes (limite d'images par seconde, échelle entière, finesse de l'éclairage) et Son (case, volume général, un curseur `data-mix` par famille de sons) de la fenêtre Paramètres, et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
+| [view.ts](../../src/client/view.ts) | zoom et caméra : `viewState.zoom` (niveau courant), `zoomAt` (borné de 1 à 12), `zoomCentered`, `slideBy(cells)` (la fenêtre d'exploration a glissé : la vue la suit pour que le monde ne bouge pas à l'écran), `scaleTo(px)` (zoom qui donne `px` pixels d'écran par cellule, quelle que soit la taille du bac : le mode exploration), `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan`. Échelle entière (`wholePixels()`, Paramètres › Graphismes) : `fitCanvas()` pose largeur **et** hauteur du canvas au plus grand multiple entier, en pixels physiques, qui tient dans la scène (`wholeScale` d'ui.ts) — ou étire si l'arrondi coûte plus d'un quart de la taille ; refait à chaque changement de taille de la scène (`ResizeObserver`, différé d'une image : sur téléphone la scène suit la hauteur du bac) et de la grille | non |
+| [keys.ts](../../src/client/keys.ts) | touches réassignables (`keyState.bindings`, `keyState.bound`), touches tenues (`held`), fenêtre Paramètres (`openSettings()`, onglet Raccourcis) | non |
+| [world.ts](../../src/client/world.ts) | canvas, `worldState.width` / `worldState.height` (relus après `resize()`), `worldState.origin` (en exploration, la colonne du monde qui est la colonne 0 du bac, relevée dans chaque frame ; quand elle change, le miroir glisse d'autant, `glide()`) et `shifted()` (de combien la fenêtre a glissé dans ce que vient de poser `present()`, remis à zéro : main.ts le passe à `slideBy()` avant `follow()`), porte vers le Worker, miroir de la grille (lu par `seen()`), `cellBox()` : où sont les cellules à l'écran, bordure du canvas exclue (le zoom la grossit) — tout passage cellule ↔ pixel (clic, sélection, cadre du héros) passe par lui | non |
 | [audio.ts](../../src/client/audio.ts) | porte du son : retient case, volumes (général et par famille, `soundMix()`) et fond sonore, et ne charge sound.ts (`import()`) qu'au premier geste du joueur — le navigateur refuse de jouer avant, et la page a son budget (84 Kio). `initSound()` (main.ts), `hear()` à chaque frame, `setHum()` à chaque `stats` | non |
 | [sound.ts](../../src/client/sound.ts) | le son, synthétisé par Web Audio (aucun fichier) : explosion (bruit blanc sous un passe-bas qui se referme, plus long et plus grave avec le rayon), éclair puis tonnerre, boucles de feu (claquements), de lave (bruit brun) et de pluie ; stéréo selon la colonne ; six voix au plus ; se tait onglet caché. `MIX` : les familles (explosions, tonnerre, feu, lave, pluie), chacune multipliée par son curseur — en ajouter une, c'est aussi son `data-mix` dans index.html (test/ui.ts le vérifie). Tirage avec `crypto.getRandomValues()`, par blocs de 4 096 entiers (16 Kio) pour le bruit : il ne touche que l'oreille | `humLevel()`, `rainLevel()`, `boomShape()`, `panOf()` : **oui** (test/ui.ts) |
 | [errors.ts](../../src/client/errors.ts) | remonte les exceptions de la page et du Worker de simulation vers `POST /api/error` (voir « Erreurs des joueurs ») | `reporter()` : **oui** (test/ui.ts) |
@@ -511,6 +511,13 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | [board.ts](../../src/client/board.ts) | le classement des défis livrés, chargé au premier défi lancé (`import()` de main.ts) : `show()` (records servis, jugés un à un par le fil de [sim/judge.ts](../../src/client/sim/judge.ts), dix au plus affichés, ▶ pour regarder un rejeu), `won()` (propose « Publier au classement ») | non (le jugement, `verdict()` de [sim/verdict.ts](../../src/client/sim/verdict.ts) : **oui**) |
 | [theme.ts](../../src/client/theme.ts) | thème Système / Jour / Nuit, onglet Général de la fenêtre Paramètres (onglets câblés dans keys.ts) | non |
 | [sim/*](../../src/client/sim/) | moteur, rendu, codec, registre, bac | **oui** |
+
+Les états partagés de la page sont exposés par des objets constants à
+propriétés de lecture : `heroState`, `keyState`, `paletteState`,
+`settingsState`, `viewState` et `worldState`. Chaque propriété relit la
+variable privée de son module, pour voir immédiatement un changement de
+matière, de touche, de zoom, de rayon ou de taille sans pouvoir la réassigner
+depuis un autre module.
 
 ### Classement des défis
 
