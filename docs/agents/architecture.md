@@ -541,6 +541,9 @@ la mise à jour des dimensions et l'envoi de l'ordre `size`.
 
 ### Classement des défis
 
+Dans board.ts, `show()` orchestre la vérification et l'affichage ;
+`refusedLabel()` formate à part le nombre de rejeux écartés et son pluriel.
+
 Pour les défis **livrés** (`CHALLENGES`), pas les mondes-défis de la galerie :
 leur grille n'est pas bâtie en code, un juge n'aurait rien à quoi comparer le
 départ.

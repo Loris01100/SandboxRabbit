@@ -31,6 +31,9 @@ interface Entry { id: string; name: string; ticks: number; film: string }
 const seconds = (ticks: number): string =>
   `${(ticks / 60).toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`;
 
+const refusedLabel = (count: number): string =>
+  count > 0 ? ` (${count} écarté${count > 1 ? "s" : ""} : rejeu qui ne gagne pas)` : "";
+
 let judge: Worker | null = null;
 const pending = new Map<string, (ok: boolean) => void>();
 
@@ -97,7 +100,7 @@ export async function show(challenge: string, watch: (rec: Recording) => void): 
   }
   titleEl.textContent = kept === 0
     ? `Classement — ${challenge} : aucun record ne tient.`
-    : `Classement — ${challenge}${refused > 0 ? ` (${refused} écarté${refused > 1 ? "s" : ""} : rejeu qui ne gagne pas)` : ""}`;
+    : `Classement — ${challenge}${refusedLabel(refused)}`;
 }
 
 /** La partie à publier, après une victoire. */
