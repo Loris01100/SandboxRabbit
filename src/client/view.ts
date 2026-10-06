@@ -1,5 +1,5 @@
 import { held } from "./keys.ts";
-import { clampPan, panAfterZoom, type Action } from "./ui.ts";
+import { clampPan, panAfterZoom, wholeScale, type Action } from "./ui.ts";
 import { HEIGHT, WIDTH, canvas, onResize } from "./world.ts";
 
 /**
@@ -80,6 +80,24 @@ export function follow([x, y]: [number, number]): void {
   applyView();
 }
 
+/**
+ * La fenêtre d'exploration a glissé de `cells` colonnes (`shifted()` de
+ * world.ts) : le bac affiché est parti d'autant vers la gauche, la vue le
+ * suit vers la droite pour que le monde ne bouge pas à l'écran.
+ */
+export function slideBy(cells: number): void {
+  panBy((cells * canvas.offsetWidth * zoom) / WIDTH, 0);
+}
+
+/**
+ * Zoome autour du centre pour qu'une cellule fasse `px` pixels d'écran, quelle
+ * que soit la taille du bac : l'échelle du mode exploration. Borné comme
+ * `zoomAt` — sur un écran étroit, la cellule reste plus petite.
+ */
+export function scaleTo(px: number): void {
+  zoomCentered((px * WIDTH) / canvas.offsetWidth);
+}
+
 // Le zoom se coupe : sans lui la molette rend la main à la page, et un bac
 // laissé agrandi ne piège personne — on le remet d'aplomb en décochant.
 export const zoomInput = document.querySelector<HTMLInputElement>("#zoom")!;
@@ -95,6 +113,55 @@ canvas.addEventListener("wheel", (e) => {
 
 canvas.addEventListener("auxclick", (e) => e.preventDefault());
 
+/**
+ * Échelle entière (Paramètres › Graphismes) : le canvas prend le plus grand
+ * multiple entier de la grille qui tient dans la scène (`wholeScale` d'ui.ts),
+ * au lieu de s'étirer — toutes les cellules ont la même taille, au prix d'une
+ * marge autour du bac. Décochée, ou si même ×1 ne tient pas, le CSS étire
+ * comme avant. La hauteur est posée aussi : `aspect-ratio` compte la
+ * bordure (`border-box`), et l'intérieur tombait à un pixel près — une ligne
+ * de cellules plus fine que les autres.
+ */
+let whole = true;
+const stage = canvas.parentElement!;
+
+function fitCanvas(): void {
+  canvas.style.width = canvas.style.height = "";
+  if (!whole) { applyView(); return; }
+  const cs = getComputedStyle(stage), mine = getComputedStyle(canvas);
+  const border = canvas.clientLeft * 2; // border-box : la bordure est dans la largeur
+  const boxW = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - border;
+  // Sur téléphone, la scène prend la hauteur du bac, bornée par `max-height`
+  // en pixels (40vh) : c'est elle qu'on lit, pas la scène, qui la suivrait.
+  const boxH = (mine.maxHeight.endsWith("px")
+    ? parseFloat(mine.maxHeight)
+    : stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) - border;
+  const k = wholeScale(boxW, boxH, WIDTH, HEIGHT, devicePixelRatio);
+  if (k > 0) {
+    canvas.style.width = `${(WIDTH * k) / devicePixelRatio + border}px`;
+    canvas.style.height = `${(HEIGHT * k) / devicePixelRatio + border}px`;
+  }
+  applyView();
+}
+
+/** Coche ou décoche l'échelle entière. */
+export function wholePixels(on: boolean): void {
+  whole = on;
+  fitCanvas();
+}
+
+// La scène change de taille avec la fenêtre, le plein écran, le zoom du
+// navigateur (qui change aussi `devicePixelRatio`) : on refait le compte.
+// À l'image suivante, pas dans le rappel : sur téléphone la scène prend la
+// hauteur du bac, la changer dans le rappel relançait l'observateur, et
+// Chrome levait « ResizeObserver loop », remontée comme erreur du joueur.
+let fitting = false;
+new ResizeObserver(() => {
+  if (fitting) return;
+  fitting = true;
+  requestAnimationFrame(() => { fitting = false; fitCanvas(); });
+}).observe(stage);
+
 // Redimensionner remet la vue d'aplomb. Les crans d'annulation et
 // l'enregistrement en cours, eux, sont vidés par le bac lui-même.
-onResize.push(() => zoomAt(0, 0, 1));
+onResize.push(() => { fitCanvas(); zoomAt(0, 0, 1); });

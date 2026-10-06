@@ -7,15 +7,18 @@ import { readFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { decode, decodeFrozen, decodeLife, decodeNames, decodeTemp, encode } from "../src/client/sim/codec.ts";
 import { CLOCK, DAY, HOURS, clockAt, Renderer, hourTint, lighting, thumbnail } from "../src/client/sim/render.ts";
+import { FlatLight } from "../src/client/sim/flatlight.ts";
 import { CHALLENGES, SCENES } from "../src/client/challenges.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../src/client/gestures.ts";
 import { FILM_MAX, Player, Recorder, pack, parse, put, unpack, vet, type Recording } from "../src/client/replay.ts";
 import { terrain } from "../src/client/terrain.ts";
+import { EXPLORE_SCALE, STRIP, land } from "../src/client/sim/explore.ts";
 import {
   MATERIALS, CATEGORIES, PALETTE, SHORTCUTS,
   ALCOHOL, BATTERY, C4, CANDLE, EMBER, EMPTY, FIRE, FIREDAMP, GLASS, ICE, LAVA, MERCURY, METAL, MINE, NITRO, THERMITE,
-  MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED,
-  CEMENT, FILINGS, HERO, HERO_HARM, HERO_SLOTS, MAGNET, PILOT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
+  MOLTEN_GLASS, MOLTEN_WAX, MUD, NANITE, NITROGEN, OIL, PLANT, SALT, SALTWATER, SAND, SEED, SMOKE,
+  ACID, STEAM, HERO_HEAD, HERO_BODY, HERO_LEGS,
+  CEMENT, FILINGS, RUST, SODIUM, HERO, HERO_HARM, HERO_SLOTS, MAGNET, PILOT, RABBIT, RABBIT_BODY, RABBIT_EYE, RABBIT_TAIL, SNOW, SOURCE, SPARK, PETROLEUM, URANIUM, FALLOUT, STONE, SWITCH, TAR, TNT, WATER, WAX, WOOD, type MaterialId,
 } from "../src/client/sim/materials.ts";
 
 const W = 60, H = 40;
@@ -567,6 +570,91 @@ function count(e: Engine, id: MaterialId): number {
   assert.equal(count(e, C4), 0, "l'étincelle fait sauter le mur entier");
 }
 
+// Sodium : l'eau le fait sauter, pas le feu ; sous l'huile, il ne risque rien.
+{
+  const sec = engine();
+  sec.rect(0, H - 2, W - 1, H - 1, STONE);
+  sec.rect(20, H - 5, 30, H - 3, SODIUM);
+  for (let x = 20; x <= 30; x++) sec.set(x, H - 6, FIRE);
+  for (let t = 0; t < 60; t++) sec.step();
+  assert.equal(count(sec, SODIUM), 33, "à sec, le feu ne le déclenche pas");
+  assert.equal(sec.heard.booms, 0, "et rien n'a sauté");
+
+  const huile = engine();
+  huile.rect(0, H - 2, W - 1, H - 1, STONE);
+  huile.rect(10, H - 12, 50, H - 3, OIL);
+  huile.rect(28, H - 4, 32, H - 3, SODIUM);
+  for (let t = 0; t < 120; t++) huile.step();
+  assert.equal(count(huile, SODIUM), 10, "gardé sous l'huile, il ne bouge pas");
+
+  const lac = engine();
+  lac.rect(0, H - 2, W - 1, H - 1, STONE);
+  lac.rect(0, H - 10, W - 1, H - 3, WATER);
+  lac.rect(28, 5, 32, 7, SODIUM);
+  for (let t = 0; t < 120 && count(lac, SODIUM) === 15; t++) lac.step();
+  assert.ok(count(lac, SODIUM) < 15, "jeté dans l'eau, il saute");
+  assert.ok(count(lac, WATER) < W * 8, "et emporte de l'eau avec lui");
+  assert.ok(MATERIALS[SODIUM].density < MATERIALS[WATER].density, "plus léger que l'eau : il flotte, donc la touche toujours");
+}
+
+// Rouille : le métal mouillé rouille, plus vite dans l'eau salée, et la rouille ne conduit pas.
+{
+  /** Un fil de métal posé au fond d'un bac rempli de `liquid` (ou à sec) ; rend la rouille après `ticks`. */
+  const trempé = (liquid: MaterialId | null, ticks: number): number => {
+    const e = engine();
+    e.rect(0, H - 2, W - 1, H - 1, STONE);
+    e.rect(5, H - 3, 54, H - 3, METAL);
+    if (liquid !== null) e.rect(0, H - 12, W - 1, H - 4, liquid);
+    for (let t = 0; t < ticks; t++) e.step();
+    return count(e, RUST);
+  };
+  assert.equal(trempé(null, 600), 0, "à sec, le métal ne rouille pas");
+  const douce = trempé(WATER, 600), salée = trempé(SALTWATER, 600);
+  assert.ok(douce > 0, `dans l'eau, il rouille (${douce} cellules en 600 ticks)`);
+  assert.ok(salée > douce * 2, `l'eau salée le ronge bien plus vite (${salée} contre ${douce})`);
+
+  // L'eau passe par la rouille : une barre épaisse finit rongée sous sa surface.
+  const barre = engine();
+  barre.rect(0, H - 2, W - 1, H - 1, STONE);
+  barre.rect(10, H - 8, 49, H - 3, METAL); // six cellules d'épaisseur
+  barre.rect(0, H - 20, W - 1, H - 9, SALTWATER);
+  for (let t = 0; t < 4000; t++) barre.step();
+  let dessous = 0;
+  for (let x = 10; x < 50; x++) for (let y = H - 6; y <= H - 3; y++) if (barre.get(x, y) === RUST) dessous++;
+  assert.ok(dessous > 0, `la rouille gagne l'intérieur de la barre (${dessous} cellules sous les deux premières rangées)`);
+  // Sèche, la rouille ne gagne rien.
+  const sèche = engine();
+  sèche.rect(10, 20, 30, 20, METAL);
+  sèche.set(20, 20, RUST);
+  for (let t = 0; t < 600; t++) sèche.step();
+  assert.equal(count(sèche, RUST), 1, "à sec, la rouille ne se propage pas");
+
+  // Un fil rouillé au milieu ne laisse plus passer l'étincelle.
+  const e = engine();
+  for (let x = 10; x < 40; x++) e.set(x, 20, METAL);
+  e.set(25, 20, RUST);
+  e.set(45, 20, TNT);
+  for (let x = 40; x < 45; x++) e.set(x, 20, METAL);
+  e.set(9, 20, BATTERY);
+  for (let t = 0; t < 120; t++) e.step();
+  assert.equal(e.get(45, 20), TNT, "la rouille coupe le circuit : le TNT au bout ne saute pas");
+  e.set(25, 20, METAL);
+  for (let t = 0; t < 120; t++) e.step();
+  assert.notEqual(e.get(45, 20), TNT, "réparé, le fil conduit de nouveau");
+}
+
+// Plus d'un quart du bac qui saute au même tick : la file des explosions avait
+// un quart de la grille de places, et perdait le reste (lesquelles, selon les
+// fils). Une place par cellule et une demande par cellule : toutes sautent.
+{
+  const e = engine();
+  e.rect(0, 0, W - 1, 19, C4); // la moitié du bac
+  for (let i = 0; i < W * 20; i++) e.life[i] = 1; // amorcées : elles demandent toutes à ce tick
+  e.wakeAll();
+  e.step();
+  assert.ok(e.heard.booms > (W * H) / 4, `toutes jouées, au-delà du quart du bac (${e.heard.booms} sur ${W * 20})`);
+}
+
 // Grisou : la nappe entière s'enflamme, pas seulement la cellule touchée.
 {
   const e = engine();
@@ -670,6 +758,24 @@ function count(e: Engine, id: MaterialId): number {
   assert.equal(count(e, PLANT), 0, "les retombées tuent la plante");
 }
 
+// Gravité inversée : le lapin se retourne avec elle, et tombe au plafond pattes
+// en premier — vivant, oreilles vers le bas.
+{
+  const e = new Engine(W, H, 11);
+  e.rect(0, 0, W - 1, 1, STONE);
+  e.rect(0, H - 2, W - 1, H - 1, STONE);
+  e.paint(30, H - 5, 1, RABBIT);
+  for (let t = 0; t < 20; t++) e.step();
+  assert.equal(count(e, RABBIT), 1, "le lapin est posé");
+  e.gravity = -1;
+  for (let t = 0; t < 120; t++) e.step();
+  assert.equal(count(e, RABBIT), 1, "retourné, il vit encore");
+  const cœur = e.cells.indexOf(RABBIT), x = cœur % W, y = (cœur / W) | 0;
+  assert.ok(y < H / 2, `il est tombé vers le plafond (cœur en y = ${y})`);
+  assert.equal(e.get(x, y + 2), RABBIT_BODY, "l'oreille est sous le cœur");
+  assert.equal(count(e, RABBIT_BODY) + count(e, RABBIT_EYE) + count(e, RABBIT_TAIL), 8, "le corps entier");
+}
+
 // Le lapin. Graines fixes : ses règles tirent beaucoup au sort, et un test qui
 // échoue une fois sur mille ne dirait rien.
 {
@@ -750,6 +856,29 @@ function count(e: Engine, id: MaterialId): number {
   assert.ok(fond, "il a coulé jusqu'au fond");
   assert.equal(corps(mare), 0, "et il s'y est noyé");
   assert.ok(count(mare, WATER) >= eau - 2, `l'eau qu'il a traversée n'a pas disparu (${count(mare, WATER)} sur ${eau})`);
+
+  // Empilés, chacun n'a au-dessus des oreilles que le corps du voisin : sans
+  // les côtés de la tête, seul celui du haut se noyait, et celui du dessous
+  // respirait au fond de l'eau tant que l'autre lui servait de couvercle. Un
+  // puits juste à sa largeur (de x - 2 à x + 1) : il ne peut pas se décaler,
+  // et celui du haut dépasse de l'eau, donc il survit pour faire le couvercle.
+  const pile = pré(15);
+  for (let y = 24; y < 38; y++) { pile.set(18, y, STONE); pile.set(23, y, STONE); }
+  for (let x = 19; x < 23; x++) for (let y = 31; y < 38; y++) pile.set(x, y, WATER);
+  pile.paint(21, SOL, 1, RABBIT, 1, true);
+  pile.paint(21, SOL - 4, 1, RABBIT, 1, true);
+  assert.equal(count(pile, RABBIT), 2, "deux lapins empilés dans un puits noyé");
+  for (let t = 0; t < 60; t++) pile.step();
+  assert.equal(corps(pile), 9, "celui du dessous se noie sans attendre que l'autre lui libère la tête");
+
+  // Le sable par-dessus les oreilles étouffe comme l'eau : enseveli, il meurt.
+  const enseveli = pré(21);
+  enseveli.paint(25, SOL, 1, RABBIT);
+  for (let t = 0; t < 10; t++) enseveli.step();
+  enseveli.rect(20, 28, 30, 33, SAND);
+  let étouffé = 400;
+  for (let t = 0; t < 400; t++) { enseveli.step(); if (corps(enseveli) === 0) { étouffé = t; break; } }
+  assert.ok(étouffé < 400, "un lapin enseveli sous le sable s'étouffe");
 
   // Deux lapins repus dans un enclos : un petit, de la même taille qu'eux.
   const enclos = pré(16);
@@ -1105,6 +1234,115 @@ function top(e: Engine, id: MaterialId): number {
 }
 
 /**
+ * Pression et vent : un souffle laisse de la pression dans l'air, qui chasse
+ * les gaz vers l'extérieur, puis retombe à zéro — et le bac se rendort.
+ */
+{
+  /** Distance moyenne des cellules de fumée au point (80, 45). */
+  const spread = (e: Engine): number => {
+    let n = 0, sum = 0;
+    for (let i = 0; i < e.cells.length; i++) {
+      if (e.cells[i] !== SMOKE) continue;
+      const x = (i % e.width) - 80, y = ((i / e.width) | 0) - 45;
+      n++;
+      sum += Math.sqrt(x * x + y * y);
+    }
+    return sum / n;
+  };
+  const cloud = (boom: boolean): Engine => {
+    const e = new Engine(160, 90, 3);
+    e.paint(80, 45, 25, SMOKE, 0.3);
+    if (boom) e.explode(80, 45, 7);
+    for (let t = 0; t < 8; t++) e.step();
+    return e;
+  };
+  const calm = cloud(false), blown = cloud(true);
+  assert.ok(!calm.press.some((p) => p !== 0), "sans souffle, pas un souffle d'air");
+  assert.ok(blown.press.some((p) => p > 1), "un souffle laisse de la pression autour de lui");
+  assert.ok(spread(blown) > spread(calm) + 2, `et chasse la fumée : ${spread(blown).toFixed(1)} contre ${spread(calm).toFixed(1)} cellules du centre`);
+
+  // La pression n'entre pas dans la pierre, et retombe à zéro : le bac se rendort.
+  const e = new Engine(96, 64, 5);
+  e.rect(0, 40, 95, 63, STONE);
+  e.explode(48, 30, 5);
+  e.step();
+  for (let i = 0; i < e.cells.length; i++) {
+    if (e.cells[i] === STONE) assert.equal(e.press[i], 0, "aucune pression dans la pierre");
+  }
+  for (let t = 0; t < 600 && e.busy > 0; t++) e.step();
+  assert.ok(!e.press.some((p) => p !== 0), "la pression retombe à zéro exactement");
+  for (let t = 0; t < 400 && e.busy > 0; t++) e.step();
+  assert.equal(e.busy, 0, "puis le bac se rendort : la pression ne tient rien éveillé pour toujours");
+
+  // L'onde se répand par l'air : rien derrière un mur plein.
+  const mur = new Engine(96, 64, 5);
+  mur.rect(60, 0, 63, 63, STONE);
+  mur.explode(48, 32, 5);
+  let derrière = 0;
+  for (let y = 0; y < 64; y++) for (let x = 64; x < 96; x++) derrière += mur.press[y * 96 + x];
+  assert.equal(derrière, 0, "l'onde ne traverse pas un mur");
+
+  // L'air a de l'élan : dans un couloir, le souffle part en deux fronts qui
+  // s'éloignent du centre. Une simple diffusion y gardait son maximum.
+  const couloir = new Engine(160, 21, 5);
+  couloir.rect(0, 0, 159, 8, STONE);
+  couloir.rect(0, 12, 159, 20, STONE);
+  couloir.explode(80, 10, 3);
+  const pic = (): number => {
+    let best = 0, at = 80;
+    for (let x = 0; x < 160; x++) if (couloir.press[10 * 160 + x] > best) { best = couloir.press[10 * 160 + x]; at = x; }
+    return at;
+  };
+  const départ = pic();
+  for (let t = 0; t < 8; t++) couloir.step();
+  assert.ok(Math.abs(pic() - 80) > Math.abs(départ - 80) + 5, `l'onde voyage : son pic passe de ${départ} à ${pic()}`);
+
+  /** Cellules de verre éclatées par un TNT à `d` cellules de la vitre, à l'air libre ou dans une pièce close. */
+  const vitre = (d: number, close: boolean): number => {
+    const e = new Engine(160, 90, 3);
+    e.rect(0, 70, 159, 89, STONE);
+    e.rect(80 + d, 56, 80 + d, 69, GLASS);
+    if (close) { e.rect(80 - d, 56, 80 + d, 56, STONE); e.rect(80 - d, 56, 80 - d, 69, STONE); }
+    e.step();
+    e.explode(80, 63, 5);
+    for (let t = 0; t < 60; t++) e.step();
+    return 14 - count(e, GLASS) - (close ? 1 : 0); // la pièce prend une cellule de la vitre à son plafond
+  };
+  assert.ok(vitre(9, false) > 0, "une vitre proche d'un souffle éclate");
+  assert.equal(vitre(20, false), 0, "une vitre lointaine tient");
+  assert.ok(vitre(9, true) > vitre(9, false), `dans une pièce close, la même charge en casse plus (${vitre(9, true)} contre ${vitre(9, false)})`);
+  const éclats = new Engine(160, 90, 3);
+  éclats.rect(89, 60, 89, 69, GLASS);
+  éclats.explode(80, 65, 5);
+  for (let t = 0; t < 5; t++) éclats.step();
+  assert.ok(count(éclats, SAND) > 0, "le verre éclaté devient du sable");
+
+  // Le sable est soufflé par l'onde, pas par un bac calme.
+  const tas = (boom: boolean): number => {
+    const e = new Engine(160, 90, 3);
+    e.rect(0, 70, 159, 89, STONE);
+    e.rect(45, 60, 65, 69, SAND);
+    for (let t = 0; t < 30; t++) e.step();
+    const avant = e.cells.slice();
+    if (boom) e.explode(80, 66, 7);
+    let bougé = 0;
+    for (let t = 0; t < 10; t++) {
+      e.step();
+      for (let i = 0; i < avant.length; i++) if (avant[i] === SAND && e.cells[i] !== SAND) bougé++;
+    }
+    return bougé;
+  };
+  assert.equal(tas(false), 0, "un tas posé ne bouge pas");
+  assert.ok(tas(true) > 10, "l'onde arrache le sable du tas qui lui fait face");
+
+  // Une grille posée (monde, rejeu, salon, annulation) repart sans pression, chez chacun.
+  const f = new Engine(96, 64, 5);
+  f.explode(48, 30, 5);
+  f.wakeAll();
+  assert.ok(!f.press.some((p) => p !== 0), "`wakeAll()` remet la pression à zéro");
+}
+
+/**
  * Contrat d'équivalence du moteur : à graine égale, la même scène donne la même
  * grille au tick près. C'est ce test — et non les règles prises une à une — qui
  * dira qu'un moteur réécrit (Rust/WASM) fait bien la même chose que celui-ci :
@@ -1152,7 +1390,7 @@ function top(e: Engine, id: MaterialId): number {
   };
 
   const empreinte = fingerprint(run(1234));
-  assert.equal(empreinte, "c0b016ea", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
+  assert.equal(empreinte, "ce7a1a98", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
   assert.equal(fingerprint(run(1234)), empreinte, "et rejouable : deux fois la même graine, la même grille");
   assert.notEqual(fingerprint(run(9876)), empreinte, "une autre graine donne une autre partie");
 }
@@ -1377,6 +1615,187 @@ function top(e: Engine, id: MaterialId): number {
   let bougé = 0;
   for (let i = 0; i < avant.length; i++) if (avant[i] !== a.cells[i]) bougé++;
   assert.ok(bougé < avant.length / 100, `le monde naît au repos (${bougé} cellules changées en 200 ticks)`);
+
+  // Échelle fixe (mode exploration) : `scale` = h / 180 redonne le monde par
+  // défaut au bit près, et un monde 1280×720 à `EXPLORE_SCALE` garde héros,
+  // poches fermées et repos — ses formes sont 2,7 fois plus petites qu'à
+  // l'échelle du bac, rien ne dit que le scellement suit.
+  const fixe = new Engine(640, 360, 1);
+  fixe.clear();
+  terrain(fixe, 4217, 2);
+  assert.deepEqual(fixe.cells, monde(4217).cells, "scale = h / 180 : le monde de toujours");
+  const x = new Engine(1280, 720, 1);
+  x.clear();
+  terrain(x, 4217, EXPLORE_SCALE);
+  assert.ok(count(x, HERO) > 0, "le monde d'exploration a son héros");
+  let fuites = 0;
+  for (let y = 0; y < x.height; y++) {
+    for (let i = 0; i < x.width; i++) {
+      const id = x.get(i, y);
+      if ((id === PETROLEUM || id === LAVA) && ![x.get(i - 1, y), x.get(i + 1, y), x.get(i, y - 1), x.get(i, y + 1)]
+        .every((n) => n === id || n === STONE || n === METAL || n === URANIUM)) fuites++;
+    }
+  }
+  assert.equal(fuites, 0, "à échelle fixe aussi, pétrole et lave restent enfermés");
+  const posé = x.cells.slice();
+  for (let t = 0; t < 100; t++) x.step();
+  let remué = 0;
+  for (let i = 0; i < posé.length; i++) if (posé[i] !== x.cells[i]) remué++;
+  assert.ok(remué < posé.length / 100, `le monde d'exploration naît au repos (${remué} cellules changées en 100 ticks)`);
+}
+
+/**
+ * `land()`, étape 1 du monde infini (docs/agents/exploration.md) : chaque
+ * cellule ne dépend que de sa position dans le monde. Sinon la fenêtre
+ * glissante rebâtirait un chunk revisité autrement qu'à l'aller, et deux
+ * machines d'un salon, qui n'auraient pas bâti dans le même ordre,
+ * divergeraient.
+ */
+{
+  const W = 1280, H = 720, G = 4217;
+  const bâti = (x0: number, tranches: [number, number][]): Engine => {
+    const e = new Engine(W, H, 1);
+    e.clear();
+    for (const [from, to] of tranches) land(e, G, EXPLORE_SCALE, x0, from, to);
+    return e;
+  };
+  const entier = bâti(0, [[0, W]]);
+  const tirage = new Engine(W, H, 1);
+  const avant = tirage.seed;
+  land(tirage, G, EXPLORE_SCALE, 0, 0, W);
+  assert.equal(tirage.seed, avant, "bâtir une tranche ne consomme aucun tirage du bac");
+
+  const pièces = bâti(0, [3, 0, 4, 1, 2].map((k): [number, number] => [k * STRIP, (k + 1) * STRIP]));
+  assert.deepEqual(pièces.cells, entier.cells, "cinq tranches dans le désordre : la même grille");
+  assert.deepEqual(pièces.life, entier.life, "… les mêmes `life` (lapins compris)");
+  assert.deepEqual(pièces.noise, entier.noise, "… le même grain");
+  assert.deepEqual(pièces.temp, entier.temp, "… la même température");
+
+  // Deux fenêtres décalées coïncident sur leurs colonnes communes, à gauche de zéro comme à droite.
+  for (const x0 of [STRIP, -2 * STRIP]) {
+    const autre = bâti(x0, [[0, W]]);
+    const d = x0 > 0 ? x0 : -x0;
+    let écarts = 0;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W - d; x++) {
+        const ici = x0 > 0 ? entier.cells[y * W + x + d] : entier.cells[y * W + x];
+        const là = x0 > 0 ? autre.cells[y * W + x] : autre.cells[y * W + x + d];
+        if (ici !== là) écarts++;
+      }
+    }
+    assert.equal(écarts, 0, `fenêtre décalée de ${x0} : mêmes colonnes communes`);
+  }
+
+  for (const id of [STONE, SAND, WATER, WOOD, PLANT, PETROLEUM, LAVA, METAL, URANIUM, RABBIT]) {
+    assert.ok(count(entier, id) > 0, `la tranche contient du ${MATERIALS[id].name.toLowerCase()}`);
+  }
+  assert.equal(count(entier, HERO), 0, "pas de héros : c'est au mode de le poser");
+  let ouvertes = 0, amas = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const id = entier.get(x, y);
+      const près = [entier.get(x - 1, y), entier.get(x + 1, y), entier.get(x, y - 1), entier.get(x, y + 1)];
+      // Les colonnes du bord ont leur voisine hors du bac (lue comme de la pierre) : elle compte comme le reste du monde.
+      if ((id === PETROLEUM || id === LAVA) && !près.every((n) => n === id || n === STONE || n === METAL || n === URANIUM)) ouvertes++;
+      if (id === URANIUM && près.includes(URANIUM)) amas++;
+    }
+  }
+  assert.equal(ouvertes, 0, "pétrole et lave enfermés, tranche par tranche");
+  assert.equal(amas, 0, "l'uranium en grains isolés");
+
+  const posé = entier.cells.slice();
+  for (let t = 0; t < 100; t++) entier.step();
+  let remué = 0;
+  for (let i = 0; i < posé.length; i++) if (posé[i] !== entier.cells[i]) remué++;
+  assert.ok(remué < posé.length / 100, `la tranche naît au repos (${remué} cellules changées en 100 ticks)`);
+}
+
+/**
+ * `shift()`, étape 2 du monde infini : la fenêtre glisse d'un chunk. Sans
+ * glisser **tous** les tableaux (les deux tampons de chaleur et de pression,
+ * les blocs de veille), un bloc endormi se réveillait avec la chaleur d'un
+ * autre endroit, ou ne se réveillait pas sous ce qui venait d'arriver.
+ */
+{
+  // Glisser puis revenir, la bande sortie reposée à la main : tout est à sa place.
+  const W = 640, H = 360, D = 128;
+  const scène = (): Engine => {
+    const e = new Engine(W, H, 5);
+    e.rect(0, 300, W - 1, H - 1, STONE);
+    e.rect(10, 270, 19, 299, STONE);
+    e.rect(101, 270, 110, 299, STONE);
+    e.rect(20, 280, 100, 299, WATER);
+    e.rect(300, 100, 340, 140, SAND);
+    e.rect(400, 280, 440, 299, WOOD);
+    e.paint(420, 279, 2, FIRE);
+    e.rect(560, 40, 600, 90, SAND);
+    e.paint(580, 295, 3, LAVA);
+    for (let t = 0; t < 60; t++) e.step();
+    return e;
+  };
+  const a = scène(), b = scène();
+  const bande = b.copy(0, 0, D - 1, H - 1);
+  const chaud = Array.from({ length: H }, (_, y) => b.temp.slice(y * W, y * W + D));
+  const grain = b.noise.slice();
+  const avant = { cells: b.cells.slice(), life: b.life.slice(), temp: b.temp.slice(), press: b.press.slice(), clock: b.clock.slice() };
+
+  b.shift(D);
+  assert.equal(b.cells[300 * W + 580 - D], avant.cells[300 * W + 580], "la matière glisse de D colonnes vers la gauche");
+  assert.equal(b.temp[295 * W + 580 - D], avant.temp[295 * W + 580], "la chaleur de la lave glisse avec elle");
+  assert.equal(b.cells[300 * W + W - 1], EMPTY, "la bande neuve est vide");
+  assert.equal(b.temp[10 * W + W - 1], b.ambient, "… à l'ambiante");
+  assert.equal(b.noise[10 * W + W - 1], 0, "… sans grain : à l'appelant de le poser");
+  b.shift(-D);
+  b.paste(bande, 0, 0);
+  for (let y = 0; y < H; y++) { b.temp.set(chaud[y], y * W); b.noise.set(grain.subarray(y * W, y * W + D), y * W); }
+  assert.deepEqual(b.cells, avant.cells, "aller-retour : la même matière");
+  assert.deepEqual(b.life, avant.life, "… le même `life`");
+  assert.deepEqual(b.temp, avant.temp, "… la même chaleur");
+  assert.deepEqual(b.press, avant.press, "… la même pression");
+  assert.deepEqual(b.noise, grain, "… le même grain");
+
+  // Et la suite ne s'en ressent pas : le témoin a seulement vu sa bande
+  // réveillée (`paste` sur elle-même), comme `shift()` réveille la sienne.
+  a.paste(a.copy(0, 0, D - 1, H - 1), 0, 0);
+  for (let t = 0; t < 200; t++) { a.step(); b.step(); }
+  assert.deepEqual(b.cells, a.cells, "200 ticks après un aller-retour : la même partie qu'un bac resté en place");
+  assert.deepEqual(b.temp, a.temp, "… la même chaleur");
+  assert.equal(b.seed, a.seed, "… le même tirage");
+
+  assert.throws(() => a.shift(8), "un décalage qui n'est pas un multiple de 16 est refusé");
+  assert.throws(() => a.shift(W), "un décalage d'une fenêtre entière est refusé");
+}
+{
+  // Glisser une fenêtre du monde infini puis bâtir la bande neuve = bâtir la fenêtre d'à côté.
+  const W = 1280, H = 720, G = 4217;
+  const e = new Engine(W, H, 1);
+  e.clear();
+  land(e, G, EXPLORE_SCALE, 0, 0, W);
+  e.shift(STRIP);
+  land(e, G, EXPLORE_SCALE, STRIP, W - STRIP, W);
+  const voisin = new Engine(W, H, 1);
+  voisin.clear();
+  land(voisin, G, EXPLORE_SCALE, STRIP, 0, W);
+  assert.deepEqual(e.cells, voisin.cells, "glisser d'un chunk puis bâtir la bande = la fenêtre d'à côté");
+  assert.deepEqual(e.life, voisin.life, "… lapins compris");
+  assert.deepEqual(e.noise, voisin.noise, "… grain compris");
+  assert.deepEqual(e.temp, voisin.temp, "… chaleur comprise");
+}
+{
+  // Le héros piloté suit le décalage ; coupé par le bord, il est perdu.
+  const W = 320, H = 180;
+  const e = new Engine(W, H, 3);
+  e.rect(0, 100, W - 1, H - 1, STONE);
+  assert.ok(e.spawnHero(200, 98) >= 0, "un héros se pose");
+  e.step();
+  const là = e.hero;
+  e.shift(64);
+  assert.equal(e.hero, là - 64, "l'index du héros glisse avec lui");
+  assert.equal(e.cells[e.hero], HERO, "… et désigne toujours son cœur");
+  e.step();
+  assert.equal(e.cells[e.hero], HERO, "un tick plus tard, il est toujours piloté");
+  e.shift(144);
+  assert.equal(e.hero, -1, "sorti par la gauche, plus de héros piloté");
 }
 
 /**
@@ -1470,6 +1889,32 @@ function top(e: Engine, id: MaterialId): number {
   for (let t = 0; t < HERO_HARM; t++) noyé.step();
   assert.equal(count(noyé, HERO), 0, "mais pas indéfiniment : il se noie");
 
+  // Empilés, le héros du dessous n'a au-dessus de la tête que le corps de celui
+  // du dessus : sans la remontée à travers les créatures, il respirait au fond
+  // de l'eau pendant que l'autre se noyait.
+  const pile = new Engine(W, H, 34);
+  pile.rect(0, SOL, W - 1, H - 1, STONE);
+  pile.rect(0, 5, W - 1, SOL - 1, WATER);
+  pile.paint(10, 24, 1, HERO, 1, true);
+  pile.paint(10, 20, 1, HERO, 1, true);
+  assert.equal(count(pile, HERO), 2, "deux héros empilés en pleine eau");
+  for (let t = 0; t < 60; t++) pile.step();
+  const coeurs = [...pile.cells].flatMap((id, at) => (id === HERO ? [at] : []));
+  assert.equal(coeurs.length, 2, "les deux tiennent encore après une seconde");
+  for (const at of coeurs) {
+    const dégâts = pile.life[at + HERO_SLOTS.harm[0] + HERO_SLOTS.harm[1] * W];
+    assert.ok(dégâts > 40, "chacun des deux manque d'air, pas seulement celui du dessus");
+  }
+
+  // Le sable étouffe aussi, mais sans mouiller : enseveli, il perd de l'air
+  // sans se mettre à nager pour autant.
+  const sous = plaine();
+  tenir(sous, 0, 5);
+  const [hx, hy] = où(sous);
+  sous.rect(hx - 5, hy - 7, hx + 5, hy - 3, SAND);
+  tenir(sous, 0, 60);
+  assert.ok(fiche(sous, HERO_SLOTS.harm) > 40, "enseveli sous le sable, il manque d'air");
+
   const nommé = plaine();
   tenir(nommé, 0, 1);
   const numéro = fiche(nommé, HERO_SLOTS.name);
@@ -1481,6 +1926,48 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(fiche(nommé, HERO_SLOTS.name), numéro, "son corps emporte sa fiche quand il marche");
   assert.ok(fiche(nommé, HERO_SLOTS.dug) > 0, "il compte ce qu'il creuse");
   assert.ok(heroName(nommé, numéro).length > 0, "son nom d'origine vient de la liste");
+
+  // Creuser ramasse : le sable arraché va au sac, et poser puise dans le sac
+  // avant la palette (ici de la pierre).
+  const sac = plaine();
+  sac.rect(14, SOL - 6, 15, SOL - 1, SAND);
+  tenir(sac, PILOT.right | PILOT.dig, 120);
+  assert.equal(fiche(sac, HERO_SLOTS.bag), SAND, "il porte ce qu'il a creusé");
+  const porté = fiche(sac, HERO_SLOTS.load);
+  assert.ok(porté > 0, `et combien (${porté})`);
+  const sable = count(sac, SAND), pierre = count(sac, STONE);
+  applyGesture(sac, { t: "pilot", keys: PILOT.place | PILOT.up | (STONE << 8) });
+  for (let t = 0; t < 30 && fiche(sac, HERO_SLOTS.load) === porté; t++) sac.step();
+  assert.ok(fiche(sac, HERO_SLOTS.load) < porté, "le sac se vide quand il pose");
+  assert.ok(count(sac, SAND) > sable, "il pose le sable de son sac");
+  assert.equal(count(sac, STONE), pierre, "pas la pierre de la palette, tant que le sac n'est pas vide");
+  for (let t = 0; t < 60; t++) sac.step();
+  assert.equal(fiche(sac, HERO_SLOTS.load), 0, "vidé, le sac");
+  assert.ok(count(sac, STONE) > pierre, "puis il pose la pierre de la palette");
+
+  // Deux héros ne partagent pas de numéro : `chosen` en est un, ils obéiraient
+  // ensemble. Le tirage d'avant le prenait de la place du cœur, et deux héros
+  // dont les index sont distants de 250 — ici une marche de quatre rangées —
+  // tombaient tous les deux sur le 1.
+  const paire = new Engine(W, H, 31);
+  paire.rect(0, SOL, W - 1, H - 1, STONE);
+  paire.rect(5, SOL - 4, 15, SOL - 4, STONE);
+  assert.equal(paire.spawnHero(20, SOL - 2), 2000, "un héros sur le sol");
+  assert.equal(paire.spawnHero(10, SOL - 6), 1750, "un autre sur la marche, 250 cellules plus tôt");
+  paire.step();
+  const numéros = [...paire.cells].flatMap((id, at) =>
+    id === HERO ? [paire.life[paire.index(at % W + HERO_SLOTS.name[0], ((at / W) | 0) + HERO_SLOTS.name[1])]] : []);
+  assert.equal(new Set(numéros).size, 2, `deux numéros distincts (${numéros})`);
+  assert.ok(!numéros.includes(0), "et aucun héros sans numéro");
+
+  // Un monde chargé sans état vivant arrive sans numéros : le moteur les rend
+  // au premier tick (`seek`), sinon plus personne n'obéit aux touches.
+  paire.life.fill(0);
+  paire.adopt(paire.cells.slice());
+  paire.step();
+  const rendus = [...paire.cells].flatMap((id, at) =>
+    id === HERO ? [paire.life[paire.index(at % W + HERO_SLOTS.name[0], ((at / W) | 0) + HERO_SLOTS.name[1])]] : []);
+  assert.ok(!rendus.includes(0) && new Set(rendus).size === 2, `renumérotés, toujours distincts (${rendus})`);
   applyGesture(nommé, { t: "name", id: numéro, name: "  Robert le Lapin des Bois  " });
   assert.equal(heroName(nommé, numéro), "Robert le Lapin des", "renommé, sans blancs autour, 20 caractères au plus");
   applyGesture(nommé, { t: "name", id: 999, name: "Pirate" });
@@ -1556,9 +2043,10 @@ function top(e: Engine, id: MaterialId): number {
  * navigateurs : dans le moteur, un salon Chrome + Firefox divergerait ; dans
  * le générateur, une graine ne redonnerait plus le même monde. Aucun test de
  * comportement ne le verrait, tous tournent sous le même V8 : on lit donc la
- * source. `Math.sqrt`, correctement arrondie, reste permise.
+ * source. `Math.sqrt`, correctement arrondie, reste permise ; pour le reste,
+ * sim/libm.ts (sin, cos, atan, atan2, exp, log), qui est lue elle aussi.
  */
-for (const fichier of ["../src/client/sim/engine.ts", "../src/client/terrain.ts"]) {
+for (const fichier of ["../src/client/sim/engine.ts", "../src/client/terrain.ts", "../src/client/sim/explore.ts", "../src/client/sim/libm.ts"]) {
   const source = readFileSync(new URL(fichier, import.meta.url), "utf8");
   const approchées = source.match(/Math\.(hypot|sin|cos|tan|asin|acos|atan2?|sinh|cosh|tanh|exp|expm1|log|log1p|log2|log10|pow|cbrt)\b/g);
   assert.equal(approchées, null, `${fichier} n'emploie aucune fonction Math approchée (${approchées?.join(", ")})`);
@@ -1572,6 +2060,48 @@ const lumière = lighting();
 for (let id = 0; id < 256; id++) {
   const émet = lumière[id * 4] + lumière[id * 4 + 1] + lumière[id * 4 + 2] > 0;
   if (émet) assert.ok(lumière[id * 4 + 3] > 0, `la matière ${id} émet de la lumière, elle doit en arrêter un peu`);
+}
+
+/**
+ * L'éclairage du secours 2D (`FlatLight`) : il ne copie pas le shader, mais il
+ * doit en garder les traits qu'on voit — la lave éclaire autour d'elle, un mur
+ * fait de l'ombre, le noir reste noir, la pierre au bord de la lave prend sa
+ * lumière, et ce qui brille ne se rajoute pas sa propre lumière.
+ */
+{
+  const W2 = 160, H2 = 90;
+  const e = new Engine(W2, H2);
+  e.rect(20, 40, 30, 50, LAVA);
+  e.rect(80, 0, 83, H2 - 1, STONE); // un mur du haut en bas
+  const grid = { width: W2, height: H2, ambient: e.ambient, cells: e.cells, life: e.life, frozen: e.frozen, noise: e.noise, temp: e.temp, press: e.press };
+  const l = new FlatLight();
+  l.compute(grid);
+  const at = (x: number, y: number): number => {
+    const t = (Math.floor(y / l.scale) * l.width + Math.floor(x / l.scale)) * 3;
+    return l.light[t] + l.light[t + 1] + l.light[t + 2];
+  };
+  assert.ok(at(40, 45) > 0.05, `à côté de la lave, de la lumière (${at(40, 45).toFixed(3)})`);
+  assert.ok(at(40, 45) > at(70, 45), "plus loin, moins");
+  assert.ok(at(70, 45) > at(95, 45) * 4, `derrière le mur, l'ombre (${at(70, 45).toFixed(3)} devant, ${at(95, 45).toFixed(3)} derrière)`);
+  assert.ok(at(80, 45) > 0, "le mur, opaque, prend la lumière de son voisin éclairé (sa face côté lave)");
+  assert.equal(at(25, 45), 0, "la lave, qui brille, ne reçoit rien en plus");
+
+  const noir = new Engine(W2, H2);
+  noir.rect(0, 60, W2 - 1, H2 - 1, STONE);
+  l.compute({ ...grid, cells: noir.cells, temp: noir.temp, life: noir.life, frozen: noir.frozen, noise: noir.noise, press: noir.press });
+  assert.ok(l.light.every((v) => v === 0), "sans rien qui émette, pas de lumière");
+
+  // Le mélange : la même cellule, plus claire éclairée, jamais plus sombre.
+  l.compute(grid);
+  const sans = new Renderer(grid), avec = new Renderer(grid);
+  avec.lights = l;
+  sans.draw(); avec.draw();
+  let plusClair = 0;
+  for (let i = 0; i < sans.pixels.length; i++) {
+    assert.ok(avec.pixels[i] >= sans.pixels[i], "l'éclairage ajoute, il n'enlève rien");
+    if (avec.pixels[i] > sans.pixels[i]) plusClair++;
+  }
+  assert.ok(plusClair > 1000, `l'air autour de la lave s'éclaire (${plusClair} canaux)`);
 }
 
 /** Le cycle des heures passe par chaque heure au quart de journée, en boucle, et ne sort pas de [0, 1]. */
@@ -1592,6 +2122,49 @@ for (let s = 0; s < DAY; s += 7) assert.ok(hourTint(s).every((v) => v >= 0 && v 
   r.tint = HOURS.nuit; r.draw();
   assert.ok(r.pixels[2] < jour[2], "la nuit doit assombrir la pierre");
   assert.equal(r.pixels[6], jour[6], "la nuit ne doit pas assombrir la lave");
+}
+
+/**
+ * Le pire cas de chaque matière : un bac **plein d'elle seule**. Il doit
+ * s'endormir (`busy` = 0), sinon il coûte à chaque tick pour toujours — en
+ * 1920×1080, un bac plein d'aimants coûtait 2 s par tick à chercher de la
+ * limaille qui n'y était pas, plein de sel ou de sources 70 à 150 ms.
+ *
+ * Une matière inerte s'endort en quelques ticks (la lave et la glace le temps
+ * de se mettre à l'ambiante). Celles de `WORKS` travaillent vraiment à chaque
+ * tick — c'est leur règle, pas du gaspillage —, mais finissent par s'éteindre.
+ * Une nouvelle matière qui reste éveillée sans rien faire casse ce test : la
+ * faire appeler `wake(i)` quand elle a de quoi agir plutôt que la mettre dans
+ * `ACTIVE` (docs/agents/simulation.md, « Blocs de veille »). Et si elle
+ * travaille vraiment, l'ajouter à `WORKS` avec sa raison.
+ */
+{
+  /** Ticks au plus pour qu'un bac plein d'une matière inerte s'endorme. */
+  const INERT = 30;
+  /** Ticks au plus pour une matière de `WORKS` (l'acide, le plus lent, met ~1500 ticks). */
+  const LONG = 2000;
+  const WORKS: Partial<Record<MaterialId, string>> = {
+    [FIRE]: "brûle et vieillit, puis la chaleur retombe",
+    [SMOKE]: "vieillit", [STEAM]: "vieillit et se condense", [FIREDAMP]: "vieillit", [FALLOUT]: "vieillit",
+    [NANITE]: "vieillit", [EMBER]: "vieillit en fumée, et chauffe",
+    [ACID]: "ronge le bord du bac (hors grille = pierre) et s'use en fumée",
+    [MOLTEN_GLASS]: "refroidit jusqu'à se figer en verre",
+    [URANIUM]: "s'emballe en masse et saute",
+    [RABBIT]: "vit, puis meurt de faim", [RABBIT_BODY]: "sans cœur, le corps se défait", [RABBIT_EYE]: "idem", [RABBIT_TAIL]: "idem",
+    [HERO_HEAD]: "sans cœur, le corps se défait", [HERO_BODY]: "idem", [HERO_LEGS]: "idem",
+  };
+  for (const key of Object.keys(MATERIALS)) {
+    const id = Number(key) as MaterialId;
+    // Le héros ne s'endort jamais : il attend les commandes du joueur (créature, donc `ACTIVE`).
+    if (id === EMPTY || id === HERO) continue;
+    const e = new Engine(64, 64, 1234);
+    e.rect(0, 0, 63, 63, id);
+    const limit = WORKS[id] ? LONG : INERT;
+    let t = 0;
+    while (t < limit && (t === 0 || e.busy > 0)) { e.step(); t++; }
+    assert.equal(e.busy, 0, `un bac plein de ${MATERIALS[id].name} (${id}) doit s'endormir en ${limit} ticks : il reste ${e.busy} blocs éveillés`
+      + (WORKS[id] ? ` (${WORKS[id]})` : " — une matière inerte ne doit pas tenir son bloc éveillé"));
+  }
 }
 
 console.log("ok — simulation conforme");

@@ -28,6 +28,105 @@ export function route(message: string | ArrayBuffer, fromHost: boolean): "guests
   } catch {
     return null;
   }
-  if (fromHost) return type === "start" || type === "turn" ? "guests" : null;
+  // `lock` : l'hôte met les invités en lecture seule (ou les en sort) — c'est
+  // lui qui refuse leurs gestes, le message ne fait que les prévenir.
+  if (fromHost) return type === "start" || type === "turn" || type === "lock" ? "guests" : null;
   return type === "do" || type === "sync" ? "host" : null;
+}
+
+/** Joueurs par salon. Au-delà, un arrivant coûte un départ complet à tous les autres. */
+export const PLACES = 8;
+
+/** Longueur d'un pseudo, en caractères. */
+const NICK = 24;
+
+/**
+ * Le pseudo qu'un joueur annonce en entrant (`?nick=` de l'URL du salon), tel
+ * que les autres le verront : texte seul, sans caractère de contrôle (un saut
+ * de ligne cassait la liste des joueurs), espaces resserrés, 24 caractères au
+ * plus. Vide si rien d'utilisable : la page affiche alors « Joueur N ».
+ */
+export function nick(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return [...raw.replace(/[\p{Cc}\p{Cf}]/gu, "").replace(/\s+/g, " ").trim()].slice(0, NICK).join("");
+}
+
+/**
+ * Un pseudo distinct de ceux déjà pris dans le salon : « Alice », puis
+ * « Alice 2 », « Alice 3 »… (coupé pour tenir dans 24 caractères). Sans ça deux
+ * joueurs portaient le même nom, et la liste ne disait plus qui était qui.
+ * Vide reste vide : la page affiche « Joueur N », déjà distinct par son numéro.
+ */
+export function unique(name: string, taken: string[] | ((name: string) => boolean)): string {
+  const busy = typeof taken === "function" ? taken : (n: string) => taken.includes(n);
+  if (!name || !busy(name)) return name;
+  for (let n = 2; ; n++) {
+    const tail = ` ${n}`;
+    const candidate = [...name].slice(0, NICK - tail.length).join("").trimEnd() + tail;
+    if (!busy(candidate)) return candidate;
+  }
+}
+
+/** Durée pendant laquelle un pseudo reste à qui l'a porté, en ms : trente jours sans revenir, il se libère. */
+export const KEEP = 30 * 24 * 3600 * 1000;
+
+/** Le carnet des pseudos d'un salon : pour chacun, l'empreinte de la clé de qui le porte et sa dernière venue. */
+export type Book = Record<string, { key: string; at: number }>;
+
+/**
+ * Le pseudo qu'obtient un arrivant de clé `key` (empreinte de la clé que son
+ * navigateur garde, room.ts côté page) : le sien s'il est libre — ni porté
+ * dans le salon (`taken`), ni retenu au carnet par une autre clé depuis moins
+ * de `KEEP` —, sinon « Alice 2 »… Le carnet retient ensuite ce pseudo pour
+ * cette clé, et oublie ce qui a passé `KEEP`. Sans clé, rien n'est retenu :
+ * on ne protège pas un nom qu'on ne saurait rendre. Pur : le Durable Object
+ * (room.ts) le range dans son stockage.
+ */
+export function claim(book: Book, name: string, key: string, now: number, taken: string[]): { name: string; book: Book } {
+  const fresh: Book = {};
+  for (const [n, e] of Object.entries(book)) if (now - e.at < KEEP) fresh[n] = e;
+  const got = unique(name, (n) => taken.includes(n) || (fresh[n] !== undefined && fresh[n].key !== key));
+  if (got && key) fresh[got] = { key, at: now };
+  return { name: got, book: fresh };
+}
+
+/** Le plus petit numéro de joueur libre, de 1 à `PLACES` : il donne sa couleur au curseur, et se recycle quand un joueur part. */
+export function freeId(taken: number[]): number {
+  for (let id = 1; id <= PLACES; id++) if (!taken.includes(id)) return id;
+  return 0;
+}
+
+/** Plus grande coordonnée de cellule acceptée : la plus grande grille du menu fait 1920 de large. */
+const FAR = 4096;
+
+/**
+ * Le curseur d'un joueur, refait par le salon avant d'être relayé à tous les
+ * autres : c'est le salon qui y met le numéro de l'émetteur (`id`), sinon un
+ * joueur pourrait déplacer le curseur d'un autre. Des cellules entières, ou
+ * -1, -1 quand il a quitté le bac. Rien d'autre ne passe : le curseur ne
+ * touche pas la grille, il ne peut donc pas faire diverger le lockstep, mais
+ * il est relayé à tout le monde, invités compris.
+ */
+export function cursor(message: string | ArrayBuffer, id: number): string | null {
+  if (typeof message !== "string" || message.length > 200) return null;
+  let msg: { type?: unknown; x?: unknown; y?: unknown } | null;
+  try {
+    msg = JSON.parse(message) as typeof msg;
+  } catch {
+    return null;
+  }
+  if (msg?.type !== "cursor") return null;
+  const { x, y } = msg;
+  const inside = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0 && (v as number) < FAR;
+  const away = x === -1 && y === -1;
+  if (!away && !(inside(x) && inside(y))) return null;
+  return JSON.stringify({ type: "cursor", id, x, y });
+}
+
+/** Un joueur tel que le salon le connaît : rangé dans la pièce jointe de son socket. */
+export interface Player { host: boolean; id: number; name: string }
+
+/** La liste des joueurs, envoyée à tous à chaque arrivée, départ ou changement d'hôte. */
+export function roster(players: Player[]): string {
+  return JSON.stringify({ type: "roster", players: players.map(({ id, name, host }) => ({ id, name, host })) });
 }

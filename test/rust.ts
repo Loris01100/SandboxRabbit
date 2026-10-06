@@ -19,15 +19,19 @@
  * incomplets à droite et en bas ; son ambiante -0 vérifie le +0 qu'écrit
  * `flat()`.
  *
+ * Puis la pression (`breathe()` contre `air()` de lib.rs) sur une salve
+ * d'explosions, voir en fin de fichier.
+ *
  * Rien ici ne garde de budget ni n'échoue sur un temps : c'est un instrument
  * de décision, comme `npm run directions`. Il échoue seulement si le `.wasm`
  * manque, ou si une version annoncée exacte ne l'est pas.
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { Engine } from "../src/client/sim/engine.ts";
+import { Engine, OPEN } from "../src/client/sim/engine.ts";
+import { atan, atan2, cos, exp, log, sin } from "../src/client/sim/libm.ts";
 import {
-  ALCOHOL, CEMENT, FIRE, ICE, LAVA, MATERIALS, MERCURY, NITROGEN, SALTWATER, SAND, SNOW, STONE, WATER, WAX, WOOD,
+  ALCOHOL, CEMENT, FIRE, ICE, LAVA, MATERIALS, MERCURY, NITROGEN, SALTWATER, SAND, SMOKE, SNOW, STONE, WATER, WAX, WOOD,
 } from "../src/client/sim/materials.ts";
 
 const RUNS = 30;
@@ -258,3 +262,210 @@ ${name} — ${W}×${H}, ${(awake * 100).toFixed(0)} % des blocs éveillés`);
 
 // Sans changement d'état, `convert()` côté Rust ne serait vérifié par rien.
 assert.ok(conversions > 100, `trop peu de changements d'état comparés (${conversions}) : la fonderie ne joue plus son rôle`);
+
+/*
+ * La pression de l'air (`breathe()` d'engine.ts, `air()` de lib.rs), sur une
+ * salve d'explosions au-dessus du chantier : la passe ne tourne que là où un
+ * souffle a laissé de la pression, c'est donc sa pire charge. Deux tailles,
+ * dont une pas multiple de 16 (blocs incomplets à droite et en bas).
+ */
+
+/** Ce que `breathe()` lit et écrit. */
+interface Windy {
+  press: Float32Array;
+  pressNext: Float32Array;
+  windX: Float32Array;
+  windY: Float32Array;
+  hush: Uint8Array;
+  awake: Uint8Array;
+  stir: Uint8Array;
+  control: Int32Array;
+  breathe(): void;
+}
+
+/** Le chantier tassé 50 ticks, une nappe de fumée au-dessus, et une salve de charges qui sautent au même tick. */
+function volley(e: Engine): void {
+  worksite(e);
+  for (let t = 0; t < 50; t++) e.step();
+  const { width: W } = e;
+  e.rect(0, 0, W - 1, 30, SMOKE, false);
+  for (let x = 60; x < W; x += 120) e.explode(x, 60, 7);
+}
+
+// Le mode SIMD (f64×2) mesurait l'ancienne diffusion : il n'a pas été refait
+// pour l'élan de l'air (docs/rust.md). Reste la copie cellule par cellule.
+const AIR_MODES = [
+  { mode: 0, name: "Rust, f64 (copie)" },
+];
+const GUST = 8; // CTL.gust d'engine.ts
+
+for (const [name, W, H] of [["salve", 1920, 1080], ["salve", 1917, 1077]] as const) {
+  const N = W * H, chunks = Math.ceil(W / 16) * Math.ceil(H / 16);
+  const { instance } = await WebAssembly.instantiate(readFileSync(WASM));
+  const x = instance.exports as {
+    memory: WebAssembly.Memory;
+    reserve(bytes: number): number;
+    air(...args: number[]): number;
+  };
+  const at = {
+    cells: x.reserve(N), press: x.reserve(N * 4), next: x.reserve(N * 4), windX: x.reserve(N * 4), windY: x.reserve(N * 4), awake: x.reserve(chunks),
+    stir: x.reserve(chunks), hush: x.reserve(chunks), jobs: x.reserve(chunks * 4), open: x.reserve(256),
+  };
+  const b = x.memory.buffer;
+  const v = {
+    cells: new Uint8Array(b, at.cells, N), press: new Float32Array(b, at.press, N), next: new Float32Array(b, at.next, N),
+    windX: new Float32Array(b, at.windX, N), windY: new Float32Array(b, at.windY, N),
+    awake: new Uint8Array(b, at.awake, chunks), stir: new Uint8Array(b, at.stir, chunks), hush: new Uint8Array(b, at.hush, chunks),
+  };
+  new Uint8Array(b, at.open, 256).set(OPEN);
+
+  const engine = new Engine(W, H, 5);
+  volley(engine);
+  engine.step();
+  const e = engine as unknown as Windy & Inner;
+  const take = () => ({
+    cells: e.cells.slice(), press: e.press.slice(), next: e.pressNext.slice(), windX: e.windX.slice(), windY: e.windY.slice(), hush: e.hush.slice(),
+    awake: e.awake.slice(), stir: e.stir.slice(),
+  });
+  let start = take();
+  const refs = { press: e.press, next: e.pressNext };
+  const restore = () => {
+    e.press = refs.press; e.pressNext = refs.next;
+    e.press.set(start.press); e.pressNext.set(start.next); e.windX.set(start.windX); e.windY.set(start.windY);
+    e.hush.set(start.hush); e.stir.set(start.stir); e.awake.set(start.awake);
+    Atomics.store(e.control, GUST, 1);
+  };
+  const load = () => {
+    v.cells.set(start.cells); v.press.set(start.press); v.next.set(start.next); v.windX.set(start.windX); v.windY.set(start.windY);
+    v.awake.set(start.awake); v.stir.set(start.stir); v.hush.set(start.hush);
+  };
+  const run = (_mode: number) => x.air(W, H, at.cells, at.press, at.next, at.windX, at.windY, at.awake, at.stir, at.hush, at.jobs, at.open);
+
+  let js = 0;
+  for (let r = 0; r < RUNS; r++) {
+    restore();
+    const t0 = performance.now();
+    e.breathe();
+    js += performance.now() - t0;
+  }
+  js /= RUNS;
+  const time = AIR_MODES.map(({ mode }) => {
+    let sum = 0;
+    for (let r = 0; r < RUNS; r++) {
+      load();
+      const t0 = performance.now();
+      run(mode);
+      sum += performance.now() - t0;
+    }
+    return sum / RUNS;
+  });
+  let tick = 0;
+  restore();
+  for (let t = 0; t < 5; t++) {
+    const t0 = performance.now();
+    engine.step();
+    tick += performance.now() - t0;
+  }
+  tick /= 5;
+
+  const awake = start.awake.reduce((n, a) => n + (a ? 1 : 0), 0) / chunks;
+  console.log(`
+${name} (pression) — ${W}×${H}, ${(awake * 100).toFixed(0)} % des blocs éveillés`);
+  console.log(`  tick complet (JS)        ${ms(tick)}`);
+  console.log(`  breathe() JavaScript     ${ms(js)}   (${((js / tick) * 100).toFixed(0)} % du tick)`);
+
+  const diff = AIR_MODES.map(() => 0);
+  let windy = 0;
+  for (let k = 0; k < CHECKS; k++) {
+    if (k > 0) {
+      engine.step();
+      start = take();
+      refs.press = e.press; refs.next = e.pressNext;
+    }
+    restore();
+    e.breathe();
+    const gust = Atomics.load(e.control, GUST);
+    const expected = { press: e.press.slice(), next: e.pressNext.slice(), windX: e.windX.slice(), windY: e.windY.slice(), stir: e.stir.slice(), hush: e.hush.slice() };
+    for (const p of expected.press) if (p > 0) windy++;
+    AIR_MODES.forEach(({ mode }, m) => {
+      load();
+      const g = run(mode);
+      diff[m] += gap(expected.press, v.next).count + gap(expected.next, v.press).count
+        + gap(expected.windX, v.windX).count + gap(expected.windY, v.windY).count
+        + gap(expected.stir, v.stir).count + gap(expected.hush, v.hush).count + (g === gust ? 0 : 1);
+    });
+    restore();
+  }
+  assert.ok(windy > 10_000, `la salve doit laisser de la pression à comparer (${windy} cellules)`);
+  console.log(`  ${CHECKS} ticks comparés, ${windy} cellules sous pression`);
+  AIR_MODES.forEach(({ name: label }, m) => {
+    const same = diff[m] === 0;
+    console.log(`  ${label.padEnd(24)} ${ms(time[m])}   ×${(js / time[m]).toFixed(2)}   ${same ? "identique au bit près" : `${diff[m]} cases différentes`}`);
+    assert.ok(same, `${label} doit rendre exactement la pression de JavaScript (${name} ${W}×${H})`);
+  });
+}
+
+/*
+ * Les fonctions mathématiques déterministes (src/client/sim/libm.ts) contre la
+ * crate Rust `libm` dont elles sont la copie : les mêmes bits, argument par
+ * argument, NaN compris. Un million d'arguments par fonction, dont des doubles
+ * tirés bit à bit (tous les exposants, sous-normaux compris) et les voisins
+ * des multiples de π/4, là où la réduction d'argument change de branche.
+ */
+{
+  const N = 1 << 20;
+  const { instance } = await WebAssembly.instantiate(readFileSync(WASM));
+  const x = instance.exports as { memory: WebAssembly.Memory; reserve(bytes: number): number; math(...args: number[]): void };
+  const at = { xs: x.reserve(N * 8), ys: x.reserve(N * 8), out: x.reserve(N * 8) };
+  const b = x.memory.buffer;
+  const xs = new Float64Array(b, at.xs, N), ys = new Float64Array(b, at.ys, N), out = new Float64Array(b, at.out, N);
+
+  let s = 777;
+  const next = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s; };
+  const u = () => next() / 0x1_0000_0000;
+  const scratch = new Float64Array(1), words = new Uint32Array(scratch.buffer);
+  /** Un double quelconque, tiré bit à bit : NaN, infinis et sous-normaux compris. */
+  const anyDouble = () => { words[0] = next(); words[1] = next(); return scratch[0]; };
+  /** Voisin d'un multiple de π/4, jusqu'au 1 000ᵉ : la réduction y perd le plus de bits. */
+  const nearQuarter = () => {
+    const k = Math.floor(u() * 2000) - 1000, v = k * (Math.PI / 4);
+    return v + (Math.floor(u() * 64) - 32) * Number.EPSILON * Math.max(1, Math.abs(v));
+  };
+  /** Dans le domaine de sin et cos (au-delà, NaN assumé côté TypeScript). */
+  const trig = (): number => {
+    const r = u();
+    if (r < 0.3) return nearQuarter();
+    if (r < 0.6) return (u() * 2 - 1) * 10;
+    if (r < 0.8) return (u() * 2 - 1) * 1_647_000;
+    const v = anyDouble();
+    return Math.abs(v) < 1_647_000 || !Number.isFinite(v) ? v : v % 1_647_000; // `%` est exact
+  };
+  const wide = (range: number) => (): number => (u() < 0.5 ? anyDouble() : (u() * 2 - 1) * range);
+
+  const OPS: [string, number, (a: number, b: number) => number, () => number][] = [
+    ["sin", 0, (a) => sin(a), trig],
+    ["cos", 1, (a) => cos(a), trig],
+    ["atan", 2, (a) => atan(a), wide(10)],
+    ["exp", 3, (a) => exp(a), wide(750)],
+    ["log", 4, (a) => log(a), wide(1e6)],
+    ["atan2", 5, (a, c) => atan2(c, a), wide(100)],
+  ];
+  console.log(`\nfonctions mathématiques — ${N} arguments chacune, TypeScript contre la crate libm`);
+  for (const [name, op, ours, draw] of OPS) {
+    for (let i = 0; i < N; i++) { xs[i] = draw(); ys[i] = draw(); }
+    const t0 = performance.now();
+    x.math(op, at.xs, at.ys, at.out, N);
+    const rust = performance.now() - t0;
+    let differ = 0, first = "";
+    const t1 = performance.now();
+    for (let i = 0; i < N; i++) {
+      const r = ours(xs[i], ys[i]);
+      if (Object.is(r, out[i]) || (r !== r && out[i] !== out[i])) continue;
+      if (!differ) first = `${name}(${op === 5 ? `${ys[i]}, ` : ""}${xs[i]}) : ${r} contre ${out[i]}`;
+      differ++;
+    }
+    const js = performance.now() - t1;
+    console.log(`  ${name.padEnd(6)} TS ${ms(js).padStart(9)}   Rust ${ms(rust).padStart(9)}   ${differ ? `${differ} différences` : "identique au bit près"}`);
+    assert.equal(differ, 0, `libm.ts doit rendre les bits de la crate libm — premier écart : ${first}`);
+  }
+}

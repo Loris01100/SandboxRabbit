@@ -24,7 +24,7 @@ import { EMPTY, LAVA, METAL, PETROLEUM, PLANT, SAND, STONE, URANIUM, WATER, WOOD
 export const SEEDS = 999_999;
 
 /** Bruit de valeur en un point entier du réseau, dans [0, 1). Un hachage, pas un état : lisible dans n'importe quel ordre. */
-function lattice(seed: number, x: number, y: number): number {
+export function lattice(seed: number, x: number, y: number): number {
   let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ Math.imul(seed, 0x9e3779b1);
   h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
@@ -48,12 +48,52 @@ function fbm(seed: number, x: number, y: number): number {
 }
 
 /** Ce qu'une poche de liquide peut toucher sans se déverser. */
-const SEALS = new Set<MaterialId>([STONE, METAL, URANIUM]);
+export const SEALS = new Set<MaterialId>([STONE, METAL, URANIUM]);
+
+/** Ce qui ne dépend que de la graine, de la hauteur et de l'échelle : partagé par `terrain()` et `land()`. */
+export interface Plan {
+  seed: number;
+  h: number;
+  /** Échelle des formes. */
+  s: number;
+  /** Côté d'une maille de bruit, en cellules : les formes gardent leur taille relative au bac (ou fixe, avec une échelle donnée). */
+  cell: number;
+  /** Niveau de la mer : l'eau remplit les creux du relief jusque-là. */
+  sea: number;
+  /** Nappe : sous elle, une grotte est noyée. */
+  table: number;
+}
+
+export function plan(seed: number, h: number, s: number): Plan {
+  return { seed, h, s, cell: 40 * s, sea: Math.round(h * 0.47), table: Math.round(h * 0.72) };
+}
+
+/** Hauteur du sol de la colonne `x` du monde. */
+export function surface(p: Plan, x: number): number {
+  return Math.round(p.h * (0.36 + 0.9 * (fbm(p.seed, x / (p.cell * 4), 0.5) - 0.5)));
+}
+
+/** Matière de (x, y) sous la surface `top`, avant scellement des poches : sable sur `soil` cellules, puis pierre, grottes, pétrole, lave, métal. */
+export function under(p: Plan, x: number, y: number, top: number, soil: number): MaterialId {
+  const { seed, h, s, cell, table } = p;
+  const depth = y - top;
+  if (depth < soil) return SAND;
+  if (depth <= 8 * s) return STONE;
+  const dig = fbm(seed + 10, x / cell, y / cell);
+  const deep = (y - top) / (h - top);
+  if (dig > 0.62 - 0.08 * deep) return y >= table ? WATER : EMPTY;
+  if (y > h * 0.5 && y < h * 0.78 && fbm(seed + 20, x / (cell / 2), y / (cell / 2)) > 0.74) return PETROLEUM;
+  if (y > h * 0.84 && dig < 0.42 && fbm(seed + 30, x / (cell / 2), y / (cell / 2)) > 0.7) return LAVA;
+  if (fbm(seed + 40, x / (cell / 4), y / (cell / 4)) > 0.76) return METAL;
+  return STONE;
+}
 
 /**
- * Bâtit le monde de la graine `seed` sur un bac vidé. Les distances sont en
- * fraction de la hauteur (`h`) : un monde 1920×1080 est le même que son
- * 320×180, en plus fin et plus large.
+ * Bâtit le monde de la graine `seed` sur un bac vidé. Par défaut, les
+ * distances sont en fraction de la hauteur (`h`) : un monde 1920×1080 est le
+ * même que son 320×180, en plus fin et plus large. `scale` les fixe à la place
+ * (`EXPLORE_SCALE`) : les étages (mer, nappe, pétrole, lave) restent en
+ * fraction de `h`, seules les formes gardent une taille en cellules.
  *
  * Trois passes. Le relief et le sous-sol, colonne par colonne. Puis les
  * poches de pétrole et de lave sont refermées : une cellule qui touche autre
@@ -63,18 +103,13 @@ const SEALS = new Set<MaterialId>([STONE, METAL, URANIUM]);
  * jusqu'à sauter), les arbres, les touffes et les lapins sur le sable sec —
  * et le héros, au sec le plus près du centre.
  */
-export function terrain(e: Engine, seed: number): void {
+export function terrain(e: Engine, seed: number, scale?: number): void {
   const { width: w, height: h } = e;
-  const s = h / 180;
-  /** Côté d'une maille de bruit, en cellules : les formes gardent leur taille relative au bac. */
-  const cell = 40 * s;
-  const sea = Math.round(h * 0.47);
-  const table = Math.round(h * 0.72);
+  const p = plan(seed, h, scale ?? h / 180);
+  const { s, sea } = p;
 
   const ground = new Int32Array(w);
-  for (let x = 0; x < w; x++) {
-    ground[x] = Math.round(h * (0.36 + 0.9 * (fbm(seed, x / (cell * 4), 0.5) - 0.5)));
-  }
+  for (let x = 0; x < w; x++) ground[x] = surface(p, x);
 
   for (let x = 0; x < w; x++) {
     const top = ground[x];
@@ -82,16 +117,7 @@ export function terrain(e: Engine, seed: number): void {
     const soil = flat ? Math.round(3 * s) + 1 : 0;
     for (let y = sea; y < top; y++) e.set(x, y, WATER);
     for (let y = top; y < h; y++) {
-      const depth = y - top;
-      let id: MaterialId = depth < soil ? SAND : STONE;
-      if (id === STONE && depth > 8 * s) {
-        const dig = fbm(seed + 10, x / cell, y / cell);
-        const deep = (y - top) / (h - top);
-        if (dig > 0.62 - 0.08 * deep) id = y >= table ? WATER : EMPTY;
-        else if (y > h * 0.5 && y < h * 0.78 && fbm(seed + 20, x / (cell / 2), y / (cell / 2)) > 0.74) id = PETROLEUM;
-        else if (y > h * 0.84 && dig < 0.42 && fbm(seed + 30, x / (cell / 2), y / (cell / 2)) > 0.7) id = LAVA;
-        else if (fbm(seed + 40, x / (cell / 4), y / (cell / 4)) > 0.76) id = METAL;
-      }
+      const id = under(p, x, y, top, soil);
       if (id !== EMPTY) e.set(x, y, id);
     }
   }
@@ -153,3 +179,4 @@ export function terrain(e: Engine, seed: number): void {
     if (ground[x] < sea && e.spawnHero(x, ground[x] - 2) >= 0) break;
   }
 }
+

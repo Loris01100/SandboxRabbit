@@ -13,38 +13,41 @@
  * fichier à part embarquait une seconde copie du moteur : 35 Ko de plus à
  * télécharger.
  */
-import { Sandbox, type News, type Order } from "./sandbox.ts";
+import { SLICE, Sandbox, type News, type Order } from "./sandbox.ts";
+import { recycle } from "./render.ts";
 import { Pool, serve, type Helper } from "./pool.ts";
 
 // `self` typé à la main : le projet compile avec la lib DOM, pas celle des
 // Workers (les deux se contredisent sur la moitié des noms globaux).
 const worker = self as unknown as {
   postMessage(message: unknown, transfer?: Transferable[]): void;
-  onmessage: ((e: { data: Order | { t: "start"; w: number; h: number } | Parameters<typeof serve>[0] }) => void) | null;
+  onmessage: ((e: { data: Order | { t: "start"; w: number; h: number } | { t: "pace"; ms: number } | { t: "spare"; buffer: unknown } | Parameters<typeof serve>[0] }) => void) | null;
 };
 
 let bac: Sandbox | null = null;
 let last = performance.now();
 
-/** Les bandes d'une frame sont **transférées** : chacun de leurs tableaux a son tampon, que la page reçoit sans copie. */
+/**
+ * Les bandes d'une frame sont **transférées** : la page reçoit leur tampon sans
+ * copie. Un seul par frame (`Tracker.take()`), et il ne doit figurer qu'une fois
+ * dans la liste — deux fois, `postMessage` jette.
+ */
 function tell(news: News): void {
-  const buffers = news.t !== "frame" ? [] : news.patches.flatMap((p) => {
-    const own = [p.cells.buffer, p.life.buffer, p.frozen.buffer, p.temp.buffer];
-    if (p.noise) own.push(p.noise.buffer);
-    return own as ArrayBuffer[];
-  });
+  const buffers = news.t !== "frame" ? [] : [...new Set(news.patches.map((p) => p.cells.buffer as ArrayBuffer))];
   worker.postMessage(news, buffers);
 }
 
 /**
  * Les fils auxiliaires du moteur (pool.ts), si la page est isolée — sinon pas
  * de mémoire partagée, et le moteur fait tout sur ce fil, au même résultat.
- * Autant que de cœurs, moins deux (la page et ce fil-ci), sept au plus : au-delà
- * la mémoire sature et le gain s'arrête (`npm run directions`).
+ * Autant que de cœurs, moins deux (la page et ce fil-ci), quatorze au plus.
+ * Le plafond était de sept, mesuré sur une scène où la mémoire sature ; mais un
+ * bac 1920×1080 plein de nanites, où tout calcule, passe encore de 28 ms le
+ * tick à 7 fils à 19 ms à 15 (16 cœurs). Au-delà de 16 cœurs, pas mesuré.
  */
 function helpers(): Pool | null {
   const scope = self as unknown as { crossOriginIsolated?: boolean; navigator: { hardwareConcurrency?: number } };
-  const count = Math.min(7, (scope.navigator.hardwareConcurrency ?? 1) - 2);
+  const count = Math.min(14, (scope.navigator.hardwareConcurrency ?? 1) - 2);
   if (!scope.crossOriginIsolated || count < 1) return null;
   const list = Array.from({ length: count }, (): Helper => {
     const w = new Worker(import.meta.url, { type: "module" });
@@ -64,15 +67,28 @@ worker.onmessage = (e) => {
     loop();
     return;
   }
+  // La page a mesuré son écran, ou le joueur a limité les images (world.ts) :
+  // borné ici aussi, un nombre venu d'ailleurs ne doit pas faire tourner la
+  // boucle à vide.
+  if (message.t === "pace") {
+    if (Number.isFinite(message.ms)) period = Math.min(Math.max(message.ms, 1000 / 240), 1000 / 30);
+    return;
+  }
+  // La page rend le tampon des bandes qu'elle a posées : il resservira.
+  if (message.t === "spare") {
+    if (message.buffer instanceof ArrayBuffer) recycle(message.buffer);
+    return;
+  }
   bac?.order(message);
 };
 
-const PERIOD = 1000 / 60;
+/** L'écart visé entre deux frames : 60 Hz jusqu'à ce que la page dise la fréquence de son écran ou sa limite (`pace`). */
+let period = 1000 / 60;
 /** L'heure à laquelle la prochaine frame est due. */
 let due = performance.now();
 
 /**
- * ~60 Hz. Le vrai rythme, c'est le temps écoulé : le bac fait ses comptes avec.
+ * Au rythme de l'écran (60 Hz par défaut, 240 au plus, 30 au moins). Le vrai rythme, c'est le temps écoulé : le bac fait ses comptes avec.
  * On vise une échéance fixe plutôt qu'un délai après le travail : attendre
  * 16,7 ms *après* une frame qui en coûte 10 ne livrait que ~37 images par
  * seconde. En retard de plus d'une frame (onglet en veille, tick trop lourd), on
@@ -87,11 +103,13 @@ function loop(): void {
   // exception du moteur arrêtait la boucle pour de bon — plus un tick, plus une
   // image, jusqu'au rechargement de la page.
   try {
-    bac?.frame(elapsed);
+    // Une frame deux fois plus longue (limite à 30 images) simule deux fois
+    // plus longtemps : sans ça, un bac chargé ralentissait de moitié.
+    bac?.frame(elapsed, SLICE * Math.max(1, period / (1000 / 60)));
   } finally {
-    due += PERIOD;
+    due += period;
     const after = performance.now();
-    if (due < after - PERIOD) due = after;
+    if (due < after - period) due = after;
     setTimeout(loop, Math.max(0, due - after));
   }
 }

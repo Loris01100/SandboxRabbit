@@ -7,8 +7,10 @@ a bougé).
 ## Ajouter une matière
 
 1. Une constante d'id dans [materials.ts](../../src/client/sim/materials.ts),
-   à la suite (la dernière est `RABBIT_TAIL = 50`). **Ne jamais renuméroter** : les
-   ids sont écrits dans les mondes sauvegardés.
+   à la suite (la dernière est `RUST = 56`). **Ne jamais renuméroter** : les
+   ids sont écrits dans les mondes sauvegardés. Reporter l'id dans la table
+   gelée `IDS` de [test/rules.ts](../../test/rules.ts), qui le réclame — c'est
+   elle qui interdit la renumérotation.
 2. Son entrée dans `MATERIALS` : `id`, `name`, `kind`, `density`, `color`,
    `noise`, `hint` (en français), plus au besoin `flammable`, `life` (≤ 250),
    `spread`, `heat`, `spawn`, `boil`, `freeze`.
@@ -22,9 +24,12 @@ a bougé).
    `paint()` / `rect()`. Le lapin et le héros en sont les deux exemples, décrits
    dans [simulation.md](simulation.md#créatures--le-lapin).
    Si elle agit sans que rien ne bouge autour d'elle (compteur, tirage qui
-   finit par réussir) : son id dans la liste `ACTIVE` d'engine.ts — les gaz et
-   les créatures y sont d'office. Sinon son bloc s'endort et elle se fige (voir
-   [Blocs de veille](simulation.md#blocs-de-veille)).
+   finit par réussir) : `this.wake(i)` dans sa règle quand elle a de quoi agir
+   (l'acide, le sel, la pile, l'aimant), ou, si elle agit à chaque tick quoi
+   qu'il arrive (un compteur de vie), son id dans la liste `ACTIVE` d'engine.ts
+   — les gaz et les créatures y sont d'office. Sinon son bloc s'endort et elle
+   se fige (voir [Blocs de veille](simulation.md#blocs-de-veille)). Mesurer
+   son pire cas : un bac 1920×1080 plein d'elle seule, `node --cpu-prof`.
 5. Un bloc d'`assert` dans [test/sim.ts](../../test/sim.ts) qui prouve son
    comportement. La forme de l'entrée est déjà relue par l'assert du
    registre : clé = `id`, `life` ≤ 250, couleur en trois canaux 0..255,
@@ -36,7 +41,8 @@ a bougé).
    d'après son `kind` : un solide ou une poudre fait de l'ombre, un liquide
    atténue, un gaz laisse passer.
 7. Une ligne dans le tableau « Ce qui se passe quand on mélange » du
-   [README](../../README.md), et mettre à jour le compte de matières en tête.
+   [README](../../README.md), et, en tête, le compte de matières **et** son nom
+   dans l'énumération : test/rules.ts compare cette liste à la palette.
 
 Un changement d'état seul (fondre, geler, prendre) = `boil` / `freeze`, aucune
 ligne dans le moteur. Voir le ciment ou le verre fondu.
@@ -58,7 +64,8 @@ ligne dans le moteur. Voir le ciment ou le verre fondu.
   lancer, et y ajouter la nouvelle matière si sa scène ne la réveille pas.
 - Écrire directement dans `cells` / `life` / `temp` (hors `set`, `swap`,
   `convert`…) : `this.wake(i)` à côté, sinon le bloc voisin endormi ne le voit
-  pas. Une règle qui agit sans changement autour : son id dans `ACTIVE`.
+  pas. Une règle qui agit sans changement autour : `this.wake(i)` quand elle a
+  de quoi agir, ou son id dans `ACTIVE` si elle agit à chaque tick.
 - L'empreinte de test/sim.ts va très probablement changer : voir
   [tests.md](tests.md#lempreinte-du-moteur).
 
@@ -66,7 +73,9 @@ ligne dans le moteur. Voir le ciment ou le verre fondu.
 
 Lui trouver un **déclencheur** qui n'existe pas encore (voir
 [simulation.md](simulation.md#explosifs--un-déclencheur-chacun)), réutiliser
-`explode()` pour le souffle. S'il doit survivre à une chaîne, le préserver sur
+`explode()` pour le souffle : sa règle appelle `this.blast(x, y)`, et son rayon
+va dans la table `BLAST` d'engine.ts (+ 256 pour des retombées) — sans sa ligne,
+sa demande est ignorée. S'il doit survivre à une chaîne, le préserver sur
 le pourtour d'`explode()` comme `TNT` et `C4`.
 
 ## Ajouter un défi
@@ -90,6 +99,11 @@ n'exprime pas : une entrée dans `CHALLENGES` de
 Les boutons, le chrono, le record et la détection (toutes les 500 ms, dans le
 Worker) sont génériques. test/sim.ts construit déjà chaque défi : vérifier
 qu'il ne démarre pas gagné. Mettre à jour la liste des défis du README.
+**Ajouter son nom à `TRIALS`** d'[app.ts](../../src/worker/app.ts), la liste
+des défis qui ont un classement : test/api.ts échoue tant qu'elle diffère de
+`CHALLENGES`. `build` ne doit pas tirer au sort : le juge du classement
+(sim/verdict.ts) le rebâtit dans un moteur neuf et compare la grille au
+départ du rejeu.
 `scene()` de sandbox.ts bâtit un défi à 20 °C (`AMBIENT`), l'ambiante du
 panneau rendue ensuite : `build` n'a pas à s'en soucier.
 
@@ -132,6 +146,10 @@ Rappel : ce qui transite est cloné (clone structuré), pas partagé.
 3. S'il change la simulation : `set({…})` de world.ts et un champ dans
    `Knobs`. S'il doit être retenu : l'ajouter à `SAVED` (settings.ts), qui
    l'écrit dans le blob `sandbox-rabbit:reglages` et le rejoue à `restore()`.
+   Le blob range chaque réglage sous l'`id` de son contrôle : **renommer cet
+   `id`**, c'est ajouter `"nouvel-id": ["ancien-id"]` à `RENAMED`
+   (settings.ts), sinon le réglage repart au défaut chez tous ceux qui
+   l'avaient changé.
 4. Pas de `style=` ni de `<script>` en ligne (CSP) : passer par
    [style.css](../../src/client/style.css) ou le CSSOM.
 5. Toute logique pure (calcul, parsing) va dans
@@ -196,3 +214,22 @@ app.ts (binding optionnel `?` s'il est absent en local ou en test), puis
 comme absent (valeur par défaut) par les mondes d'avant ; ne jamais changer le
 sens d'un bloc existant. Vérifier dans test/sim.ts qu'une chaîne de l'ancien
 format se relit toujours.
+
+## Décoder une pile de production
+
+Un rapport d'erreur (journaux du Worker, filtre `message = "erreur joueur"`)
+cite le bundle minifié : `index-AbC123.js:1:48213`.
+
+1. Se placer sur **le commit déployé** : les cartes de sources ne sont
+   jamais publiées, on reconstruit le même code. Le nom haché du fichier le
+   garantit — `npm run pile` dit quand un fichier cité manque au build.
+2. Copier la pile dans un fichier, puis `npm run pile < pile.txt`
+   ([test/pile.ts](../../test/pile.ts)) : il lance `vite build` avec
+   `SOURCEMAP=hidden`, lit les cartes des fichiers cités, **les efface** de
+   `dist/`, et réécrit chaque ligne avec son `fichier.ts:ligne:colonne`.
+   Sous Windows, passer par l'entrée standard : npm coupe un argument à son
+   premier saut de ligne.
+
+Ce qu'on oublie : `dist/` est alors un build de ce commit-là. Ne pas lancer
+`wrangler deploy` dessus sans `npm run build` ; et ne jamais garder une carte
+dans `dist/` (`hidden` n'empêche que le lien vers elle, pas son envoi).

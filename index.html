@@ -42,6 +42,9 @@
              touchent pas au rendu et suivent le zoom sans le savoir. -->
         <div id="ring" class="overlay" hidden aria-hidden="true"></div>
         <div id="marquee" class="overlay" hidden aria-hidden="true"></div>
+        <!-- Les curseurs des autres joueurs d'un salon (room.ts), posés comme
+             le cadre du héros : en pixels de la scène, hors du rendu. -->
+        <div id="peers" aria-hidden="true"></div>
       </div>
 
       <aside class="panel">
@@ -114,6 +117,7 @@
           </label>
           <div class="buttons">
             <button id="terrain" type="button" title="Un monde généré : relief, lacs, grottes, pétrole, lave — la même graine redonne le même monde">Nouveau monde 🗺️</button>
+            <button id="explore" type="button" title="Prototype : un monde 1280×720 au décor à taille fixe, vu de près sur le héros">Explorer 🧭</button>
             <button id="surprise" type="button" title="Un décor tiré au sort">Surprise 🎲</button>
             <button id="full" type="button" title="Le bac en plein écran">Plein écran</button>
             <button id="clear" type="button">Vider</button>
@@ -192,6 +196,10 @@
             <span>Vue thermique <kbd>h</kbd> : bleu = froid, blanc = 1200 °C</span>
           </label>
           <label class="check">
+            <input id="airmap" type="checkbox" />
+            <span>Vue pression <kbd>b</kbd> : l'onde des explosions, du bleu au blanc</span>
+          </label>
+          <label class="check">
             <input id="lighting" type="checkbox" checked />
             <span>Éclairage : le feu et la lave éclairent, la pierre fait de l'ombre</span>
           </label>
@@ -201,6 +209,11 @@
           <summary>Défis</summary>
           <div id="challenges" class="buttons"></div>
           <p id="goal" class="hint" role="status"></p>
+          <div id="board" hidden>
+            <p id="board-title" class="hint" role="status"></p>
+            <ol id="board-list" class="board"></ol>
+            <button id="board-publish" type="button" hidden>Publier au classement</button>
+          </div>
         </details>
 
         <details class="group" name="panneau">
@@ -233,6 +246,13 @@
             <button id="gallery-open" type="button">Galerie</button>
           </div>
           <p id="status" class="hint" role="status"></p>
+          <!-- L'hôte d'un salon seulement (room.ts) : les gestes des invités refusés. -->
+          <label class="check" id="room-lock-row" hidden title="Les invités regardent sans pouvoir peindre ; décocher leur rend la main.">
+            <input id="room-lock" type="checkbox" />
+            <span>Invités en lecture seule</span>
+          </label>
+          <!-- Les joueurs du salon, remplie par room.ts : vide hors salon. -->
+          <ul id="roster" class="roster" aria-label="Joueurs du salon" hidden></ul>
         </details>
       </aside>
     </main>
@@ -241,11 +261,13 @@
     <dialog id="gallery">
       <form method="dialog" class="gallery-bar">
         <h2>Galerie</h2>
+        <input id="gallery-search" type="search" placeholder="Chercher un nom" aria-label="Chercher un monde par son nom" />
         <label>
           <span>Tri</span>
           <select id="gallery-sort">
             <option value="date">Plus récents</option>
             <option value="views">Plus vus</option>
+            <option value="likes">Plus aimés</option>
           </select>
         </label>
         <button type="submit">Fermer</button>
@@ -262,9 +284,15 @@
       </form>
       <nav class="keys-menu tabs" aria-label="Onglets des paramètres">
         <button type="button" data-tab="settings-general">Général</button>
+        <button type="button" data-tab="settings-graphics">Graphismes</button>
+        <button type="button" data-tab="settings-sound">Son</button>
         <button type="button" data-tab="settings-keys">Raccourcis</button>
       </nav>
       <section id="settings-general">
+        <label class="row" title="Le nom que voient les autres joueurs d'un bac partagé. Vide : « Joueur » et votre numéro dans le salon.">
+          <span>Pseudo</span>
+          <input id="nick" type="text" maxlength="24" placeholder="Joueur" autocomplete="nickname" />
+        </label>
         <label class="row">
           <span>Thème</span>
           <select id="theme">
@@ -273,6 +301,72 @@
             <option value="dark">Nuit</option>
           </select>
         </label>
+      </section>
+      <!-- Pour les petits PC : réglages de la page seule (settings.ts), le bac
+           simule pareil et le salon n'en sait rien. -->
+      <section id="settings-graphics" hidden>
+        <label class="row" title="Moins d'images, c'est moins de travail pour la page et la carte graphique. La simulation garde sa vitesse.">
+          <span>Images par seconde</span>
+          <select id="fps-cap">
+            <option value="0">Fréquence de l'écran</option>
+            <option value="60">60 au plus</option>
+            <option value="30">30 au plus</option>
+          </select>
+        </label>
+        <label class="row" title="La lumière du feu et de la lave est calculée sur une grille plus grossière que le bac : plus grossière, elle coûte moins à la carte graphique.">
+          <span>Finesse de l'éclairage</span>
+          <select id="light-detail">
+            <option value="480">Fine</option>
+            <option value="240">Moyenne</option>
+            <option value="120">Grossière</option>
+          </select>
+        </label>
+        <label class="check" title="Toutes les cellules à la même taille (×2, ×3, ×4…), avec une marge autour du bac. Décochée, le bac remplit tout le cadre, au prix de cellules d'une largeur inégale.">
+          <input id="whole" type="checkbox" checked />
+          <span>Échelle entière : des cellules toutes de la même taille</span>
+        </label>
+        <p class="hint">Ça rame encore ? Dans le panneau, Physique du monde : décocher l'Éclairage soulage la carte graphique, et une Grille plus petite le processeur — 640 × 360, c'est quatre fois moins de cellules que 1280 × 720.</p>
+      </section>
+      <!-- Réglages de la page seule (settings.ts) : le son est fabriqué sur
+           place par sound.ts, le bac n'en sait rien. -->
+      <section id="settings-sound" hidden>
+        <label class="check" title="Explosions, tonnerre, crépitement du feu, grondement de la lave, pluie. Touche m.">
+          <input id="sound" type="checkbox" checked />
+          <span>Son</span>
+        </label>
+        <label class="row">
+          <span>Volume</span>
+          <input id="volume" type="range" min="0" max="100" step="5" value="50" />
+          <output id="volume-value">50 %</output>
+        </label>
+        <!-- Chaque famille de sons sous le volume général : `data-mix` la nomme
+             (MIX de sound.ts), settings.ts câble tous les curseurs d'un coup. -->
+        <label class="row">
+          <span>Explosions</span>
+          <input id="mix-booms" data-mix="booms" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
+        <label class="row">
+          <span>Tonnerre</span>
+          <input id="mix-thunder" data-mix="thunder" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
+        <label class="row">
+          <span>Feu</span>
+          <input id="mix-fire" data-mix="fire" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
+        <label class="row">
+          <span>Lave</span>
+          <input id="mix-lava" data-mix="lava" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
+        <label class="row">
+          <span>Pluie</span>
+          <input id="mix-rain" data-mix="rain" type="range" min="0" max="100" step="5" value="100" />
+          <output>100 %</output>
+        </label>
+        <p class="hint">Le son démarre au premier clic ou à la première touche : les navigateurs refusent de jouer avant.</p>
       </section>
       <!-- Rempli par main.ts (listBindings) depuis KEY_GROUPS d'ui.ts : un
            onglet par encadré, un bouton par touche à changer. -->

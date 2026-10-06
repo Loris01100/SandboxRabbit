@@ -30,19 +30,35 @@ flowchart LR
 1. **Le fil principal** (page) ne simule rien. Il gère le DOM, traduit la souris
    en `Gesture`, envoie des **ordres** au bac et **colorie** la grille.
    Chaque frame n'apporte que les bandes changées (`patches`), en données
-   brutes — matière, `life`, figé, température au degré, et le grain avec la
-   première frame d'un moteur. world.ts les recopie **dès l'arrivée** dans un
-   miroir de la grille (`blit()`), puis `present()` fait colorier le
+   brutes — matière, `life`, figé, température et pression telles que le
+   moteur les tient (flottants), et le grain avec la première frame d'un
+   moteur —, toutes découpées dans **un seul tampon** par frame, transféré une
+   fois. world.ts les recopie **dès l'arrivée** dans un miroir de la grille
+   (`blit()` → `land()` de render.ts : rien que des copies, le miroir garde
+   température et pression brutes, comme le moteur), puis **rend le tampon**
+   au Worker (`{t: "spare", buffer}`, transféré, traité par worker.ts
+   lui-même), qui le réutilise pour une frame suivante (`recycle()` /
+   `claim()` de render.ts, trois tampons au plus). En 1920×1080 tout changé,
+   arrondir côté Worker et y allouer un tableau par bande et par couche
+   coûtait ~11 ms par frame au fil du bac, arrondir côté page ~15 ms ;
+   préparation et pose tiennent maintenant en ~2 ms chacune
+   (`npm run stress`). Puis `present()` fait colorier le
    rectangle changé par [screen.ts](../../src/client/screen.ts) : un shader
-   WebGL2 sur des textures entières, ou, sans WebGL2, `Renderer` puis un
+   WebGL2 sur des textures (entières, sauf température et pression, en flottants R32F, que le shader lit brutes comme `Renderer`), ou, sans WebGL2, `Renderer` puis un
    `putImageData`. Un envoi à l'écran par rafraîchissement. Ne jamais sauter
    une frame : elle ne porte que ce qui a changé, et le morceau resterait en
    retard pour de bon. La vue thermique ne regarde que la page : `order()`
-   relève `heatmap` au passage et fait tout recolorier. L'éclairage global
+   relève `heatmap` au passage et fait tout recolorier. La vue pression
+   (case « Vue pression », `airView()` de world.ts) aussi, sans passer par
+   le bac ; elle passe devant la thermique, et le panneau (settings.ts) ne
+   laisse cocher que l'une des deux. L'éclairage global
    (case « Éclairage », `light()` de world.ts) est lui aussi un réglage de
    la page seule : en WebGL2, screen.ts recalcule la lumière de tout le bac à
    chaque frame arrivée (quelques passes à basse résolution, voir `SCENE`
-   dans screen.ts) ; au repos, rien n'arrive et rien n'est recalculé.
+   dans screen.ts) ; au repos, rien n'arrive et rien n'est recalculé. Sa
+   finesse (Paramètres › Graphismes, `lightDetail()` de world.ts →
+   `screen.detail()`) est la largeur maximale de la grille de lumière : 480,
+   240 ou 120 texels.
    L'heure (menu « Heure », `hour()` de world.ts, teintes `HOURS` de
    render.ts) aussi : un `vec3 tint` du shader, tout recolorié quand elle
    change — une fois par seconde en mode « Cycle » (`setInterval` de settings.ts),
@@ -53,20 +69,32 @@ flowchart LR
    par vite.config.ts), il lance aussi des **fils auxiliaires** — lui-même,
    relancé par `import.meta.url` (le premier message dit le rôle : `start`
    pour le bac, une mémoire de moteur pour un auxiliaire ; un fichier à part
-   embarquait une seconde copie du moteur), jusqu'à sept — que
+   embarquait une seconde copie du moteur), jusqu'à quatorze — que
    [sim/pool.ts](../../src/client/sim/pool.ts) fait travailler sur la
    mémoire partagée du moteur — voir « Plusieurs fils » dans
    [simulation.md](simulation.md). Sans isolation, le moteur tourne seul, au
    même résultat. Il avance au
-   temps réellement écoulé (`setTimeout` à ~60 Hz, pas de `requestAnimationFrame`)
-   et renvoie des **nouvelles**. L'échéance suivante est posée dans un
+   temps réellement écoulé (`setTimeout`, pas de `requestAnimationFrame`)
+   et renvoie des **nouvelles**. Sa cadence suit l'écran : la page mesure ses
+   rafraîchissements (`beat()` de world.ts, médiane par `refreshPeriod()` de
+   ui.ts) et envoie `{t: "pace", ms}`, traité par worker.ts lui-même (pas un
+   `Order` du bac), borné entre 30 et 240 Hz. Le joueur peut la limiter à 60
+   ou 30 images par seconde (Paramètres › Graphismes, `limitFps()` de
+   world.ts, `framePeriod()` d'ui.ts) : réglage de la page seule, le salon
+   n'en sait rien. La vitesse de la simulation
+   n'en dépend pas (`ticksFor` compte en 60es de seconde) : un écran plus
+   rapide montre plus d'images, pas plus de ticks. L'échéance suivante est posée dans un
    `finally` : une exception du moteur ne coupe plus la boucle pour de bon.
-   Une frame s'accorde au plus `SLICE` (12 ms) de simulation — bac, rejeu ou
+   Une frame s'accorde au plus `SLICE` (12 ms à 60 Hz, au prorata au-dessous :
+   24 ms à 30 images par seconde, sinon un bac chargé ralentissait de moitié) de simulation — bac, rejeu ou
    invité qui rattrape — et abandonne le reste de son retard : sinon une frame
    lente en réclame plus à la suivante, et en grande grille la boucle montait
    à huit ticks par frame. Un bac trop chargé ralentit, la page reste fluide.
 3. **Le Worker Cloudflare** sert le site statique **et** l'API — il n'y a pas
    de projet Pages séparé.
+
+Le détail du coloriage de la page — textures, programmes WebGL2, éclairage
+global — est dans [rendu.md](rendu.md).
 
 Conséquence clé : **aucun module de la page n'importe l'`Engine`**. Tout ce
 qui a besoin de la grille passe par [world.ts](../../src/client/world.ts).
@@ -84,6 +112,7 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | `edit` | `clear` / `undo` / `redo` / `step` / `snapshot`. Pendant un rejeu, `step` l'avance d'un tick, `clear` / `undo` / `redo` l'arrêtent d'abord. `clear` désarme le défi |
 | `scene` `{name}` | Bâtit un défi ou un décor de `challenges.ts` ; arrête le rejeu |
 | `terrain` `{seed}` | Bâtit le monde de la graine (terrain.ts) à la taille du bac, graine ramenée dans 1..`SEEDS` ; même chemin que `scene` (rejeu arrêté, cran d'annulation, `stamp()`, défi désarmé). Refusé à un invité |
+| `explore` `{seed, saved?}` | Mode exploration ([exploration.md](exploration.md)). Le module (sim/explore.ts) est chargé à la première demande (`import()`) : le bac continue en attendant, `arrival` (la promesse, pour les tests) dit quand c'est fait, et un ordre qui remplace la grille pendant ce temps (`leave()`) annule le départ. Puis : fenêtre `WINDOW_W` × `WINDOW_H` (1280×720) sur un monde infini en largeur (`Explore` de sim/explore.ts), héros posé près du zéro du monde — ou, avec `saved` (une partie rangée par la page, `save()` de sim/explore.ts) de la même graine, la partie reprise là où elle était (`parse()`, `put()` de la fenêtre, `resume()`) ; illisible, un `say` le dit et le monde neuf part. Refusé (message `say`) si le bac n'a pas cette taille — la page fait d'abord `fit(1280)` — ou pendant un salon. Arrête le rejeu, abandonne l'enregistrement, vide les crans d'annulation, désarme le défi. Ensuite, après chaque tick, la fenêtre glisse si le héros l'exige (`slide()`), et chaque frame bâtit d'avance un morceau du chunk suivant (`prepare()`). Pendant le mode : annuler, rétablir, enregistrer et rejouer sont refusés (`say`), le cran d'annulation des gestes n'est pas pris. Le mode s'arrête sur `terrain`, `scene`, `load`, `size`, `edit clear`, `host` (avec un `say`) et `follow`. Refusé à un invité |
 | `goal` `{goal}` | Objectif d'un monde-défi (`ge:12:600`) |
 | `cursor` `{x,y}` | Position de la sonde |
 | `clip` `{ask,…}` | Découpe un rectangle, répond par `reply` |
@@ -91,24 +120,32 @@ Défini dans [sim/sandbox.ts](../../src/client/sim/sandbox.ts) (`Order`, `News`)
 | `rec` / `play` `{on}` | Enregistrement / rejeu. Le rejeu obéit à la pause ; à sa fin, le moteur reprend les réglages du panneau (`knobs`) |
 | `film` `{ask}` | Répond par `reply` : le dernier rejeu enregistré ou importé (`Recording`), ou `null` (`askFilm()` de world.ts) — ce qu'exportent lien et fichier |
 | `reel` `{rec}` | Remplace le rejeu du bac par un rejeu importé, **déjà passé par `vet()`** côté page ; arrête le rejeu en cours. Refusé à un invité |
+| `host` `{on}` | Devenir l'hôte d'un salon (`on` faux : cesser de diffuser). Arrête le rejeu, repart de la grille présente dans un `Recorder` neuf et répond par un `start` |
+| `follow` `{rec}` | Suivre l'hôte : la partie reçue devient un `Player` après `vet()`. `null` = ne plus suivre, et les réglages du panneau rentrent au moteur |
+| `turn` `{ticks,beats,sums}` | La suite de la partie de l'hôte, allongée dans le `Player` (`feed()`). Écartée si on ne suit personne, ou si `vetBeats()` la refuse |
 
 | Nouvelle (`listen()`) | Fréquence | Contenu |
 | --- | --- | --- |
-| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,noise?}`, tampons **transférés** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y, nom]` ou `null` (la caméra le suit ; le reste de sa fiche, la page le lit dans son miroir) |
-| `stats` | 2 × / s | nombre de cellules pleines |
-| `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`, `latestGrid()`), pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
+| `frame` | chaque frame | `patches` (bandes changées `{x,y,w,h,cells,life,frozen,temp,press,noise?}`, `temp` et `press` en `Float32Array` bruts, toutes vues d'**un seul** tampon **transféré** par sim/worker.ts ; liste vide au repos, grille entière et grain à la première frame d'un moteur), taille, `ambient` (le shader en a besoin), sonde `[matière, °C]`, `hero` `[x, y, nom]` ou `null` (la caméra le suit ; le reste de sa fiche, la page le lit dans son miroir), `heard` : ce que la frame a fait d'audible (`Engine.heard` relevé puis remis à zéro : explosions, plus gros rayon et sa colonne, éclairs) ou `null`, `origin` : en exploration, la colonne du monde qui est la colonne 0 du bac (`Explore.x0`, multiple de 256), sinon `null`. Quand elle change, la grille a glissé de la différence : world.ts fait glisser son miroir d'autant (`glide()` de render.ts) **avant** d'y poser les bandes de la frame, qui ne portent que la bande neuve et ce qu'ont changé les ticks, avec leur grain (`Tracker.grained()`). La page cale ensuite sa caméra dans l'image où elle dessine le glissement (`shifted()` de world.ts, `slideBy()` de view.ts). test/sandbox.ts rebâtit un miroir de frame en frame et le compare à la grille du bac après chaque glissement |
+| `stats` | 2 × / s | nombre de cellules pleines ; `hum` : flammes (feu, braise), lave et niveau de météo, tout à zéro en pause — le fond sonore |
+| `grid` | si le bac a changé : toutes les 250 ms en 640×360, plus rarement au-delà (≈ 2 s en 1920×1080) | copie de secours de la grille (`full`) et la largeur du bac qui l'a faite (`w`) — `latestGrid()` rend les deux —, et `voyage` : en exploration, `full` est la partie entière (`save()` de sim/explore.ts, JSON : graine en tête, origine, héros piloté, fenêtre encodée, chunks rangés), rangée sous `:exploration`, pour ranger le bac quand l'onglet passe en arrière-plan — seul usage qui ne peut pas attendre une réponse |
 | `reply` | à la demande | réponse numérotée à `askLoad()` / `askGrid()` / `askClip()` / `askFilm()` |
 | `say` | à la demande | message pour la barre de statut |
-| `won` | à la demande | le défi en cours est réussi (vérifié toutes les 500 ms dans le Worker) |
+| `won` | à la demande | le défi en cours est réussi (vérifié toutes les 500 ms dans le Worker), avec `film` : la partie depuis la construction d'un défi livré (`trial`), si le classement peut la recevoir (`fair()`), sinon `null` |
 | `rec` / `play` | à la demande | fin d'enregistrement, début/fin de rejeu |
+| `start` | quand l'hôte (re)part | `{rec}` : sa grille entière et l'état de son tirage, à diffuser aux invités |
+| `turn` | 20 × / s chez l'hôte, tant que le bac avance ou qu'il y a des gestes | `{ticks, beats, sums}` : jusqu'où il est allé, ce qui s'est passé, et une empreinte par seconde |
+| `desync` | une fois par divergence | l'invité n'a pas retrouvé l'empreinte de l'hôte (ou son enregistrement local a changé de taille) : room.ts en fait un `sync` |
 
 Questions-réponses : `askLoad()` et `askClip()` numérotent leur ordre (`ask`) et
 attendent la `reply` qui porte le même numéro. C'est le seul moyen d'`await`
 quelque chose du bac depuis la page.
 
-`latestGrid()` rend la dernière nouvelle `grid` reçue : sauvegarder ou ranger
-le bac en `localStorage` n'attend donc jamais le Worker (important quand
-l'onglet part en arrière-plan).
+`latestGrid()` rend la dernière nouvelle `grid` reçue, avec sa largeur :
+sauvegarder ou ranger le bac en `localStorage` n'attend donc jamais le Worker
+(important quand l'onglet part en arrière-plan). La largeur est celle de la
+grille, pas `WIDTH` : juste après un redimensionnement, la copie est encore
+celle de l'ancien bac, et la ranger sous la nouvelle largeur la cisaillait.
 
 Le choix d'une graine aléatoire et du décor « Surprise » dans main.ts utilise
 `crypto.getRandomValues()`. La graine saisie reste prioritaire ; ces tirages
@@ -162,8 +199,8 @@ avec ses gestes de souris, fixes ; un menu d'onglets (`#keys-menu`) en montre
 un à la fois (`shownGroup`), `listBindings()` remplit le tout. Tous sont posés
 dans la même case de grille, les autres en `visibility: hidden` : chacun a la
 taille du plus grand, la fenêtre ne saute pas d'un onglet à l'autre. La
-fenêtre Paramètres a elle-même une hauteur fixe (style.css) : l'onglet Général
-et l'onglet Raccourcis ont la même taille, et un contenu trop long défile
+fenêtre Paramètres a elle-même une hauteur fixe (style.css) : les onglets Général,
+Graphismes et Raccourcis ont la même taille, et un contenu trop long défile
 (dans Raccourcis, seule la liste `#bindings` défile, menu et bouton restent). Chaque action
 est dans un encadré et un seul (test/ui.ts). Les actions de Simulation et de
 Mondes, et « recommencer le dernier défi » (`lastChallenge`), cliquent
@@ -197,9 +234,53 @@ de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixel
   (pur, testé dans test/api.ts) lit le `type` de chaque message texte
   ≤ 200 000 caractères et ne laisse passer que `start` / `turn` de l'hôte
   vers les invités, `do` / `sync` d'un invité vers l'hôte. Un invité ne parle
-  donc jamais aux autres invités, et `role` / `peers` ne viennent que du DO :
-  un invité qui les imitait destituait l'hôte ou le faisait taire. Le rôle vit
-  dans la pièce jointe du socket (`serializeAttachment`). 8 places.
+  donc jamais aux autres invités, et `role` / `peers` / `roster` ne viennent
+  que du DO : un invité qui les imitait destituait l'hôte ou le faisait taire.
+  Seule exception, le **curseur** (`cursor`), qui va de chacun à tous les
+  autres : il ne touche pas la grille, donc ne peut pas faire diverger le
+  lockstep, et le DO le **refait** (`cursor()` de relay.ts) avec le numéro de
+  l'émetteur — un joueur ne déplace pas le curseur d'un autre. Le joueur
+  (`{host, id, name}`) vit dans la pièce jointe du socket
+  (`serializeAttachment`). 8 places (`PLACES`).
+- **Chargé à la demande** : room.ts n'arrive qu'au premier clic sur « Bac
+  partagé » (`import()` de [lobby.ts](../../src/client/lobby.ts), la porte que
+  main.ts appelle — `relay()`, `pointAt()`, `placeCursors()` ne font rien
+  avant).
+- **Verrou** : l'hôte peut cocher « Invités en lecture seule » (`#room-lock`,
+  visible chez lui seul). C'est lui qui applique les gestes des invités, c'est
+  donc lui qui les refuse ; le message `lock` (hôte → invités, avec chaque
+  départ pour qu'un arrivant le sache) ne fait que les prévenir, et leurs
+  gestes ne partent plus. Un hôte promu repart sans verrou.
+- **Pseudos** : le joueur l'annonce dans l'URL (`/api/room/:id?nick=…`, champ
+  « Pseudo » de Paramètres › Général, retenu dans `:reglages`) ; le DO le
+  nettoie (`nick()` : sans caractère de contrôle, 24 caractères), le
+  distingue de ceux déjà pris, et donne un numéro de 1 à 8 (`freeId()`,
+  recyclé au départ), d'où la couleur (`peerColor()` d'ui.ts). Pseudo vide :
+  « Joueur N ».
+- **Pseudos réservés** : le navigateur tire une fois une clé
+  (`browserKey()`, `localStorage` `:cle-salon`) et l'envoie avec le pseudo
+  (`&key=`). Le DO n'en garde que l'empreinte (`fingerprint()`, SHA-256) et
+  tient un **carnet** par salon (`ctx.storage`, clé `"names"`) : pour chaque
+  pseudo, l'empreinte de qui l'a porté et sa dernière venue. `claim()`
+  (relay.ts, pur) rend le pseudo s'il n'est ni porté dans le salon ni retenu
+  par une autre clé depuis moins de `KEEP` (30 jours), sinon « Alice 2 »
+  (`unique()`, qui prend la liste des noms pris ou une fonction) ; il retient
+  ensuite ce pseudo pour cette clé et oublie ce qui a passé `KEEP`. Sans clé,
+  rien n'est retenu. Ce n'est pas une authentification : qui vole la clé
+  d'un navigateur prend ses pseudos.
+- **Curseurs** : main.ts passe la cellule survolée à `pointAt()` de room.ts
+  avec la sonde ; il part au plus toutes les `POINT` = 80 ms, seulement s'il a
+  changé et qu'on n'est pas seul. Chez les autres, un `.peer` (point et nom)
+  dans `#peers`, replacé à chaque image par `placeCursors()` (zoom et caméra
+  compris, comme le cadre du héros). -1, -1 : hors du bac, caché.
+- **Fantômes** : un invité attend l'aller-retour par l'hôte avant de voir son
+  geste. `relay()` pose donc tout de suite un **fantôme** (`ghost()` : un
+  disque pour `paint`, un rectangle pour `rect`, à la couleur de la matière,
+  dans `#peers`, classes `.ghost` / `.ghost.round`), replacé avec les
+  curseurs par `placeCursors()`. Un `turn` qui apporte des gestes efface les
+  fantômes de plus de 40 ms (`settleGhosts()`) ; aucun ne dure plus de
+  `GHOST` = 1 s — un geste refusé (lecture seule) ne laisse pas de trace.
+  Rien de tout cela ne touche la grille.
 - Client : [src/client/room.ts](../../src/client/room.ts) pour le réseau,
   `host()` / `follow()` / `catchUp()` de
   [sandbox.ts](../../src/client/sim/sandbox.ts) pour la simulation.
@@ -233,12 +314,61 @@ de dessous continue d'être peint : un deuxième envoi à l'écran, de 120 pixel
 
 | Message | Sens | Contenu |
 | --- | --- | --- |
-| `role` | DO → client | `{host: boolean}` |
+| `role` | DO → client | `{host: boolean, id}` : `id`, son numéro dans le salon (1 à 8) |
 | `peers` | DO → tous | `{n}` : nombre de connectés ; l'hôte renvoie un `start` quand il monte, se tait à 1 |
+| `roster` | DO → tous | `{players: [{id, name, host}]}` après chaque `peers`, et de nouveau après une promotion : la liste sous la barre de statut, un curseur par autre joueur |
+| `lock` | hôte → invités | `{on}` : les invités sont en lecture seule (ou ne le sont plus) ; renvoyé avec chaque `start` |
+| `cursor` | chacun → DO → tous les autres | `{x, y}` en cellules entières (-1, -1 : hors du bac) ; le DO le renvoie avec `id`, celui de l'émetteur |
 | `start` | hôte → invités | `{rec: Recording}` : grille complète (état vivant), `clock`, `seed`, `scan`, réglages |
 | `turn` | hôte → invités | `{ticks, beats, sums}` toutes les 50 ms tant que le bac avance ou qu'il y a des gestes |
 | `do` | invité → hôte | `{g: Gesture}` ; l'hôte l'applique via le même chemin que ses propres gestes |
 | `sync` | invité → hôte | demande un nouveau `start` (empreinte différente, changement de taille) |
+
+### Le déroulé d'une partie
+
+Qui parle quand, et avec quelles constantes (toutes dans sandbox.ts, sauf
+`RESYNC` et le délai de reconnexion, dans room.ts côté page) :
+
+1. **Entrée.** `join()` ouvre le WebSocket et le DO répond `role`. Hôte :
+   `order({t:"follow", rec:null})` (on ne suit plus personne) puis `restart()`.
+   Invité : on attend un `start`.
+2. **`restart()`** envoie `order({t:"host", on: peers >= 2})` : **seul, l'hôte ne
+   diffuse rien**. Il est rappelé à chaque `peers` qui monte (un arrivant ne
+   connaît que l'état présent) et quand on retombe sous deux.
+3. **`host(true)`** (sandbox.ts) arrête le rejeu, ouvre un `Recorder` sur la
+   grille présente et répond par la nouvelle `start`, que room.ts relaie.
+4. **La suite.** À chaque frame, `frame()` compte les millisecondes ; toutes les
+   `TURN` = 50 ms, si le compteur de ticks a bougé ou qu'il y a des gestes, il
+   envoie `turn` avec ce que le `Recorder` a accumulé (`drain()`, qui le vide) et
+   les empreintes en attente. Un tick sur `SUM` = 60 (une seconde à vitesse
+   normale) ajoute une empreinte FNV de `cells` à `sums`.
+5. **Chez l'invité**, `catchUp()` avance d'**un tiers du retard** par frame,
+   `CATCH_UP` = 32 ticks au plus : régulier quand les messages arrivent par
+   paquets de trois frames, et l'écart se stabilise tout seul quelle que soit la
+   vitesse de l'hôte. Avant chaque pas, si une empreinte est attendue à ce tick,
+   il la compare — une seule fois : `lost` empêche d'inonder l'hôte de demandes.
+   Un invité en retard reste en retard sans rien perdre, la partie l'attend.
+6. **Divergence.** `desync` → room.ts envoie `sync` → l'hôte **diffère** la
+   demande jusqu'à `RESYNC` = 2 s après son dernier départ, puis `restart()`.
+   Différée et non jetée : sinon un invité qui divergerait sans cesse resterait
+   figé. Une seule demande à la fois (`resync`).
+7. **Taille.** Un `start` dont la taille n'est pas la nôtre déclenche le rappel
+   `size()` (le sélecteur du panneau) et **la partie est ignorée** : le bac
+   recréé, un nouveau `sync` ramènera un départ à la bonne taille.
+8. **Départ de l'hôte.** Le DO promeut le plus ancien restant, qui reçoit `role`
+   et repart de **sa** grille — la même, au retard près. Côté page, `leaveRoom()`
+   rend la main au joueur (`onRole(true)`) : sans ça, un invité qui part restait
+   en pause.
+9. **Coupure.** Une connexion **établie** (`opened`) qui tombe sans « Quitter »
+   (`quitting`) est retentée une fois après 1 s. Une tentative qui n'ouvre pas ne
+   relance rien : pas de boucle contre un salon plein ou un Worker à terre. Le
+   drapeau `failed` garde « Salon injoignable » d'être effacé par « Salon
+   quitté », puisqu'un échec déclenche `error` **puis** `close`.
+
+Ce que coûte une partie : un départ 2 à 9 Ko, une suite ~50 octets. Un message
+au-delà de `HEAVY` = 200 000 caractères (le plafond du DO, `MAX` de relay.ts)
+n'est pas envoyé — le DO le jetterait sans rien dire — et l'hôte le signale dans
+la barre de statut.
 
 Ce qui arrive d'un pair n'est pas de confiance : `known()` écarte les ids de
 matière inconnus, `disc()` borne les rayons, `applyGesture` refuse un `clip`
@@ -256,10 +386,13 @@ le charger dans Node. Ce qui en a besoin (le Durable Object) vit dans
 | Route | Rôle | Garde-fous |
 | --- | --- | --- |
 | `GET /api/health` | état + backend (`d1` / `memory`) | — |
-| `GET /api/worlds` | les 50 plus récents **et** les 50 plus vus (`kept()` de store.ts, 100 max), `data` **coupé au premier bloc** (matière seule, pour les vignettes) | — |
-| `GET /api/worlds/:id` | monde complet, **incrémente `views`** | seul chemin de chargement depuis la galerie ; au-delà du débit (compteur `vue:` à part), servi sans compter la vue |
-| `POST /api/worlds` | `{name, width, height, data, goal?}` → `201 {id, token}` | débit, `data` ≤ 200 000, dimensions entières et ≤ 1920×1080 cellules (`CELLS`, la plus grande grille du menu : en ajouter une plus grande = relever ce plafond), `goal` validé par regex |
+| `GET /api/worlds` | les 50 plus récents, les 50 plus vus **et** les 50 plus aimés (`kept()` de store.ts, 150 max), avec `parent` et `likes` ; `data` **coupé au premier bloc** (matière seule, pour les vignettes) | — |
+| `GET /api/worlds/:id` | monde complet, **incrémente `views`** une fois par IP et par monde (`who()`, table `sightings`) | seul chemin de chargement depuis la galerie ; au-delà du débit (compteur `vue:` à part), servi sans compter la vue |
+| `POST /api/worlds` | `{name, width, height, data, goal?, parent?}` → `201 {id, token}` | débit, `data` ≤ 200 000, dimensions entières et ≤ 1920×1080 cellules (`CELLS`, la plus grande grille du menu : en ajouter une plus grande = relever ce plafond), `goal` validé par regex, `parent` (le monde remixé) à la forme d'un id (`UUID`) — son existence n'est pas vérifiée, le ménage peut l'effacer après coup |
+| `POST /api/worlds/:id/like` | un « J'aime » de plus → `200 {likes}` (le total inchangé si cette IP a déjà voté) | débit (compteur `vote:` à part), `404` si l'id n'a pas la forme d'un id ou que le monde n'existe pas. Un vote par IP et par monde (`who()`, table `votes`) ; la page retient aussi les siens (`:votes`) pour éteindre le bouton |
 | `DELETE /api/worlds/:id` | en-tête `x-world-token` requis | débit, `403` si mauvais jeton |
+| `GET /api/records/:challenge` | les `BOARD` (30) meilleurs records d'un défi livré, du moins de ticks au plus, **rejeu compris** (`film`) : la page les juge | `404` pour un défi absent de `TRIALS` |
+| `POST /api/records` | `{challenge, name, ticks, film}` → `201 {id}` | débit (compteur `record:` à part), `challenge` dans `TRIALS` (les noms de `CHALLENGES`, test/api.ts compare), `ticks` entier de 1 à `TRIAL_TICKS` (cinq minutes), `film` en base64 url ≤ 200 000 caractères, `name` nettoyé par `nick()` (« Anonyme » s'il est vide). Le rejeu **n'est pas rejoué** ici (voir [Classement des défis](#classement-des-défis)) |
 | `GET /api/room/:id` | upgrade WebSocket vers le DO | `503` sans binding `ROOM`, débit, `426` sans upgrade |
 | `POST /api/error` | rapport d'erreur d'un joueur (texte brut, par `sendBeacon`) → `console.error({message, report, agent})` → `204` ; rien en base | corps ≤ 16 Kio (`bodyLimit`, `413`), débit (compteur `erreur:` à part : une page qui boucle n'empêche pas de sauvegarder), `400` si vide |
 | `* /api/*` | `404` JSON | — |
@@ -286,8 +419,9 @@ Les rapports se lisent dans les journaux du Worker, gardés par
 `observability` (wrangler.jsonc) : tableau de bord Cloudflare → Workers →
 sandbox-rabbit → Observability, filtre `message = "erreur joueur"`, ou en
 direct avec `npx wrangler tail`. En `npm run dev`, ils s'affichent dans le
-terminal. Les piles de production pointent dans le bundle minifié (voir le
-`ponytail:` d'errors.ts).
+terminal. Les piles de production pointent dans le bundle minifié
+(`index-….js:1:48213`) : `npm run pile < pile.txt` les retraduit dans les
+sources (recette dans [recettes.md](recettes.md#décoder-une-pile-de-production)).
 
 ### Stockage
 
@@ -302,11 +436,30 @@ répond 500.
   le `POST`, et ne sort d'aucune lecture (`shown()` en mémoire, colonnes
   nommées dans les `SELECT` D1). Ne jamais écrire `SELECT *`.
 - Le client garde ses jetons dans `localStorage` (`sandbox-rabbit:mondes`).
+- **Votes et vues, une fois par IP** (migration 0006) : tables `votes(world,
+  voter)` et `sightings(world, viewer)`, la paire en clé primaire. Jamais
+  l'IP : `who()` d'app.ts en garde les 16 premiers octets d'un SHA-256 de
+  `sel:monde:ip` (`cf-connecting-ip`). Le monde y entre pour qu'on ne suive
+  pas un visiteur d'un monde à l'autre ; le sel est le secret `SALT`
+  (`npx wrangler secret put SALT`), un sel fixe sinon. `see()` / `like()` :
+  un lot D1 `INSERT OR IGNORE`, puis `UPDATE … + changes()` — la ligne
+  insérée ou non décide du +1, sans aller-retour de plus. En mémoire, deux
+  ensembles `monde|empreinte`. `purge` efface aussi les lignes orphelines.
+  Limite (`ponytail:` de store.ts) : plusieurs IP, plusieurs votes.
 - Ménage nocturne (cron `0 4 * * *`, `scheduled` dans index.ts) : garde les
-  mondes que la galerie montre, les 50 plus récents et les 50 plus vus
-  (`kept()` en mémoire, `KEPT` en SQL) : 50 sauvegardes de spam ne chassent
-  plus un monde que les joueurs chargent. Les mondes à `token` NULL (d'avant la migration 0004) ne
+  mondes que la galerie montre, les 50 plus récents, les 50 plus vus et les 50
+  plus aimés (`kept()` en mémoire, `KEPT` en SQL) : 50 sauvegardes de spam ne
+  chassent plus un monde que les joueurs chargent ou aiment.
+- Colonnes servies : `COLUMNS` de store.ts, la même liste pour `list()` et
+  `get()` — `parent` (migration 0005, sans clé étrangère : le parent peut
+  partir au ménage, l'enfant garde le lien) et `likes` (incrémenté par
+  `UPDATE … RETURNING likes`, dans le lot du vote). Les mondes à `token` NULL (d'avant la migration 0004) ne
   partent que par là.
+- **Records des défis** (migration 0007) : table `records(id, challenge, name,
+  ticks, film, created_at)`, index `(challenge, ticks, created_at)`.
+  `board()` en sert les `BOARD` meilleurs, `enter()` en ajoute un ; le
+  ménage ne garde que les `BOARD` meilleurs de chaque défi (`ROW_NUMBER()
+  OVER (PARTITION BY challenge …)`).
 - Schéma : un **nouveau** fichier numéroté dans [migrations/](../../migrations/),
   jamais de retouche d'un fichier existant. Appliquer avec
   `npx wrangler d1 migrations apply sandbox-rabbit --remote`.
@@ -334,32 +487,88 @@ n'a été renommé. `decodeNames()` ne lève jamais (bloc illisible = pas de nom
 | Module | Rôle | Testable sous Node ? |
 | --- | --- | --- |
 | [main.ts](../../src/client/main.ts) | souris, raccourcis, défis, rejeu, chargement du bac, boucle rAF, câblage de tout le DOM | non |
-| [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`hero`, relevée par `track()`), fiche de l'encadré Héros (`card()` : nom, santé, âge, température, compteurs lus dans le miroir ; `nameInput`, `heroId`), cadre `#halo` autour du héros piloté dans les vues de côté (`mark()`, repère posé sur la scène, pas dans le rendu), caméra décrochée (`loose`), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
+| [hero.ts](../../src/client/hero.ts) | le héros côté page : position (`hero`, relevée par `track()`), fiche de l'encadré Héros (`card()` : nom, santé, âge, température, cellules creusées et sac (« sac : N × matière »), et en exploration sa colonne dans le monde (`origin` + x) lus dans le miroir ; `nameInput`, `heroId`), cadre `#halo` autour du héros piloté dans les vues de côté (`mark()`, repère posé sur la scène, pas dans le rendu), caméra décrochée (`loose`), gros plan du mode exploration (`closeUp(px)` : `meet()` pose `px` pixels par cellule au lieu de 160 cellules de large ; remis à 0 par `abandon()` de main.ts et par un changement de taille), commandes tenues (`pilot()`, `STEER`), vues et encadré `#sight` (`nextView()`, `gaze()`) | non |
 | [palette.ts](../../src/client/palette.ts) | palette des matières et six récentes ; `select()`, qui tient `current` et `emit` (matière des sources) | non |
-| [settings.ts](../../src/client/settings.ts) | contrôles du panneau (pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage) et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
-| [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan` | non |
+| [settings.ts](../../src/client/settings.ts) | contrôles du panneau (pinceau, outil, vitesse, vent, ambiante, taille, météo, heure, éclairage), ceux des onglets Graphismes (limite d'images par seconde, échelle entière, finesse de l'éclairage) et Son (case, volume général, un curseur `data-mix` par famille de sons) de la fenêtre Paramètres, et le blob `:reglages` ; `fit()` impose une taille, `restore()` rejoue les réglages retenus. main.ts appelle `restore()` une fois ses écouteurs posés, **avant** de charger le bac gardé : la taille restaurée l'effacerait | non |
+| [view.ts](../../src/client/view.ts) | zoom et caméra : `zoomAt` (borné de 1 à 12), `zoomCentered`, `slideBy(cells)` (la fenêtre d'exploration a glissé : la vue la suit pour que le monde ne bouge pas à l'écran), `scaleTo(px)` (zoom qui donne `px` pixels d'écran par cellule, quelle que soit la taille du bac : le mode exploration), `panBy`, `follow`, `scroll` (ZQSD / WASD / flèches tenues, `MOVES`), molette ; bornes par `clampPan`. Échelle entière (`wholePixels()`, Paramètres › Graphismes) : `fitCanvas()` pose largeur **et** hauteur du canvas au plus grand multiple entier, en pixels physiques, qui tient dans la scène (`wholeScale` d'ui.ts) — ou étire si l'arrondi coûte plus d'un quart de la taille ; refait à chaque changement de taille de la scène (`ResizeObserver`, différé d'une image : sur téléphone la scène suit la hauteur du bac) et de la grille | non |
 | [keys.ts](../../src/client/keys.ts) | touches réassignables (`bindings`, `bound`), touches tenues (`held`), fenêtre Paramètres (`openSettings()`, onglet Raccourcis) | non |
-| [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), porte vers le Worker, miroir de la grille (lu par `seen()`), `cellBox()` : où sont les cellules à l'écran, bordure du canvas exclue (le zoom la grossit) — tout passage cellule ↔ pixel (clic, sélection, cadre du héros) passe par lui | non |
+| [world.ts](../../src/client/world.ts) | canvas, `WIDTH`/`HEIGHT` (liaisons vivantes réassignées par `resize()`), `origin` (en exploration, la colonne du monde qui est la colonne 0 du bac, relevée dans chaque frame ; quand elle change, le miroir glisse d'autant, `glide()`) et `shifted()` (de combien la fenêtre a glissé dans ce que vient de poser `present()`, remis à zéro : main.ts le passe à `slideBy()` avant `follow()`), porte vers le Worker, miroir de la grille (lu par `seen()`), `cellBox()` : où sont les cellules à l'écran, bordure du canvas exclue (le zoom la grossit) — tout passage cellule ↔ pixel (clic, sélection, cadre du héros) passe par lui | non |
+| [audio.ts](../../src/client/audio.ts) | porte du son : retient case, volumes (général et par famille, `soundMix()`) et fond sonore, et ne charge sound.ts (`import()`) qu'au premier geste du joueur — le navigateur refuse de jouer avant, et la page a son budget (84 Kio). `initSound()` (main.ts), `hear()` à chaque frame, `setHum()` à chaque `stats` | non |
+| [sound.ts](../../src/client/sound.ts) | le son, synthétisé par Web Audio (aucun fichier) : explosion (bruit blanc sous un passe-bas qui se referme, plus long et plus grave avec le rayon), éclair puis tonnerre, boucles de feu (claquements), de lave (bruit brun) et de pluie ; stéréo selon la colonne ; six voix au plus ; se tait onglet caché. `MIX` : les familles (explosions, tonnerre, feu, lave, pluie), chacune multipliée par son curseur — en ajouter une, c'est aussi son `data-mix` dans index.html (test/ui.ts le vérifie). Tirage avec `crypto.getRandomValues()`, par blocs de 4 096 entiers (16 Kio) pour le bruit : il ne touche que l'oreille | `humLevel()`, `rainLevel()`, `boomShape()`, `panOf()` : **oui** (test/ui.ts) |
 | [errors.ts](../../src/client/errors.ts) | remonte les exceptions de la page et du Worker de simulation vers `POST /api/error` (voir « Erreurs des joueurs ») | `reporter()` : **oui** (test/ui.ts) |
-| [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, secours 2D par `Renderer` (sans éclairage) | non |
+| [screen.ts](../../src/client/screen.ts) | colorie le miroir : shader WebGL2 (textures entières) et éclairage global par *radiance cascades*, remonté après une perte de contexte ; secours 2D par `Renderer`, éclairé par `FlatLight` (sim/flatlight.ts, chargé à la demande, ses rayons dans le fil de [sim/flatlight-worker.ts](../../src/client/sim/flatlight-worker.ts)) | non |
 | [ui.ts](../../src/client/ui.ts) | logique pure du panneau (objectifs, récents, zoom, cadence, touches réassignables), accès `localStorage` tolérant | **oui** (test/ui.ts) |
 | [sight.ts](../../src/client/sight.ts) | ce que voit le héros : `look()` lance un éventail de rayons dans une grille et rend une colonne de pixels | **oui** (test/ui.ts) |
 | [gestures.ts](../../src/client/gestures.ts) | `Gesture` + `applyGesture(engine, g)` + météo (`weather(engine, niveau)` : 0 sec, 1 pluie, 2 orage, 3 gros orage, éclairs compris ; le niveau est le réglage `weather` et le champ `weather` d'une `Scene`, booléen dans les enregistrements d'avant l'orage) | **oui** |
 | [replay.ts](../../src/client/replay.ts) | `Recorder` / `Player` | **oui** |
 | [challenges.ts](../../src/client/challenges.ts) | défis et décors bâtis en code | **oui** |
-| [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
-| [room.ts](../../src/client/room.ts) | salon côté navigateur | non |
-| [share.ts](../../src/client/share.ts) | galerie, PNG, vidéo, lien ; export / import du rejeu | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
+| [terrain.ts](../../src/client/terrain.ts) | monde généré par graine (relief, lacs, grottes, poches), bâti au repos ; échelle des formes en option ; prête au monde infini son relief et son sous-sol (`plan()`, `surface()`, `under()`, `lattice()`, `SEALS`) ; tirage à lui, jamais `engine.rand()` | **oui** (test/sim.ts) |
+| [sim/explore.ts](../../src/client/sim/explore.ts) | **chargé à la demande** : le Worker de simulation ne l'importe (`import()` de sandbox.ts, qui n'en garde que le type) qu'au premier ordre `explore` — d'où les Workers en modules ES (`worker.format` de vite.config.ts) et `explore-*.js` hors du budget du moteur. Le générateur du monde infini : `EXPLORE_SCALE`, `STRIP` (256 colonnes), `land()` = `lay(raise(…))`, chaque cellule ne dépendant que de sa position — `raise()` bâtit hors du bac (pur, par morceaux recollés par `join()`), `lay()` pose, `regrain()` refait le grain d'un chunk relu ; tirage à lui, jamais `engine.rand()`. Et le mode : `Explore` (graine, échelle, origine `x0`, chunks rangés `kept`), `start()` (fenêtre de départ et héros), `due()` / `slide()` (la fenêtre glisse d'un chunk quand le héros sort des trois du milieu ; le chunk sortant est rangé brut — `Stash`, température arrondie comme le codec —, l'entrant relu ou bâti), `prepare()` (une fois par frame, sauf celle du glissement : encode un chunk rangé brut, ou décode d'avance celui qui va rentrer, ou bâtit 32 colonnes du chunk neuf suivant), `save()` / `parse()` / `resume()` (la partie rangée par la page, au plus 3 millions de caractères : les chunks les plus lointains sont laissés à la graine ; un chunk rangé illisible est rebâti par la graine) ; `WINDOW_W` × `WINDOW_H` | **oui** (test/sandbox.ts) |
+| [lobby.ts](../../src/client/lobby.ts) | porte du salon : charge room.ts au premier clic sur « Bac partagé », et relaie d'ici là les appels de main.ts dans le vide | non |
+| [room.ts](../../src/client/room.ts) | salon côté navigateur, chargé à la demande : lockstep, pseudo (`#nick`), liste des joueurs (`#roster`), curseurs des autres (`pointAt()`, `placeCursors()`, calque `#peers`), fantômes des gestes en route (`ghost()`), clé du navigateur (`browserKey()`), verrou de l'hôte (`#room-lock`) | non |
+| [share.ts](../../src/client/share.ts) | sauvegarde (avec `parent` : l'origine d'un remix, `setOrigin()` / `forgetOrigin()`), jetons des mondes déposés, PNG, vidéo, lien ; export / import du rejeu ; charge gallery.ts au premier clic sur « Galerie » | non (le crible du rejeu, `vet()`, est dans replay.ts : **oui**) |
+| [gallery.ts](../../src/client/gallery.ts) | la galerie, chargée à sa première ouverture (`import()`, hors du budget de la page) : vignettes, recherche par nom, tri (récents, vus, aimés), « J'aime », remix, suppression des siens | non (la recherche, `matches()` d'ui.ts : **oui**) |
+| [board.ts](../../src/client/board.ts) | le classement des défis livrés, chargé au premier défi lancé (`import()` de main.ts) : `show()` (records servis, jugés un à un par le fil de [sim/judge.ts](../../src/client/sim/judge.ts), dix au plus affichés, ▶ pour regarder un rejeu), `won()` (propose « Publier au classement ») | non (le jugement, `verdict()` de [sim/verdict.ts](../../src/client/sim/verdict.ts) : **oui**) |
 | [theme.ts](../../src/client/theme.ts) | thème Système / Jour / Nuit, onglet Général de la fenêtre Paramètres (onglets câblés dans keys.ts) | non |
 | [sim/*](../../src/client/sim/) | moteur, rendu, codec, registre, bac | **oui** |
 
+### Classement des défis
+
+Pour les défis **livrés** (`CHALLENGES`), pas les mondes-défis de la galerie :
+leur grille n'est pas bâtie en code, un juge n'aurait rien à quoi comparer le
+départ.
+
+- **Le bac enregistre chaque défi** depuis sa construction (`trial` de
+  sandbox.ts, un `Recorder` à part de celui du joueur), créé dans `scene()`
+  juste après `stamp()`. Gestes et ticks y vont comme dans `rec` ; tout ce
+  qui oublie le défi (`won = null`) l'oublie aussi, lancer un rejeu aussi.
+  À la victoire, `won` remonte avec la partie si `fair()` (replay.ts) la
+  reçoit : 320×180, au plus `TRIAL_TICKS` (cinq minutes), **sans grille posée
+  d'un coup** (annuler, rétablir) **ni morceau collé** — l'un et l'autre
+  peuvent poser une grille déjà gagnée.
+- **Le temps est en ticks** de simulation, celui du rejeu ; le record
+  personnel (`:records`, main.ts) reste à l'horloge murale.
+- **Le Worker ne juge pas** : rejouer cinq minutes coûterait ~9 s de calcul,
+  hors de l'offre gratuite. Il range les records par ticks annoncés et sert
+  les rejeux avec. **La page juge** : board.ts envoie chaque record au fil
+  de [sim/judge.ts](../../src/client/sim/judge.ts), un à la fois, qui le
+  décompresse (`unpack()`) et appelle `verdict()`
+  ([sim/verdict.ts](../../src/client/sim/verdict.ts)) : le défi rebâti **en
+  code** dans un moteur neuf doit donner la grille de départ du rejeu
+  (`encode()` comparé), le rejeu doit être recevable et durer les ticks
+  annoncés, et le défi doit être gagné à la fin. Seuls les records qui
+  tiennent s'affichent (dix au plus) ; le titre compte les écartés.
+- Le moteur étant déterministe et le même à un fil ou à quatre, ce qui a
+  gagné chez le joueur gagne chez le juge, au tick près — la victoire n'est
+  pourtant relevée que toutes les 500 ms : le rejeu s'arrête au tick où le
+  bac l'a vue, et le juge regarde au même.
+- **Limite** (`ponytail:` de `POST /api/records`) : un faux record entre au
+  classement, et `BOARD` faux records en tête le vident chez tous les
+  visiteurs jusqu'au ménage. Juger côté Worker le jour où un tricheur s'y met.
+- Un défi ajouté à `CHALLENGES` s'ajoute à `TRIALS` d'app.ts (test/api.ts
+  compare les deux listes).
+
 ### Galerie et mondes-défis
 
-Dans [share.ts](../../src/client/share.ts), pas dans main.ts. La galerie est un
+Dans [gallery.ts](../../src/client/gallery.ts), chargé par share.ts au premier
+clic sur « Galerie », pas dans main.ts. La galerie est un
 `<dialog>` ouvert en `showModal()`, remplie par **une seule** requête
 `GET /api/worlds` : les vignettes sont redessinées depuis la grille reçue
 (`thumbnail()` de render.ts, sous-échantillonnée au-delà de 320 de large), et le
-tri (récents / plus vus) se fait sur cette liste côté client. Cliquer une carte
+tri (récents / plus vus / plus aimés) comme la recherche par nom (`matches()`
+d'ui.ts : chaque mot, accents et casse ignorés) se font sur cette liste côté
+client. Entrée dans la recherche est retenue : elle validerait le
+`<form method="dialog">` et fermerait la galerie.
+
+**Remix** : charger un monde de la galerie le retient comme origine
+(`setOrigin()` de share.ts, **après** le chargement) ; la sauvegarde suivante
+l'envoie en `parent`. Tout ce qui remplace le bac l'oublie : `abandon()` de
+main.ts (vider, nouveau monde, décor, autre chargement, taille) appelle
+`forgetOrigin()`. Une carte dit « remix de « … » » (nom du parent lu dans la
+liste en main, « d'un monde disparu » s'il n'y est plus) et compte ses remix.
+
+**J'aime** : un bouton par carte, éteint une fois voté (`:votes`, 500 ids au
+plus) ; le Worker, lui, ne compte qu'un vote par IP. Cliquer une carte
 recharge le monde par `GET /api/worlds/:id` — ne pas « optimiser » en
 réutilisant la copie en main, c'est ce chemin qui compte les vues. Le `×` de
 suppression n'apparaît que sur les cartes dont on détient le jeton. Un monde
@@ -382,7 +591,7 @@ kilo-octets de lien ne se déplient pas en gigaoctets. Le rejeu validé part au
 bac par `watch()` (rappel passé à `initShare()`) : ordre `reel`, puis lecture
 comme au bouton « Rejouer », taille du bac ajustée (`fit()`).
 
-Les modules périphériques (`room`, `share`, `theme`, `view`, `keys`, `palette`, `settings`, `hero`) ne doivent **pas**
+Les modules périphériques (`room`, `lobby`, `share`, `gallery`, `theme`, `view`, `keys`, `palette`, `settings`, `hero`, `audio`, `sound`, `board`) ne doivent **pas**
 importer main.ts (cycle) : main.ts leur passe ce dont ils ont besoin par un
 `init…()` à rappels.
 
@@ -391,10 +600,17 @@ Accès `localStorage` : uniquement via `read` / `write` / `forget` de ui.ts
 Un `localStorage.getItem` nu jette quand les cookies sont bloqués, et au
 chargement d'un module cela laisse la page blanche. Clés existantes :
 `sandbox-rabbit:mondes`, `:reglages`, `:records`, `:bac`, `:theme`, `:touches`
-(les touches réassignées, relues par `parseBindings()`).
+(les touches réassignées, relues par `parseBindings()`), `:votes` (les mondes
+aimés depuis ce navigateur, gallery.ts), `:cle-salon` (la clé qui réserve
+ses pseudos de salon, room.ts), `:exploration` (la partie du mode exploration,
+une seule, main.ts : voir plus bas).
 
 `:bac` suit le format d'un lien de partage, `320~<grille>` (`loadWorld()` de
 main.ts lit les deux ; une valeur sans `~`, d'avant, se charge dans le bac tel
 qu'il est). Sans la largeur, un défi rangé en 320 depuis un bac réglé en 480
-revenait cisaillé. Pour la même raison, `fit()` de settings.ts appelle `remember()` : une
+revenait cisaillé. En exploration, la page range la partie sous
+`:exploration` et **efface** `:bac` : au chargement, sans lien ni `:bac`,
+la partie reprend (`explore(0)` de main.ts). Le bouton Explorer la reprend
+aussi quand le champ de graine est vide ou porte sa graine, lue en tête du
+JSON (`{"seed":…`) sans relire les mégaoctets qui suivent. Pour la même raison, `fit()` de settings.ts appelle `remember()` : une
 taille imposée en code (défi, lien, galerie, salon) n'émet aucun événement.

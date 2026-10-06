@@ -59,6 +59,8 @@ export const HERO = 51;
 export const HERO_HEAD = 52;
 export const HERO_BODY = 53;
 export const HERO_LEGS = 54;
+export const SODIUM = 55;
+export const RUST = 56;
 
 /**
  * Commandes du héros, un bit chacune (`engine.pilot`, geste `pilot`). Ici
@@ -71,12 +73,16 @@ export const PILOT = { left: 1, right: 2, up: 4, down: 8, dig: 16, place: 32 } a
 /**
  * Ce que le corps du héros garde dans `life`, une cellule par donnée, en
  * offsets [dx, dy] depuis son cœur : son numéro (0 = pas encore tiré), ses
- * dégâts, son âge au-delà de 18 ans, ce qu'il a creusé et posé (plafonnés à
- * 250). Tout à zéro est un héros valide — neuf, en pleine santé — : c'est ce
+ * dégâts, son âge au-delà de 18 ans, ce qu'il a creusé (plafonné à 250), et
+ * son sac — la matière qu'il porte (`bag`, 0 = rien) et combien (`load`, 250
+ * au plus). `load` est l'ancienne case « posées » : relue dans une grille
+ * d'avant le sac, elle compte un sac de matière 0, donc vide. Tout à zéro est un héros valide — neuf, en pleine santé — : c'est ce
  * que devient un héros venu d'une grille sans état vivant. La fiche (hero.ts)
  * les relit dans le miroir.
  */
-export const HERO_SLOTS = { name: [0, -2], harm: [0, -1], age: [-1, -1], dug: [-1, 1], laid: [1, 1] } as const;
+export const HERO_SLOTS = { name: [0, -2], harm: [0, -1], age: [-1, -1], bag: [1, -1], dug: [-1, 1], load: [1, 1] } as const;
+/** Cellules d'une même matière que le sac du héros tient au plus (`life` est un octet). */
+export const BAG = 250;
 /** Dégâts qui tuent le héros. */
 export const HERO_HARM = 200;
 
@@ -167,6 +173,8 @@ export const MATERIALS: Record<MaterialId, Material> = {
   [SWITCH]: { id: SWITCH, name: "Interrupteur", kind: "static", density: 9, color: [176, 132, 60], noise: 8, hint: "Cliquez dessus pour ouvrir ou fermer le circuit" },
   [NITROGEN]: { id: NITROGEN, name: "Azote liquide", kind: "liquid", density: 1, color: [214, 240, 250], noise: 10, spread: 2, heat: -190, boil: { at: -60, into: STEAM }, hint: "À -190 °C : gèle tout ce qu'il touche et s'évapore en buée" },
   [NITRO]: { id: NITRO, name: "Nitroglycérine", kind: "liquid", density: 4, color: [208, 196, 116], noise: 8, spread: 1, hint: "Huile instable : la poser ne risque rien, la faire tomber tout casser" },
+  [SODIUM]: { id: SODIUM, name: "Sodium", kind: "powder", density: 3, color: [204, 208, 200], noise: 10, hint: "Plus léger que l'eau, il flotte… et saute au premier contact. Se garde sous l'huile" },
+  [RUST]: { id: RUST, name: "Rouille", kind: "static", density: 8, color: [150, 72, 36], noise: 26, hint: "Le métal resté mouillé : ne conduit plus. L'eau salée la fait venir cinq fois plus vite" },
   [C4]: { id: C4, name: "C4", kind: "static", density: 8, color: [232, 228, 212], noise: 6, hint: "Insensible au feu : ne saute que sous l'étincelle, et entraîne ses voisins" },
   [FIREDAMP]: { id: FIREDAMP, name: "Grisou", kind: "gas", density: 1, color: [128, 172, 126], noise: 14, life: 250, flammable: 1, hint: "Gaz de mine : s'accumule au plafond et part d'un seul coup" },
   [MINE]: { id: MINE, name: "Mine", kind: "static", density: 8, color: [104, 116, 96], noise: 8, hint: "Saute sous le poids de ce qui coule ; on peut la murer sans risque" },
@@ -205,10 +213,10 @@ export const CATEGORIES: { name: string; ids: MaterialId[] }[] = [
   { name: "Terrain", ids: [SAND, STONE, WOOD, GLASS, MUD, SALT, FILINGS] },
   { name: "Liquides", ids: [WATER, SALTWATER, OIL, PETROLEUM, TAR, ALCOHOL, ACID, MERCURY, MOLTEN_WAX, MOLTEN_GLASS, CEMENT] },
   { name: "Inflammable", ids: [FIRE, EMBER, LAVA, WAX, CANDLE] },
-  { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, THERMITE, URANIUM] },
+  { name: "Explosifs", ids: [GUNPOWDER, TNT, NITRO, C4, MINE, SODIUM, THERMITE, URANIUM] },
   { name: "Froid", ids: [ICE, SNOW, NITROGEN] },
   { name: "Vivant", ids: [SEED, PLANT, RABBIT, HERO, NANITE] },
-  { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK, MAGNET] },
+  { name: "Électricité", ids: [METAL, BATTERY, SWITCH, SPARK, MAGNET, RUST] },
   { name: "Gaz", ids: [SMOKE, STEAM, FIREDAMP, FALLOUT] },
   { name: "Outils", ids: [SOURCE, EMPTY] },
 ];

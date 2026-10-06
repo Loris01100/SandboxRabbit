@@ -14,11 +14,12 @@ import { Engine } from "./engine.ts";
 import { Tracker, type Patch } from "./render.ts";
 import type { Pool } from "./pool.ts";
 import { encode } from "./codec.ts";
-import { HERO, HERO_SLOTS, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
+import { EMBER, FIRE, HERO, HERO_SLOTS, LAVA, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../gestures.ts";
-import { Player, Recorder, isGesture, put, vet, vetBeats, type Beat, type Recording } from "../replay.ts";
+import { Player, Recorder, fair, isGesture, put, vet, vetBeats, type Beat, type Recording } from "../replay.ts";
 import { CHALLENGES, SCENES, count } from "../challenges.ts";
 import { SEEDS, terrain } from "../terrain.ts";
+import type { Explore } from "./explore.ts";
 import { parseGoal, ticksFor } from "../ui.ts";
 
 /** Les réglages du bac. Le panneau en est la source, le bac ne les invente pas. */
@@ -49,6 +50,7 @@ export type Order =
   | { t: "edit"; do: "clear" | "undo" | "redo" | "step" | "snapshot" }
   | { t: "scene"; name: string }
   | { t: "terrain"; seed: number }
+  | { t: "explore"; seed: number; saved?: string }
   | { t: "goal"; goal: string | null }
   | { t: "cursor"; x: number; y: number }
   | { t: "clip"; ask: number; x: number; y: number; x2: number; y2: number }
@@ -61,16 +63,23 @@ export type Order =
   | { t: "follow"; rec: Recording | null }
   | ({ t: "turn" } & Turn);
 
+/** Ce que la frame a fait d'audible (`Engine.heard`) : explosions et éclairs. */
+export type Heard = { booms: number; loudest: number; at: number; bolts: number; boltAt: number };
+
+/** Ce qui fait un fond sonore, relevé avec les stats : flammes, lave, météo (0 sec à 3 gros orage). Tout à zéro en pause. */
+export type Hum = { fire: number; lava: number; rain: number };
+
 export type News =
-  | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number, string] | null }
-  | { t: "stats"; filled: number }
-  | { t: "grid"; full: string }
+  | { t: "frame"; patches: Patch[]; w: number; h: number; ambient: number; probe: [MaterialId, number] | null; hero: [number, number, string] | null; heard: Heard | null; origin: number | null }
+  | { t: "stats"; filled: number; hum: Hum }
+  | { t: "grid"; full: string; w: number; voyage: boolean }
   | { t: "start"; rec: Recording }
   | ({ t: "turn" } & Turn)
   | { t: "desync" }
   | { t: "reply"; ask: number; value: unknown }
   | { t: "say"; text: string }
-  | { t: "won" }
+  /** Défi gagné, avec la partie depuis sa construction si le classement peut la recevoir (`fair()`), sinon null. */
+  | { t: "won"; film: Recording | null }
   | { t: "rec"; ticks: number; beats: number; size: number; w: number; h: number }
   | { t: "play"; on: boolean };
 
@@ -85,6 +94,10 @@ const UNDO_BYTES = 64 * 1024 * 1024;
 type Snapshot = { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array };
 
 const STATS = 500;
+/** Ce que compte le fond sonore : 1 ce qui crépite (flamme, braise), 2 ce qui gronde (lave). */
+const HUM = new Uint8Array(256);
+HUM[FIRE] = HUM[EMBER] = 1;
+HUM[LAVA] = 2;
 /**
  * Période de la copie de secours (`grid`), en ms, pour 640×360 ou moins ;
  * elle s'allonge avec la taille (`GRID_CELLS`) : l'encodage coûte 13 ms en
@@ -98,9 +111,11 @@ const GRID_CELLS = 640 * 360;
 const TURN = 50;
 const SUM = 60;
 const CATCH_UP = 32;
-/** Temps de simulation qu'une frame s'accorde, en ms : de quoi rendre et répondre sous 16,7 ms. */
-const SLICE = 12;
+/** Temps de simulation qu'une frame s'accorde à 60 Hz, en ms : de quoi rendre et répondre sous 16,7 ms. */
+export const SLICE = 12;
 const FOLLOW = "Vous suivez l'hôte : c'est lui qui mène le bac.";
+/** Annuler en exploration : la fenêtre a pu glisser depuis le cran, il ramènerait une autre grille. */
+const STILL = "Pas d'annulation en exploration.";
 /** Ambiante à laquelle se bâtit un défi : celle d'un bac neuf. */
 const AMBIENT = 20;
 
@@ -128,9 +143,18 @@ export class Sandbox {
   private player: Player | null = null;
   /** Condition de victoire du défi en cours, lue deux fois par seconde. */
   private won: ((e: Engine) => boolean) | null = null;
+  /**
+   * La partie du défi livré en cours, enregistrée depuis sa construction,
+   * pour le classement : elle part avec la victoire, et chaque visiteur la
+   * rejoue pour y croire (sim/verdict.ts). À part de `rec` : le joueur
+   * enregistre, ou pas, ce qu'il veut. Oubliée avec le défi.
+   */
+  private trial: Recorder | null = null;
   private cursor = { x: -1, y: -1 };
   /** Reliquat de tick quand la vitesse n'est pas entière (ralenti). */
   private pending = 0;
+  /** Temps de simulation de la frame en cours (`frame()`), lu par `late()`. */
+  private slice = SLICE;
   private sinceStats = 0;
   private sinceGrid = 0;
   /** Le bac a changé depuis la dernière copie de secours (`grid`) : un ordre, ou un tick où quelque chose était éveillé. */
@@ -147,6 +171,19 @@ export class Sandbox {
   private follower: Player | null = null;
   private checks = new Map<number, number>();
   private lost = false;
+  /**
+   * Le mode exploration (sim/explore.ts), null hors de lui : la fenêtre
+   * glisse après chaque tick et bâtit d'avance une image sur deux. Quitté
+   * par tout ce qui remplace la grille (vider, charger, décor, monde, taille,
+   * salon) : ce n'est plus la fenêtre de son monde.
+   */
+  private voyage: Explore | null = null;
+  /** Numéro du dernier départ demandé : un départ dont le module arrive après un autre ordre est oublié. */
+  private boarding = 0;
+  /** La fenêtre a glissé pendant cette frame : `prepare()` attend la suivante. */
+  private slid = false;
+  /** Le chargement du mode en cours ou fini (`explore()`), pour que les tests l'attendent. */
+  arrival: Promise<void> = Promise.resolve();
 
   /**
    * `pool` : les fils auxiliaires du moteur, s'il y en a (sim/worker.ts). Il
@@ -165,7 +202,7 @@ export class Sandbox {
 
   order(o: Order): void {
     if (o.t !== "cursor" && o.t !== "clip" && o.t !== "grid" && o.t !== "film") this.touched = true;
-    if (this.follower && (o.t === "do" || o.t === "edit" || o.t === "scene" || o.t === "terrain" || o.t === "load"
+    if (this.follower && (o.t === "do" || o.t === "edit" || o.t === "scene" || o.t === "terrain" || o.t === "explore" || o.t === "load"
       || o.t === "goal" || o.t === "rec" || o.t === "play" || o.t === "reel")) {
       if (o.t !== "do" && !(o.t === "edit" && o.do === "snapshot")) this.send({ t: "say", text: FOLLOW });
       if (o.t === "load" && o.ask !== undefined) this.send({ t: "reply", ask: o.ask, value: false });
@@ -182,6 +219,7 @@ export class Sandbox {
         if (!isGesture(o.g, this.engine.cells.length)) return;
         applyGesture(this.engine, o.g);
         this.rec?.gesture(o.g);
+        this.trial?.gesture(o.g);
         this.stream?.gesture(o.g);
         return;
       case "set": {
@@ -206,8 +244,10 @@ export class Sandbox {
       case "edit": return this.edit(o.do);
       case "scene": return this.scene(o.name);
       case "terrain": return this.world(o.seed);
+      case "explore": return this.explore(o.seed, o.saved);
       case "goal": {
         const goal = parseGoal(o.goal);
+        this.trial = null; // un monde-défi de la galerie n'a pas de classement : sa grille n'est pas bâtie en code
         this.won = goal
           ? (e) => (goal.op === "ge" ? count(e, goal.id) >= goal.n : count(e, goal.id) < goal.n)
           : null;
@@ -258,8 +298,11 @@ export class Sandbox {
    * la suivante — en 1920×1080, un lac qui s'étale coûte 16 ms le tick, et la
    * boucle montait à huit ticks par frame, 130 ms entre deux images, le
    * pinceau autant en retard. Un bac trop chargé ralentit, il ne rame plus.
+   * `slice` : ce plafond, plus large quand les frames sont plus espacées
+   * (images limitées à 30 par seconde, worker.ts).
    */
-  frame(ms: number): void {
+  frame(ms: number, slice = SLICE): void {
+    this.slice = slice;
     const budget = ticksFor(this.knobs.speed, ms, this.pending);
     this.pending = budget.pending;
     const start = performance.now();
@@ -280,6 +323,12 @@ export class Sandbox {
         if (this.late(start)) break;
       }
     }
+    // Un morceau du chunk qui entrera si le héros continue : 4 ms, hors des
+    // ticks. Pas dans la frame qui vient de glisser : elle a déjà payé le
+    // glissement, et le chunk suivant a 256 pas du héros pour se bâtir.
+    const slid = this.slid;
+    this.slid = false;
+    if (!slid) this.voyage?.prepare(this.engine);
 
     const patches = this.tracker.take();
     const { width: w, height: h } = this.engine;
@@ -291,24 +340,48 @@ export class Sandbox {
     const hero: [number, number, string] | null = heart >= 0 && this.engine.cells[heart] === HERO
       ? [heart % w, (heart / w) | 0, heroName(this.engine, this.engine.life[heart + HERO_SLOTS.name[1] * w + HERO_SLOTS.name[0]])]
       : null;
-    this.send({ t: "frame", patches, w, h, ambient: this.engine.ambient, probe, hero });
+    // Relevé puis vidé à chaque frame : la page joue ce qui vient d'arriver,
+    // pas ce qui s'est accumulé pendant une pause.
+    const noise = this.engine.heard;
+    const heard = noise.booms + noise.bolts > 0 ? { ...noise } : null;
+    noise.booms = noise.loudest = noise.at = noise.bolts = noise.boltAt = 0;
+    this.send({ t: "frame", patches, w, h, ambient: this.engine.ambient, probe, hero, heard, origin: this.voyage?.x0 ?? null });
 
     this.sinceStats += ms;
     if (this.sinceStats >= STATS) {
       this.sinceStats = 0;
       const { cells } = this.engine;
-      let filled = 0;
-      for (let i = 0; i < cells.length; i++) if (cells[i] !== 0) filled++;
-      this.send({ t: "stats", filled });
-      if (this.won?.(this.engine)) { this.won = null; this.send({ t: "won" }); }
+      let filled = 0, fire = 0, lava = 0;
+      for (let i = 0; i < cells.length; i++) {
+        const id = cells[i];
+        if (id === 0) continue;
+        filled++;
+        const hum = HUM[id];
+        if (hum === 1) fire++;
+        else if (hum === 2) lava++;
+      }
+      // En pause, plus rien ne crépite : le fond sonore se tait avec le bac.
+      const on = this.knobs.running;
+      this.send({ t: "stats", filled, hum: on ? { fire, lava, rain: this.knobs.weather } : { fire: 0, lava: 0, rain: 0 } });
+      if (this.won?.(this.engine)) {
+        const film = this.trial && fair(this.trial.rec) ? this.trial.rec : null;
+        this.won = null;
+        this.trial = null;
+        this.send({ t: "won", film });
+      }
     }
 
     if (this.engine.busy > 0) this.touched = true;
     this.sinceGrid += ms;
-    if (this.touched && this.sinceGrid >= GRID * Math.max(1, this.engine.cells.length / GRID_CELLS)) {
+    // Pas dans la frame qui vient de glisser : la copie de secours encode toute
+    // la grille (plusieurs ms en 1280×720), et tombait parfois sur elle.
+    if (this.touched && !slid && this.sinceGrid >= GRID * Math.max(1, this.engine.cells.length / GRID_CELLS)) {
       this.sinceGrid = 0;
       this.touched = false;
-      this.send({ t: "grid", full: this.encoded() });
+      // En exploration, la partie entière (sim/explore.ts, `save()`) : la
+      // fenêtre seule reviendrait sans le monde déjà parcouru.
+      const full = this.encoded();
+      this.send({ t: "grid", full: this.voyage ? this.voyage.save(this.engine, full) : full, w: this.engine.width, voyage: this.voyage !== null });
     }
 
     this.sinceTurn += ms;
@@ -352,7 +425,7 @@ export class Sandbox {
    * l'attend.
    */
   private late(start: number): boolean {
-    if (performance.now() - start < SLICE) return false;
+    if (performance.now() - start < this.slice) return false;
     this.pending = 0;
     return true;
   }
@@ -363,6 +436,10 @@ export class Sandbox {
     this.sums = [];
     if (!on) return;
     this.play(false);
+    // Les invités ne recevraient pas les glissements de la fenêtre : le salon
+    // reprend la fenêtre telle quelle, comme un bac ordinaire.
+    if (this.voyage) this.send({ t: "say", text: "Bac partagé : l'exploration s'arrête, la fenêtre devient un bac ordinaire." });
+    this.leave();
     this.stream = new Recorder(this.engine, this.knobs.weather);
     this.sent = 0;
     this.send({ t: "start", rec: { ...this.stream.rec, beats: [] } });
@@ -379,7 +456,9 @@ export class Sandbox {
     }
     this.play(false);
     this.record(false);
+    this.leave();
     this.won = null;
+    this.trial = null;
     // La partie de départ de l'hôte passe au même crible qu'un rejeu importé.
     const ok = vet(rec);
     try {
@@ -394,9 +473,16 @@ export class Sandbox {
   private tick(): void {
     const rain = this.knobs.weather;
     this.rec?.tick(rain); // avant le pas : c'est l'état de la scène qui va servir
+    this.trial?.tick(rain);
     this.stream?.tick(rain);
     weather(this.engine, rain);
     this.engine.step();
+    // Entre deux ticks, comme l'exige `shift()`. Ni enregistrement ni salon en
+    // exploration (refusés) : rien à `stamp()`.
+    if (this.voyage?.slide(this.engine)) {
+      this.tracker.grained();
+      this.slid = true;
+    }
     const ticks = this.stream?.rec.ticks;
     if (ticks !== undefined && ticks % SUM === 0) this.sums.push([ticks, fingerprint(this.engine.cells)]);
   }
@@ -409,6 +495,7 @@ export class Sandbox {
    */
   private stamp(): void {
     this.rec?.stamp();
+    this.trial?.stamp(); // annuler pendant un défi : la partie n'ira pas au classement (`fair()`)
     this.stream?.stamp();
   }
 
@@ -426,20 +513,22 @@ export class Sandbox {
       case "snapshot": return this.snapshot();
       case "step": return this.tick();
       case "clear":
+        this.leave();
         this.snapshot();
         this.engine.clear();
         this.stamp();
         // Un défi vidé est souvent gagné d'avance (Débâcle : plus de glace du
         // tout) : vider l'abandonne.
         this.won = null;
+        this.trial = null;
         return;
-      case "undo": return this.jump(this.undoStack, this.redoStack, "Annulé", "Rien à annuler.");
-      case "redo": return this.jump(this.redoStack, this.undoStack, "Rétabli", "Rien à rétablir.");
+      case "undo": return this.jump(this.undoStack, this.redoStack, "Annulé", this.voyage ? STILL : "Rien à annuler.");
+      case "redo": return this.jump(this.redoStack, this.undoStack, "Rétabli", this.voyage ? STILL : "Rien à rétablir.");
     }
   }
 
   private snapshot(): void {
-    if (this.player) return;
+    if (this.player || this.voyage) return; // en exploration, rien à annuler : la grille glisse
     this.undoStack.push(this.capture());
     if (this.undoStack.length > this.undoMax()) this.undoStack.shift();
     this.redoStack.length = 0; // un nouveau geste referme la branche annulée
@@ -481,6 +570,7 @@ export class Sandbox {
     const found = challenge ?? SCENES.find((s) => s.name === name);
     if (!found) return;
     this.play(false); // la scène remplace la grille du rejeu : il s'arrête
+    this.leave();
     this.snapshot();
     // Un défi se bâtit à 20 °C quelle que soit l'ambiante du panneau, rendue
     // aussitôt : baisser l'ambiante *avant* de lancer « Grand froid » bâtissait
@@ -492,6 +582,9 @@ export class Sandbox {
     this.engine.ambient = ambient;
     this.stamp();
     this.won = challenge ? challenge.won : null;
+    // Après `stamp()`, sur la grille que le salon vient d'arrondir : le juge
+    // rebâtit la même et la compare à celle-ci.
+    this.trial = challenge ? new Recorder(this.engine, this.knobs.weather) : null;
   }
 
   /**
@@ -502,11 +595,82 @@ export class Sandbox {
    */
   private world(seed: number): void {
     this.play(false);
+    this.leave();
     this.snapshot();
     this.engine.clear();
     terrain(this.engine, Math.min(SEEDS, Math.max(1, Math.floor(seed) || 1)));
     this.stamp();
     this.won = null;
+    this.trial = null;
+  }
+
+  /**
+   * Le mode exploration (sim/explore.ts) : une fenêtre `WINDOW_W` × `WINDOW_H`
+   * sur un monde infini en largeur, qui glisse avec le héros. La page a déjà
+   * mis le bac à cette taille (`fit()`) ; sinon, refusé — le bac et la page
+   * ne parleraient plus de la même grille.
+   *
+   * Ni annulation, ni enregistrement, ni rejeu, ni salon : tous supposent une
+   * grille qui ne glisse pas. Les crans d'avant sont oubliés — annuler
+   * ramènerait une autre grille sous un mode qui continuerait de glisser.
+   *
+   * `saved` : une partie rangée par la page (copie `grid` d'une visite
+   * d'avant), reprise si elle est lisible et de la même graine ; sinon le
+   * monde neuf de `seed`.
+   */
+  private explore(seed: number, saved?: string): void {
+    if (this.stream) { this.send({ t: "say", text: "Pas d'exploration pendant un salon partagé." }); return; }
+    this.leave();
+    const ticket = this.boarding;
+    // Chargé au premier clic (budget du Worker) : en attendant, le bac
+    // continue. Un ordre qui remplace la grille pendant ce temps (`leave()`)
+    // change le ticket, et ce départ-là n'a plus lieu.
+    this.arrival = import("./explore.ts").then(({ Explore, WINDOW_W, WINDOW_H, parse }) => {
+      if (ticket !== this.boarding) return;
+      if (this.stream) { this.send({ t: "say", text: "Pas d'exploration pendant un salon partagé." }); return; }
+      if (this.engine.width !== WINDOW_W || this.engine.height !== WINDOW_H) {
+        this.send({ t: "say", text: `L'exploration demande un bac de ${WINDOW_W} × ${WINDOW_H}.` });
+        return;
+      }
+      this.play(false);
+      if (this.rec) {
+        this.rec = null;
+        this.send({ t: "say", text: "Enregistrement abandonné : le monde d'exploration glisse sous la fenêtre." });
+      }
+      this.undoStack.length = 0;
+      this.redoStack.length = 0;
+      this.won = null;
+      this.trial = null;
+      this.touched = true;
+      seed = Math.min(SEEDS, Math.max(1, Math.floor(seed) || 1));
+      this.voyage = new Explore(seed);
+      const log = saved === undefined ? null : parse(saved);
+      let back = false;
+      if (log?.seed === seed) {
+        try {
+          put(this.engine, log.grid, null, this.engine.ambient);
+          this.voyage.resume(this.engine, log);
+          back = true;
+        } catch {
+          /* fenêtre illisible : le monde neuf, ci-dessous */
+        }
+      }
+      if (!back) {
+        if (saved !== undefined) this.send({ t: "say", text: `Exploration rangée illisible : monde n° ${seed} tout neuf.` });
+        this.voyage.start(this.engine);
+      }
+      // Le grain du monde infini vient de la position (`lay()`), pas du tirage
+      // du moteur : la page garde sinon celui de la première frame du bac.
+      this.tracker.grained();
+    }, () => {
+      this.send({ t: "say", text: "Exploration indisponible : le module ne s'est pas chargé." });
+    });
+  }
+
+  /** Quitte le mode exploration, et annule un départ encore en chargement (`explore()`). */
+  private leave(): void {
+    this.voyage = null;
+    this.boarding++;
   }
 
   /**
@@ -516,6 +680,7 @@ export class Sandbox {
    */
   private load(data: string, ask?: number, quiet?: boolean): void {
     this.play(false); // la grille venue d'ailleurs remplace celle du rejeu
+    this.leave();
     if (!quiet) this.snapshot();
     try {
       put(this.engine, data, null, this.engine.ambient);
@@ -534,15 +699,18 @@ export class Sandbox {
     // Un autre monde : l'objectif du défi en cours ne le concerne plus. Un
     // monde-défi de la galerie réarme le sien juste après (ordre `goal`).
     this.won = null;
+    this.trial = null;
     if (ask !== undefined) this.send({ t: "reply", ask, value: true });
   }
 
   private resize(width: number, height: number, keep: boolean): void {
     // Le rejeu tient l'ancien moteur : il continuerait d'avancer dans le vide.
     this.play(false);
+    this.leave();
     // Un bac neuf (la cuvette, ou rien) remplirait d'avance plus d'un objectif.
     // Un défi livré se rebâtit après (`fit()` puis l'ordre `scene`).
     this.won = null;
+    this.trial = null;
     const { wind, ambient, gravity, emit } = this.engine;
     this.engine = new Engine(width, height);
     Object.assign(this.engine, { wind, ambient, gravity, emit });
@@ -567,6 +735,8 @@ export class Sandbox {
   private record(on: boolean): void {
     if (on) {
       if (this.player) return; // on n'enregistre pas un rejeu
+      // Le rejeu ne connaît ni la graine ni les chunks rangés : il ne saurait pas refaire un glissement.
+      if (this.voyage) { this.send({ t: "say", text: "Pas d'enregistrement en exploration." }); return; }
       this.rec = new Recorder(this.engine, this.knobs.weather);
       this.stream?.stamp();
       return;
@@ -597,6 +767,10 @@ export class Sandbox {
       this.send({ t: "say", text: "Pas de rejeu pendant un salon partagé." });
       return;
     }
+    if (this.voyage) {
+      this.send({ t: "say", text: "Pas de rejeu en exploration." });
+      return;
+    }
     if (this.rec) {
       this.send({ t: "say", text: "Enregistrement en cours : arrêtez-le d'abord." });
       return;
@@ -606,6 +780,7 @@ export class Sandbox {
       return;
     }
     this.snapshot(); // le bac d'avant reste annulable
+    this.trial = null; // le rejeu remplace la grille du défi : il ne se gagne plus au classement
     this.player = new Player(this.film, this.engine);
     this.send({ t: "play", on: true });
   }

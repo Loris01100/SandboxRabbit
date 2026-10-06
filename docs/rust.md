@@ -2,8 +2,10 @@
 
 Le dossier [rust/](../rust/) contient un **prototype** : la diffusion de la
 chaleur du moteur (`thermal()` d'[engine.ts](../src/client/sim/engine.ts))
-réécrite en Rust et compilée en WebAssembly (WASM). Il sert à mesurer ce
-qu'un moteur en Rust ferait gagner. Il n'est **pas branché sur le bac** : le jeu
+et la pression de l'air (`breathe()`, voir
+[simulation.md](agents/simulation.md#pression-et-vent)) réécrites en Rust et
+compilées en WebAssembly (WASM). Il sert à mesurer ce qu'un moteur en Rust
+ferait gagner. Il n'est **pas branché sur le bac** : le jeu
 tourne toujours sur engine.ts, et rien de ce qui est décrit ici n'est
 nécessaire pour `npm run dev`, `check` ou `build`.
 
@@ -48,8 +50,9 @@ fixe la version de Rust (1.98.1) et la cible `wasm32-unknown-unknown`. Au
 premier `cargo` lancé depuis `rust/`, rustup les télécharge. Tout le monde
 compile donc avec la même version, sans `rustup target add`.
 
-Pas de wasm-pack ni de wasm-bindgen : le module n'a aucune dépendance (voir
-plus bas), `cargo` suffit.
+Pas de wasm-pack ni de wasm-bindgen : `cargo` suffit. Une seule dépendance,
+la crate `libm` (musl en pur Rust, pas de code C à compiler), téléchargée par
+`cargo` au premier `npm run rust` — il faut donc le réseau cette fois-là.
 
 Pour vérifier : `cargo --version` dans un nouveau terminal.
 Pour tout désinstaller : `rustup self uninstall`.
@@ -95,7 +98,14 @@ qu'écrit `flat()` : sans le `+ 0.0`, 317 952 températures diffèrent.
 
 Le script échoue si le `.wasm` manque, si une version annoncée exacte ne
 rend pas exactement ce que rend JavaScript, ou si les trois scènes comptent
-trop peu de changements d'état pour vérifier `convert()`. Il ne garde aucun budget de
+trop peu de changements d'état pour vérifier `convert()`.
+
+Il fait ensuite de même pour la pression, sur une **salve** : le chantier
+tassé 50 ticks, une nappe de fumée, et seize charges qui sautent au même
+tick, en 1920×1080 puis en 1917×1077. `breathe()` en JavaScript contre
+`air()` en Rust, comparés au bit près (les deux tampons de pression, l'élan
+`windX` / `windY`, `stir`, `hush` et l'indicateur `CTL.gust`) sur 10 ticks. Il échoue si une version
+diffère, ou si la salve laisse trop peu de pression à comparer. Il ne garde aucun budget de
 temps : comme `npm run directions`, c'est un instrument de décision, pas un
 test. Il ne tourne pas en CI, qui n'a pas Rust.
 
@@ -104,15 +114,16 @@ test. Il ne tourne pas en CI, qui n'a pas Rust.
 | Fichier | Rôle |
 | --- | --- |
 | `rust-toolchain.toml` | version de Rust et cible WASM, installées d'office par rustup |
-| `Cargo.toml` | la bibliothèque `thermal`, compilée en `cdylib` (un `.wasm` chargeable), optimisée au maximum en `release` |
+| `Cargo.toml` | la bibliothèque `thermal`, compilée en `cdylib` (un `.wasm` chargeable), optimisée au maximum en `release` ; sa dépendance `libm`, en version exacte (`=0.2.16`) : une autre version pourrait changer un algorithme, donc un bit |
 | `.cargo/config.toml` | cible par défaut `wasm32-unknown-unknown`, SIMD 128 bits activé. Lu seulement quand `cargo` est lancé **depuis** `rust/` : `npm run rust` s'y place |
-| `src/lib.rs` | le code : `reserve()` et `thermal()` |
+| `src/lib.rs` | le code : `reserve()`, `thermal()`, `air()` (la pression) et `math()` (les fonctions de la crate `libm` sur un tableau d'arguments) |
 | `target/` | le résultat de la compilation (ignoré par git) : `target/wasm32-unknown-unknown/release/thermal.wasm`, 10 Ko |
 
 ## Comment JavaScript et Rust se parlent
 
-Le module est en `no_std` : sans bibliothèque standard, sans dépendance, sans
-wasm-bindgen. Il exporte deux fonctions et sa mémoire.
+Le module est en `no_std` : sans bibliothèque standard ni wasm-bindgen, avec
+la seule crate `libm`. Il exporte `reserve()`, les calculs (`thermal()`,
+`air()`, `math()`) et sa mémoire.
 
 1. JavaScript appelle `reserve(octets)` pour chaque tableau (cellules, `life`,
    les deux tampons de température, blocs de veille, tables des matières).
@@ -174,6 +185,27 @@ Deux écarts avec engine.ts, sans effet sur le résultat, pour la vitesse :
   qu'aucune n'est dans un bloc endormi, le mode 0 saute les tests de bord et
   lit les tableaux par pointeur. Les bouts de ligne au bord du bac ou d'un
   bloc endormi restent à `diffuse_one()`, vérifiée.
+
+### La pression
+
+`air()` suit `breathe()` d'engine.ts : trois sous-pas qui échangent les
+tampons (le résultat finit donc dans `next`), chacun en deux passes —
+l'élan des faces (`wind_chunk()`, sautée quand `still()`), puis la pression
+(`air_chunk()`) —, le raccourci `hushed()` pour un bloc sans pression ni
+élan, le réveil des quatre voisins d'un bloc agité, et la remise à zéro des
+blocs calmés (les deux tampons et l'élan, comme `hushChunk()`). Il reçoit la
+table `OPEN` d'engine.ts (1 = air), exportée pour test/rust.ts. Une seule
+version, copie cellule par cellule en f64, **au bit près**.
+
+Le mode SIMD (f64×2, « cette voisine est-elle de l'air ? » en masque
+`v128_bitselect`) mesurait l'ancienne diffusion ; il n'a pas été refait pour
+l'élan de l'air, dont chaque cellule lit les faces de ses voisines écrites à
+la passe d'avant. Pas de version f32 : la chaleur a montré qu'elle diverge,
+et un salon mixte avec elle.
+
+Un changement de `windChunk()`, `airChunk()`, `still()`, `hushed()` ou des
+constantes (`AIR_STEPS`, `WIND_K`, `DRAG`, `DAMP`, `CALM_P`, `CALM_V`) se
+reporte dans lib.rs : sinon `npm run rust` échoue.
 
 ## Résultats
 
@@ -270,6 +302,90 @@ Le gain de Rust sur la chaleur tient (×2 environ, au bit près). Mais la
 chaleur ne pèse lourd que là où le reste du tick s'est effondré : les 40 %
 de la mer de lave ne font que 2 ms. La conclusion ci-dessus reste : ce sont
 les règles des cellules qu'il faudrait porter pour que ça se sente.
+
+### La pression (30 septembre 2026)
+
+Mêmes conditions (Node 24, un seul fil, deux exécutions), sur la salve,
+mesurée au tick qui suit les seize explosions :
+
+| Scène | Tick JS | `breathe()` JS | Rust f64 | Rust SIMD f64×2 |
+| --- | --- | --- | --- | --- |
+| salve 1920×1080, 46 % des blocs éveillés | 67 ms | 11 à 13 ms (17 % du tick) | ×1,9 à 2 | ×2,2 |
+| salve 1917×1077, 9 % des blocs éveillés | 12 à 16 ms | 3,1 à 3,5 ms (20 à 27 % du tick) | ×1,25 à 1,4 | ×1,4 à 1,6 |
+
+Ce qu'on en tire :
+
+- **Au bit près dans les deux modes**, SIMD compris : les masques gardent
+  l'exactitude, comme les f64×2 de la chaleur.
+- Le gain suit la part de calcul réel. En 1920×1080, près de la moitié des
+  blocs sont éveillés et beaucoup portent de la pression : ×2. Là où presque
+  tout passe par `hushed()`, il ne reste que la lecture de mémoire, et Rust
+  ne fait guère mieux que V8 (×1,3 à 1,6).
+- La pression ne coûte **rien** sans explosion (passe sautée), et quelques
+  millisecondes pendant une seconde après. Dans une salve de 1080p, elle pèse
+  moins que les souffles eux-mêmes et le feu qu'ils sèment : la porter seule en
+  Rust gagnerait environ 6 ms sur un tick de 67. Comme pour la chaleur, c'est
+  le reste du tick qui décide.
+Ces mesures sont celles de la diffusion d'avant l'élan de l'air ; voir
+ci-dessous.
+
+### La pression avec élan (2 octobre 2026)
+
+L'air a désormais de l'élan sur ses faces (`windX`, `windY`, voir
+[simulation.md](agents/simulation.md#pression-et-vent)) : deux passes par
+sous-pas au lieu d'une, et deux tableaux de plus à lire. Même salve, mêmes
+conditions :
+
+| Scène | Tick JS | `breathe()` JS | Rust f64 |
+| --- | --- | --- | --- |
+| salve 1920×1080, 46 % des blocs éveillés | 74 ms | 23 à 24 ms (32 % du tick) | ×1,7 à 1,8 |
+| salve 1917×1077, 9 % des blocs éveillés | 15 ms | 6 ms (40 % du tick) | ×1,35 à 1,45 |
+
+- **Au bit près**, élan compris.
+- La pression coûte à peu près **deux fois** ce que coûtait la diffusion en
+  JavaScript (23 ms contre 11 à 13 dans la salve 1080p), pendant la seconde
+  qui suit les souffles ; toujours rien sans explosion. En Rust, elle
+  gagnerait une dizaine de millisecondes sur ce tick-là.
+- La piste en TypeScript ci-dessous tient toujours, et pèse davantage :
+  `hushed()` et `still()` relisent maintenant trois tableaux.
+
+- Avant d'aller plus loin en Rust, une piste en TypeScript : `hushed()` relit
+  toute la bordure de chaque bloc éveillé à chaque sous-pas. Un drapeau « sans
+  pression » par bloc, tenu en double tampon comme `press`, la remplacerait
+  par neuf lectures.
+
+### Les fonctions mathématiques (30 septembre 2026)
+
+L'idée de départ était : « en Rust, `libm` est du code pur, les mêmes bits
+partout ; on pourrait enfin écrire des règles avec de la trigonométrie ».
+En y regardant, **Rust n'est pas nécessaire au jeu** : une fonction écrite en
++ − × ÷ et en lectures de bits est aussi déterministe en JavaScript. D'où
+[src/client/sim/libm.ts](../src/client/sim/libm.ts), la copie ligne à ligne
+de `sin`, `cos`, `atan`, `atan2`, `exp` et `log` de la crate, que le moteur
+peut appeler dès aujourd'hui (voir
+[simulation.md](agents/simulation.md#reproductibilité)).
+
+Rust y sert de **juge** : une implémentation écrite ailleurs, par d'autres,
+du même algorithme. `math()` passe un million d'arguments par fonction à la
+crate, test/rust.ts les passe à libm.ts, et exige les mêmes bits :
+
+| Fonction | TypeScript (V8) | Rust (WASM) | Écart |
+| --- | --- | --- | --- |
+| sin | 50 à 54 ms | 25 ms | identique au bit près |
+| cos | 61 ms | 18 ms | identique au bit près |
+| atan | 34 ms | 12 ms | identique au bit près |
+| exp | 31 ms | 11 ms | identique au bit près |
+| log | 31 ms | 7 ms | identique au bit près |
+| atan2 | 40 ms | 15 ms | identique au bit près |
+
+Soit 30 à 60 ns par appel en TypeScript, deux à quatre fois plus vite en
+Rust. Pour comparaison, `sin` et `cos` de V8 ne rendent **pas** les bits de
+musl sur environ 1 % des arguments (un ulp d'écart ; `atan` et `exp`, si) :
+deux bibliothèques correctes, deux résultats. C'est tout le problème que
+libm.ts règle.
+
+Le jour où le moteur passe en Rust, ses règles appelleront la crate, et
+retomberont sur les bits qu'avaient les parties jouées en TypeScript.
 
 ## Brancher Rust sur le vrai moteur (pas fait)
 

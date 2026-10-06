@@ -8,10 +8,14 @@
  */
 import assert from "node:assert/strict";
 import { Sandbox, type News } from "../src/client/sim/sandbox.ts";
-import { Renderer } from "../src/client/sim/render.ts";
-import { decode } from "../src/client/sim/codec.ts";
+import { Renderer, glide, land, type Mirror } from "../src/client/sim/render.ts";
+import { decode, encode } from "../src/client/sim/codec.ts";
 import { count } from "../src/client/challenges.ts";
-import { EMPTY, FIRE, HERO, PILOT, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
+import { verdict } from "../src/client/sim/verdict.ts";
+import { TRIAL_TICKS, fair, put } from "../src/client/replay.ts";
+import { EMPTY, FIRE, HERO, HERO_BODY, HERO_HEAD, HERO_LEGS, PILOT, SAND, STONE, TNT, WATER } from "../src/client/sim/materials.ts";
+import { Engine } from "../src/client/sim/engine.ts";
+import { EXPLORE_SCALE, Explore, STRIP, WINDOW_H, WINDOW_W, land as build, parse, type Log } from "../src/client/sim/explore.ts";
 
 const W = 80, H = 45;
 
@@ -58,22 +62,13 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   const miroir = {
     width: W, height: H, ambient: 20,
     cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
-    noise: new Int8Array(n), temp: new Int16Array(n),
+    noise: new Int8Array(n), temp: new Float32Array(n), press: new Float32Array(n),
   };
   const reçues = () => {
     for (const f of news.splice(0)) {
       if (f.t !== "frame") continue;
       miroir.ambient = f.ambient;
-      for (const p of f.patches) {
-        for (let r = 0; r < p.h; r++) {
-          const from = r * p.w, to = (p.y + r) * W + p.x;
-          miroir.cells.set(p.cells.subarray(from, from + p.w), to);
-          miroir.life.set(p.life.subarray(from, from + p.w), to);
-          miroir.frozen.set(p.frozen.subarray(from, from + p.w), to);
-          miroir.temp.set(p.temp.subarray(from, from + p.w), to);
-          if (p.noise) miroir.noise.set(p.noise.subarray(from, from + p.w), to);
-        }
-      }
+      for (const p of f.patches) land(miroir, p);
     }
   };
   run(sim, 400);
@@ -86,7 +81,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   const touchées = area(last(news, "frame")!);
   assert.ok(touchées > 0 && touchées < (W * H) / 2, `un grain de sable ne renvoie que son coin de bac (${touchées} cellules)`);
 
-  /** Le miroir recomposé est-il la grille du moteur ? Températures au degré, comme elles voyagent. */
+  /** Le miroir recomposé est-il la grille du moteur ? Températures et pression brutes, comme elles voyagent. */
   const pareil = (quand: string) => {
     reçues();
     const e = sim.engine;
@@ -94,8 +89,9 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
     assert.deepEqual(miroir.life, e.life, `même état vivant — ${quand}`);
     assert.deepEqual(miroir.frozen, e.frozen, `même figé — ${quand}`);
     assert.deepEqual(miroir.noise, e.noise, `même grain — ${quand}`);
-    assert.deepEqual(miroir.temp, Int16Array.from(e.temp, Math.round), `mêmes températures, au degré — ${quand}`);
+    assert.deepEqual(miroir.temp, e.temp, `mêmes températures — ${quand}`);
     assert.equal(miroir.ambient, e.ambient, `même ambiante — ${quand}`);
+    assert.deepEqual(miroir.press, e.press, `même pression — ${quand}`);
   };
   sim.order({ t: "do", g: { t: "paint", x: 20, y: 10, r: 3, id: FIRE, d: 1, over: true } });
   run(sim, 30);
@@ -107,6 +103,15 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   sim.order({ t: "set", k: { running: true, ambient: 60 } });
   run(sim, 20);
   pareil("une autre ambiante");
+  // Un souffle : la pression voyage jusqu'au miroir, puis y retombe à zéro.
+  sim.order({ t: "do", g: { t: "paint", x: 40, y: 30, r: 2, id: TNT, d: 1, over: true } });
+  sim.order({ t: "do", g: { t: "paint", x: 40, y: 27, r: 1, id: FIRE, d: 1, over: true } });
+  run(sim, 6);
+  pareil("un souffle");
+  assert.ok(miroir.press.some((p) => p > 0), "la pression d'un souffle arrive au miroir");
+  run(sim, 300);
+  pareil("un souffle retombé");
+  assert.ok(!miroir.press.some((p) => p > 0), "et y retombe à zéro");
 
   const page = new Renderer(miroir), moteur = new Renderer(sim.engine);
   page.draw();
@@ -114,6 +119,32 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   let écarts = 0;
   for (let i = 0; i < page.pixels.length; i++) if (Math.abs(page.pixels[i] - moteur.pixels[i]) > 2) écarts++;
   assert.ok(écarts < page.pixels.length / 1000, `le miroir se colorie comme le moteur, à l'arrondi des températures près (${écarts} canaux écartés)`);
+}
+
+/**
+ * Le son : une explosion est signalée dans la frame qui l'a jouée, et dans
+ * celle-là seulement (la page la jouerait sinon à chaque image) ; le feu
+ * nourrit le fond sonore des stats, qui se tait en pause.
+ */
+{
+  const { sim, news } = bac();
+  sim.order({ t: "do", g: { t: "paint", x: 40, y: 30, r: 2, id: TNT, d: 1, over: true } });
+  sim.order({ t: "do", g: { t: "paint", x: 40, y: 27, r: 1, id: FIRE, d: 1, over: true } });
+  run(sim, 60);
+  const frames = news.filter((n): n is Frame => n.t === "frame");
+  const bruyantes = frames.filter((f) => f.heard && f.heard.booms > 0);
+  assert.ok(bruyantes.length > 0, "l'explosion du TNT s'entend");
+  assert.ok(bruyantes.length < frames.length, "et seulement dans les frames qui l'ont jouée");
+  const coup = bruyantes[0].heard!;
+  assert.ok(coup.loudest > 0 && Math.abs(coup.at - 40) <= 3, `le plus gros rayon et sa colonne (${coup.loudest} en ${coup.at})`);
+  assert.equal(sim.engine.heard.booms, 0, "relevé, le compte repart de zéro");
+
+  sim.order({ t: "do", g: { t: "paint", x: 20, y: 10, r: 4, id: FIRE, d: 1, over: true } });
+  run(sim, 32);
+  assert.ok(last(news, "stats")!.hum.fire > 0, "le feu nourrit le fond sonore");
+  sim.order({ t: "set", k: { running: false } });
+  run(sim, 32);
+  assert.deepEqual(last(news, "stats")!.hum, { fire: 0, lava: 0, rain: 0 }, "en pause, tout se tait");
 }
 
 // La sonde suit le curseur, et se tait quand il sort du bac.
@@ -196,6 +227,255 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.deepEqual(sim.engine.cells, bâti, "la même graine redonne le même monde");
 }
 
+/**
+ * Le mode exploration, côté protocole : la frame dit où est la fenêtre dans
+ * le monde (`origin`), et ce qui suppose une grille qui ne glisse pas est
+ * refusé — annuler ramènerait une autre grille sous un mode qui glisse.
+ */
+{
+  const news: News[] = [];
+  const sim = new Sandbox(WINDOW_W, WINDOW_H, (n) => news.push(n));
+  const dit = (): string | undefined => last(news, "say")?.text;
+  sim.order({ t: "explore", seed: 4217 });
+  await sim.arrival; // le mode se charge à la demande (`import()`)
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, -2 * STRIP, "la fenêtre part de deux chunks à gauche du zéro du monde");
+  assert.ok(last(news, "frame")!.hero, "un héros est posé");
+  sim.order({ t: "edit", do: "undo" });
+  assert.equal(dit(), "Pas d'annulation en exploration.", "pas d'annulation");
+  sim.order({ t: "rec", on: true });
+  assert.equal(dit(), "Pas d'enregistrement en exploration.", "pas d'enregistrement");
+  sim.order({ t: "host", on: true });
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, null, "un salon arrête l'exploration");
+  sim.order({ t: "host", on: false });
+  sim.order({ t: "explore", seed: 4217 });
+  sim.order({ t: "terrain", seed: 1 });
+  await sim.arrival;
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, null, "un autre monde, demandé pendant que le mode se charge, l'emporte");
+  sim.order({ t: "explore", seed: 4217 });
+  await sim.arrival;
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, -2 * STRIP, "rechargé, le module repart");
+  sim.order({ t: "terrain", seed: 1 });
+  sim.frame(16);
+  assert.equal(last(news, "frame")!.origin, null, "un autre monde arrête l'exploration");
+
+  const petit = bac();
+  petit.sim.order({ t: "explore", seed: 1 });
+  await petit.sim.arrival;
+  assert.match(last(petit.news, "say")!.text, /1280 × 720/, "un bac d'une autre taille est refusé");
+  petit.sim.frame(16);
+  assert.equal(last(petit.news, "frame")!.origin, null, "… et reste un bac ordinaire");
+}
+
+/**
+ * La fenêtre glisse (sim/explore.ts) : un chunk qui sort est rangé, relu tel
+ * quel quand il revient ; un chunk jamais vu est bâti par la graine ; bâti
+ * d'avance par morceaux ou d'un coup, c'est le même. Le héros est déplacé à
+ * la main : le faire marcher sur 400 cellules prendrait des milliers de ticks.
+ */
+{
+  const G = 4217;
+  /** Enlève le héros et le repose au sec, à partir de la colonne `x` vers la droite ; rend la colonne. */
+  const téléporte = (e: Engine, x: number): number => {
+    for (let i = 0; i < e.cells.length; i++) {
+      const id = e.cells[i];
+      if (id === HERO || id === HERO_HEAD || id === HERO_BODY || id === HERO_LEGS) e.set(i % e.width, (i / e.width) | 0, EMPTY);
+    }
+    for (let at = x; ; at++) {
+      let y = 0;
+      while (e.get(at, y) === EMPTY) y++;
+      if (e.get(at, y) !== WATER && e.spawnHero(at, y - 2) >= 0) return at;
+    }
+  };
+  const partie = (): [Engine, Explore] => {
+    const e = new Engine(WINDOW_W, WINDOW_H, 1);
+    const ex = new Explore(G, EXPLORE_SCALE);
+    assert.ok(ex.start(e) >= 0, "le départ pose un héros");
+    return [e, ex];
+  };
+
+  const [e, ex] = partie();
+  const gauche = e.copy(0, 0, STRIP - 1, WINDOW_H - 1);
+  téléporte(e, 700);
+  assert.equal(ex.slide(e), 0, "dans les trois chunks du milieu, la fenêtre ne bouge pas");
+  téléporte(e, 1100);
+  assert.equal(ex.slide(e), STRIP, "passé le quatrième chunk, elle glisse d'un chunk vers la droite");
+  assert.equal(ex.x0, -STRIP, "… et son origine avec");
+  assert.ok(ex.kept.has(-2), "le chunk sorti est rangé");
+  assert.equal(e.cells[e.hero], HERO, "le héros piloté a glissé avec la grille");
+
+  const témoin = new Engine(WINDOW_W, WINDOW_H, 1);
+  témoin.clear();
+  build(témoin, G, EXPLORE_SCALE, -STRIP, 0, WINDOW_W);
+  const bande = (g: Engine, x: number): Uint8Array => g.copy(x, 0, x + STRIP - 1, WINDOW_H - 1).cells;
+  assert.deepEqual(bande(e, WINDOW_W - STRIP), bande(témoin, WINDOW_W - STRIP), "le chunk jamais vu est bâti par la graine");
+
+  téléporte(e, 100);
+  assert.equal(ex.slide(e), -STRIP, "dans le premier chunk, elle revient d'un chunk");
+  assert.equal(ex.x0, -2 * STRIP, "… à son origine de départ");
+  assert.deepEqual(bande(e, 0), gauche.cells, "le chunk rangé revient tel qu'il était parti");
+  assert.deepEqual(e.copy(0, 0, STRIP - 1, WINDOW_H - 1).life, gauche.life, "… `life` compris");
+  assert.ok(!ex.kept.has(-2), "relu, il n'est plus rangé : il le sera de nouveau à sa sortie");
+
+  // Bâti d'avance (huit morceaux, huit images) ou d'un coup : le même chunk.
+  const [d, avance] = partie(), [s, sur] = partie();
+  téléporte(d, 900);
+  téléporte(s, 900);
+  for (let k = 0; k < 8; k++) avance.prepare(d);
+  assert.ok(avance.ready(3), "dans le quatrième chunk, le chunk de droite se bâtit d'avance");
+  téléporte(d, 1100);
+  téléporte(s, 1100);
+  avance.slide(d);
+  sur.slide(s);
+  assert.deepEqual(d.cells, s.cells, "bâti d'avance ou au dernier moment : la même fenêtre");
+  assert.deepEqual(d.life, s.life, "… lapins compris");
+
+  // Un chunk rangé est encodé plus tard (`prepare()`) : relu encore brut ou
+  // déjà encodé, il doit revenir pareil, chaleur comprise — sinon le monde
+  // dépendrait de la cadence des images.
+  const [brut, a] = partie(), [scellé, b] = partie();
+  for (const [g, ex] of [[brut, a], [scellé, b]] as const) {
+    for (let t = 0; t < 30; t++) g.step();
+    téléporte(g, 1100);
+    ex.slide(g);
+  }
+  assert.equal(typeof a.kept.get(-2), "object", "au glissement, le chunk sortant est rangé brut");
+  téléporte(scellé, 640);
+  b.prepare(scellé);
+  assert.equal(typeof b.kept.get(-2), "string", "une image plus tard, `prepare()` l'a encodé");
+  for (const [g, ex] of [[brut, a], [scellé, b]] as const) {
+    téléporte(g, 100);
+    ex.slide(g);
+  }
+  assert.deepEqual(scellé.cells, brut.cells, "relu brut ou encodé : la même grille");
+  assert.deepEqual(scellé.life, brut.life, "… le même `life`");
+  assert.deepEqual(scellé.temp, brut.temp, "… la même chaleur, arrondie au pas du codec dans les deux cas");
+
+  // Côté protocole : la page fait glisser son miroir (`glide()`) et n'en reçoit
+  // que la bande neuve et ce qu'ont changé les ticks, grain compris pour ces
+  // bandes. Un miroir refait comme world.ts, frame après frame, doit rester
+  // la grille du bac — sinon la page montre un monde qui n'est pas celui qui
+  // tourne. Avant, chaque glissement renvoyait toute la grille : 11 Mo.
+  // Frames de 20 ms : à ×1, un tick dure 16,7 ms, et une frame de 16 n'en joue parfois aucun.
+  const news: News[] = [];
+  const sim = new Sandbox(WINDOW_W, WINDOW_H, (n) => news.push(n));
+  const n = WINDOW_W * WINDOW_H;
+  const miroir: Mirror = {
+    width: WINDOW_W, height: WINDOW_H, ambient: 20,
+    cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
+    noise: new Int8Array(n), temp: new Float32Array(n), press: new Float32Array(n),
+  };
+  let vu: number | null = null;
+  const reçoit = (): Extract<News, { t: "frame" }> => {
+    const f = last(news, "frame")!;
+    if (f.origin !== null && vu !== null) glide(miroir, f.origin - vu);
+    vu = f.origin;
+    for (const p of f.patches) land(miroir, p);
+    return f;
+  };
+  sim.frame(20);
+  reçoit();
+  sim.order({ t: "explore", seed: G });
+  await sim.arrival;
+  sim.frame(20);
+  reçoit();
+  assert.deepEqual(miroir.noise, sim.engine.noise, "au départ de l'exploration, la page reçoit le grain du monde infini");
+  for (const [x, attendu] of [[1100, -STRIP], [1100, 0], [100, -STRIP], [100, -2 * STRIP]] as const) {
+    téléporte(sim.engine, x);
+    sim.frame(20);
+    const f = reçoit();
+    assert.equal(f.origin, attendu, `héros en ${x} : la fenêtre glisse jusqu'à ${attendu}`);
+    const envoyé = f.patches.reduce((s, p) => s + p.w * p.h, 0);
+    // Ce qu'ont changé les ticks, plus la bande neuve : pas toute la grille. Une frame
+    // ordinaire de ce monde, où l'eau coule, en envoie déjà un tiers.
+    assert.ok(envoyé < n, `le glissement n'envoie pas toute la grille (${envoyé} cellules sur ${n})`);
+    sim.frame(20);
+    reçoit();
+    assert.deepEqual(miroir.cells, sim.engine.cells, `après le glissement vers ${attendu}, le miroir est la grille du bac`);
+    assert.deepEqual(miroir.life, sim.engine.life, "… `life` compris");
+    assert.deepEqual(miroir.noise, sim.engine.noise, "… grain compris");
+    assert.deepEqual(miroir.temp, sim.engine.temp, "… chaleur comprise");
+  }
+
+  // Sauvegarder (étape 5) : une partie rangée par `save()` puis reprise par
+  // `resume()` redonne la fenêtre (chaleur au pas du codec), le grain, le
+  // héros piloté, et chaque chunk rangé — même ceux encore bruts au moment
+  // de ranger.
+  const [loin, va] = partie();
+  for (let t = 0; t < 30; t++) loin.step();
+  téléporte(loin, 1100);
+  va.slide(loin);
+  téléporte(loin, 1100);
+  va.slide(loin);
+  assert.equal(va.x0, 0, "deux glissements vers la droite");
+  assert.equal(typeof va.kept.get(-1), "object", "le dernier chunk sorti est encore brut");
+  const fenêtre = encode(loin.cells, loin.frozen, loin.life, loin.temp, loin.names);
+  const rangée = va.save(loin, fenêtre);
+  assert.match(rangée, /^\{"seed":4217,/, "la graine en tête : la page la lit sans tout relire");
+  const log = parse(rangée)!;
+  assert.deepEqual(log.kept.map(([c]) => c), [-1, -2], "les chunks rangés, les plus proches d'abord");
+  const reprise = (l: Log): [Engine, Explore] => {
+    const g = new Engine(WINDOW_W, WINDOW_H, 1);
+    put(g, l.grid, null, g.ambient);
+    const x = new Explore(l.seed, EXPLORE_SCALE);
+    x.resume(g, l);
+    return [g, x];
+  };
+  const [là, revu] = reprise(log);
+  assert.equal(revu.x0, 0, "reprise à la même origine");
+  assert.deepEqual(là.cells, loin.cells, "la même fenêtre");
+  assert.deepEqual(là.life, loin.life, "… le même `life`");
+  assert.deepEqual(là.frozen, loin.frozen, "… le même figé");
+  assert.deepEqual(là.noise, loin.noise, "… le même grain, refait par la position");
+  assert.ok(là.temp.every((t, i) => Math.abs(t - loin.temp[i]) <= 4), "… la chaleur au pas du codec (8 °C)");
+  assert.equal(là.chosen, loin.chosen, "… le même héros piloté");
+  là.step();
+  assert.equal(là.cells[là.hero], HERO, "… retrouvé dès le premier tick");
+  for (const [g, x] of [[loin, va], [là, revu]] as const) {
+    téléporte(g, 100);
+    x.slide(g);
+  }
+  assert.deepEqual(bande(là, 0), bande(loin, 0), "le chunk rangé revient d'une partie reprise comme de la partie d'origine");
+  assert.deepEqual(là.copy(0, 0, STRIP - 1, WINDOW_H - 1).life, loin.copy(0, 0, STRIP - 1, WINDOW_H - 1).life, "… `life` compris");
+  assert.equal(parse("{\"seed\":1}"), null, "une partie incomplète est refusée");
+  assert.equal(parse("pas du JSON"), null, "… et ce qui n'est pas du JSON");
+
+  // Un chunk rangé abîmé dans le stockage local est rebâti par la graine,
+  // au lieu de jeter au tick du glissement.
+  const [abîmé, x2] = reprise({ ...log, kept: [[-1, "%%%"]] });
+  téléporte(abîmé, 100);
+  x2.slide(abîmé);
+  const neuf = new Engine(WINDOW_W, WINDOW_H, 1);
+  neuf.clear();
+  build(neuf, G, EXPLORE_SCALE, -STRIP, 0, WINDOW_W);
+  assert.deepEqual(bande(abîmé, 0), bande(neuf, 0), "un chunk rangé illisible revient tel que la graine le bâtit");
+
+  // Côté protocole : en exploration, la copie de secours `grid` porte la
+  // partie, et l'ordre `explore` avec `saved` la reprend.
+  const rangé = (): Extract<News, { t: "grid" }> | undefined => last(news, "grid");
+  for (let k = 0; k < 200 && !rangé()?.voyage; k++) sim.frame(20);
+  const copie = rangé()!;
+  assert.ok(copie.voyage, "en exploration, la copie de secours est la partie");
+  assert.equal(parse(copie.full)?.x0, -2 * STRIP, "… avec l'origine de la fenêtre");
+  const suite: News[] = [];
+  const repris = new Sandbox(WINDOW_W, WINDOW_H, (m) => suite.push(m));
+  repris.order({ t: "explore", seed: G, saved: copie.full });
+  await repris.arrival;
+  repris.frame(20);
+  assert.equal(last(suite, "frame")!.origin, -2 * STRIP, "la partie reprend à son origine");
+  assert.ok(last(suite, "frame")!.hero, "… avec son héros");
+  assert.equal(last(suite, "say"), undefined, "… sans message");
+  const gâché = new Sandbox(WINDOW_W, WINDOW_H, (m) => suite.push(m));
+  gâché.order({ t: "explore", seed: G, saved: "{abîmé" });
+  await gâché.arrival;
+  gâché.frame(20);
+  assert.match(last(suite, "say")!.text, /illisible/, "une partie illisible est dite");
+  assert.ok(last(suite, "frame")!.hero, "… et le monde neuf part quand même");
+}
+
 /** La frame dit où est le héros — la caméra le suit — et se tait quand il n'y en a pas. */
 {
   const { sim, news } = bac();
@@ -267,6 +547,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.equal(sim.engine.gravity, -1, "et la gravité");
   run(sim, 20);
   assert.ok(last(news, "grid")!.full.length > 0, "la copie de secours part quand le bac a changé");
+  assert.equal(last(news, "grid")!.w, W, "avec la largeur du bac qui l'a faite : rangée sous une autre, elle revenait cisaillée");
 }
 
 /** Sauvegarde et lien demandent une grille fraîche : l'ordre `grid` rend celle de l'instant, décodable en la même matière. */
@@ -491,6 +772,50 @@ function filmé(): { sim: Sandbox; news: News[] } {
   assert.ok(count(sim.engine, WATER) > 0, "le lac est bâti liquide");
   assert.equal(sim.engine.temp[sim.engine.index(160, 150)], 20, "à 20 °C");
   assert.equal(sim.engine.ambient, -60, "et l'ambiante du panneau revient aussitôt");
+}
+
+// Le classement des défis : la victoire d'un défi livré remonte avec la
+// partie depuis sa construction, et le juge (sim/verdict.ts) la rejoue dans
+// un moteur neuf — autre graine, autre fil — pour y croire.
+{
+  const gagne = (ambient: number, avant?: (sim: Sandbox) => void): Extract<News, { t: "won" }> | undefined => {
+    const { sim, news } = bac();
+    sim.order({ t: "size", w: 320, h: 180, keep: true });
+    sim.order({ t: "set", k: { ambient } });
+    sim.order({ t: "scene", name: "Débâcle" });
+    run(sim, 10);
+    avant?.(sim);
+    // La glace et la neige effacées d'un geste : Débâcle gagné.
+    sim.order({ t: "do", g: { t: "rect", x: 90, y: 90, x2: 230, y2: 150, id: EMPTY, over: true } });
+    run(sim, 40);
+    return last(news, "won");
+  };
+  const won = gagne(-10);
+  assert.ok(won?.film, "la victoire remonte avec sa partie");
+  const film = won.film;
+  assert.ok(fair(film) && film.ticks > 10, `une partie recevable, depuis la construction (${film.ticks} ticks)`);
+  assert.equal(film.scene.ambient, -10, "l'ambiante du panneau est dans la partie, le défi bâti à 20 °C");
+  assert.ok(verdict("Débâcle", film, film.ticks), "le juge la rejoue et la trouve gagnante");
+  assert.ok(!verdict("Débâcle", film, film.ticks - 1), "pas en moins de ticks qu'annoncé");
+  assert.ok(!verdict("Grand froid", film, film.ticks), "ni pour un autre défi");
+  assert.ok(!verdict("Débâcle", { ...film, beats: [] }, film.ticks), "sans le geste, elle ne gagne pas");
+  const ailleurs = bac();
+  ailleurs.sim.order({ t: "size", w: 320, h: 180, keep: true });
+  ailleurs.sim.order({ t: "scene", name: "Grand froid" });
+  const autre = ailleurs.sim.engine;
+  const triche = { ...film, grid: encode(autre.cells, autre.frozen, autre.life, autre.temp, autre.names) };
+  assert.ok(!verdict("Débâcle", triche, film.ticks), "une partie qui part d'une autre grille ne compte pas");
+  assert.ok(!fair({ ...film, ticks: TRIAL_TICKS + 1 }), "ni une partie de plus de cinq minutes");
+  assert.ok(!fair({ ...film, beats: [...film.beats, { at: 1, g: { t: "clip", x: 0, y: 0, w: 1, h: 1, cells: "", life: "" } }] }), "ni un morceau collé");
+
+  // Annuler pendant le défi pose une grille d'un coup : la victoire reste, hors classement.
+  const annulé = gagne(20, (sim) => {
+    sim.order({ t: "do", g: { t: "rect", x: 0, y: 0, x2: 3, y2: 3, id: SAND, over: true } });
+    sim.order({ t: "edit", do: "snapshot" });
+    sim.order({ t: "edit", do: "undo" });
+  });
+  assert.ok(annulé, "annuler n'empêche pas de gagner");
+  assert.equal(annulé.film, null, "mais la partie n'est pas recevable au classement");
 }
 
 console.log("ok — protocole du bac conforme");

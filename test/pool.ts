@@ -14,7 +14,8 @@ import { Engine } from "../src/client/sim/engine.ts";
 import { Pool, type Helper } from "../src/client/sim/pool.ts";
 import { applyGesture } from "../src/client/gestures.ts";
 import { terrain } from "../src/client/terrain.ts";
-import { FIRE, LAVA, NITRO, PILOT, SAND, TNT, URANIUM, WATER, WOOD } from "../src/client/sim/materials.ts";
+import { EXPLORE_SCALE, land } from "../src/client/sim/explore.ts";
+import { FIRE, LAVA, METAL, NITRO, PILOT, RUST, SAND, SODIUM, TNT, URANIUM, WATER, WOOD } from "../src/client/sim/materials.ts";
 
 /** `count` fils auxiliaires sous Node, et de quoi les arrêter. */
 function helpers(count: number): { list: Helper[]; stop: () => Promise<void> } {
@@ -39,10 +40,14 @@ function partie(e: Engine): void {
   e.paint(153 * s, 11 * s, 1, LAVA);
   e.rect(100 * s, 5 * s, 101 * s, 6 * s, NITRO);
   e.rect(290 * s, 20 * s, 294 * s, 24 * s, URANIUM);
+  // Gerbes de sodium dans l'eau (explosions différées en nombre), et un fil
+  // qui trempe dessous : la rouille tire au sort dans chaque bloc mouillé.
+  e.rect(225 * s, 1 * s, 235 * s, 3 * s, SODIUM);
+  e.rect(205 * s, 16 * s, 255 * s, 16 * s, METAL);
 }
 
 const signature = (e: Engine) => ({
-  cells: e.cells.slice(), life: e.life.slice(), temp: e.temp.slice(), frozen: e.frozen.slice(), seed: e.seed,
+  cells: e.cells.slice(), life: e.life.slice(), temp: e.temp.slice(), press: e.press.slice(), frozen: e.frozen.slice(), seed: e.seed,
 });
 
 const W = 640, H = 360, TICKS = 400;
@@ -55,14 +60,17 @@ assert.ok(multi.pool, "le pool s'attache au moteur une fois ses fils prêts");
 
 partie(seul);
 partie(multi);
-let t0 = performance.now(), ms1 = 0, ms4 = 0;
+let t0 = performance.now(), ms1 = 0, ms4 = 0, venté = 0;
 for (let t = 0; t < TICKS; t++) {
   const keys = t < 100 ? PILOT.right : t < 200 ? PILOT.right | PILOT.dig : t < 300 ? PILOT.left | PILOT.up : 0;
   applyGesture(seul, { t: "pilot", keys });
   applyGesture(multi, { t: "pilot", keys });
   t0 = performance.now(); seul.step(); ms1 += performance.now() - t0;
   t0 = performance.now(); multi.step(); ms4 += performance.now() - t0;
+  if (t % 10 === 0 && seul.press.some((p) => p > 0)) venté++;
 }
+assert.ok(venté > 0, "la partie a soufflé : la pression (`breathe()`) passe aussi par les fils");
+assert.ok(seul.heard.booms > 0 && seul.cells.includes(RUST), "le sodium a sauté et le fil a rouillé : leurs règles passent aussi par les fils");
 assert.deepEqual(signature(multi), signature(seul), `${TICKS} ticks sur 4 fils = ${TICKS} ticks sur 1, au bit près`);
 console.log(`   640×360, ${TICKS} ticks : 1 fil ${(ms1 / TICKS).toFixed(2)} ms/tick, 4 fils ${(ms4 / TICKS).toFixed(2)} ms/tick`);
 
@@ -73,6 +81,29 @@ partie(autre);
 partie(témoin);
 for (let t = 0; t < 200; t++) { autre.step(); témoin.step(); }
 assert.deepEqual(signature(autre), signature(témoin), "rebranché sur un autre moteur (changement de taille), même résultat");
+
+// La fenêtre du monde infini glisse en pleine partie (`shift()`, docs/agents/exploration.md) :
+// feu, souffle et chutes à cheval sur le décalage, bande neuve bâtie par `land()`.
+const glissé = new Engine(W, H, 11), repère = new Engine(W, H, 11);
+await pool.bind(glissé);
+partie(glissé);
+partie(repère);
+let x0 = 0;
+for (let t = 0; t < 300; t++) {
+  if (t % 50 === 25) {
+    const dx = t % 100 === 25 ? 128 : -128;
+    x0 += dx;
+    for (const e of [glissé, repère]) {
+      e.shift(dx);
+      if (dx > 0) land(e, 4217, EXPLORE_SCALE, x0, W - dx, W);
+      else land(e, 4217, EXPLORE_SCALE, x0, 0, -dx);
+    }
+  }
+  glissé.step();
+  repère.step();
+}
+assert.ok(glissé.heard.booms > 0, "la partie qui glisse a soufflé");
+assert.deepEqual(signature(glissé), signature(repère), "une fenêtre qui glisse : 4 fils = 1 fil, au bit près");
 
 pool.release();
 await stop();

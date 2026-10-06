@@ -5,27 +5,73 @@
 | Commande | Ce qu'elle vérifie |
 | --- | --- |
 | `npm run typecheck` | **quatre** projets tsc : `tsconfig.json` (client, lib DOM), `tsconfig.worker.json` (Worker, types générés, pas de DOM), `tsconfig.test.json` (tout `test/` sauf api.ts : types Node + DOM) et `tsconfig.test-worker.json` (test/api.ts : types Node + Worker). Node exécute les tests **sans** vérifier leurs types : sans ces deux derniers, un champ disparu n'y était vu qu'à l'exécution, et jamais dans test/gpu.ts, qui ne tourne pas en CI |
-| `npm run check` | les cinq scripts d'`assert`, dans l'ordre : sim, ui, api, sandbox, pool |
-| `npm run browser` | dans Chromium sans fenêtre (Playwright) : le shader WebGL2 contre `Renderer` à une unité près, et la page du jeu qui charge sans erreur. Demande `npx playwright install chromium` une fois par machine ; tout est dans [docs/navigateur.md](../navigateur.md) |
-| `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement) |
+| `npm run check` | les sept scripts d'`assert`, dans l'ordre : sim, libm, ui, api, sandbox, pool, rules |
+| `npm run browser` | dans Chromium sans fenêtre (Playwright) : le shader WebGL2 contre `Renderer` à une unité près, la page du jeu qui charge sans erreur, démarre le son au premier geste et survit à une perte du contexte WebGL. Demande `npx playwright install chromium` une fois par machine ; tout est dans [docs/navigateur.md](../navigateur.md) |
+| `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement). Mesure aussi, sans budget, une tranche 256×720 du monde infini (`land()`) et un décalage de la fenêtre 1280×720 (`shift()`, [exploration.md](exploration.md)) |
+| `npm run drift` | la dérive : bench et stress de la branche de base (`DRIFT_BASE`, `origin/main` par défaut, ou un dossier) extraite dans une copie de travail temporaire, contre ici, en alternance sur la même machine, meilleur de 3 manches de chaque côté ([test/drift.ts](../../test/drift.ts)). Échoue au-delà de +30 % (`DRIFT_MAX`), sauf les « pire tick » et sous le plancher de bruit (0,5 ms, 50 ns par cellule). Une base qui n'écrit pas ses mesures (`BENCH_JSON`, `STRESS_JSON`) est sautée. En CI, sur les pull requests |
+| `npm run stress` | les pires cas, chacun sous un plafond, sur un seul fil ([test/stress.ts](../../test/stress.ts)) : un bac 320×180 plein de **chaque** matière (≤ 800 ns par cellule et par tick ; les plus chères font 110 à 160, l'aimant en faisait 4000), TNT en chaîne, souffle en plein air, mer de lave sous la pluie, aimants sur la limaille, et les bandes d'un bac 1920×1080 tout changé (préparation côté bac, tampon rendu comme le fait la page, et pose côté page : ~2 ms chacune, plafond 12 ; 11 et 15 ms avant le tampon unique recyclé et le miroir brut). Plafonds à ~5 fois la mesure de référence ; `STRESS_SLACK=2` les double. ~10 s |
 | `npm run build` | typecheck puis `vite build` (sortie dans `dist/`) |
 | `npm run loc` | taille du projet par poste |
 | `npm run directions` | mesure de décision, pas un test : voir [Choisir une direction](#choisir-une-direction) |
-| `npm run rust` | compile [rust/](../../rust/) en WASM puis lance [test/rust.ts](../../test/rust.ts) : `thermal()` en JavaScript contre sa version Rust, temps et égalité au bit près. Demande Rust installé ([docs/rust.md](../rust.md)) ; hors CI |
+| `npm run rust` | compile [rust/](../../rust/) en WASM puis lance [test/rust.ts](../../test/rust.ts) : `thermal()` et la pression (`breathe()`, élan de l'air compris : `windX`, `windY`) en JavaScript contre leurs versions Rust, temps et égalité au bit près ; sim/libm.ts contre la crate Rust `libm`, mêmes bits exigés. Demande Rust installé ([docs/rust.md](../rust.md)) ; hors CI |
+| `npm run pile` | pas un test : retraduit une pile d'erreur de production dans les sources ([test/pile.ts](../../test/pile.ts), la pile sur l'entrée standard). Reconstruit le client avec ses cartes de sources (`SOURCEMAP=hidden`), les lit puis les efface de `dist/`. Recette dans [recettes.md](recettes.md#décoder-une-pile-de-production) ; son décodeur est testé par test/ui.ts |
 
 Il n'y a **pas de framework de test** ni de linter. Node ≥ 24 exécute le
 TypeScript directement.
 
 | Script | Couvre | Charge |
 | --- | --- | --- |
-| [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), blocs de veille (dont la mer de lave qui doit s'endormir), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
-| [test/ui.ts](../../test/ui.ts) | logique pure du panneau, touches réassignables ; ce que voit le héros ; rapports d'erreur (une fois chacun, cinq au plus, plafond) | `ui.ts`, `sight.ts`, `reporter()` d'`errors.ts` |
-| [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, vues sous débit, ménage (récents + plus vus), routage des messages du salon ; `/api/error` (ce qui est journalisé, `console.error` capturé ; vide, trop lourd, débit) | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
-| [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles ; salon en lockstep, dont les messages mal formés d'un pair (geste d'invité, `turn` et départ de l'hôte) | `Sandbox` avec un rappel `send` qui empile |
-| [test/browser.ts](../../test/browser.ts) (hors `check`) | les deux copies du coloriage (shader de screen.ts, `Renderer`) sur la page [test/screen.html](../../test/screen.html) ; la page du jeu : première frame, console sans erreur ; une exception de la page arrive sur `/api/error` (`204`) | un serveur Vite (`createServer`, port libre) et Chromium via `playwright` |
-| [test/pool.ts](../../test/pool.ts) | le moteur sur plusieurs fils : 400 ticks d'une partie chargée (monde généré, feu, explosifs, uranium, héros piloté) sur 1 fil et sur 4, **identiques au bit près** ; rebranchement sur un autre moteur | `Engine`, `Pool`, fils `worker_threads` ([test/helper.ts](../../test/helper.ts)) |
+| [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), éclairage du secours 2D (`FlatLight` : la lave éclaire, un mur fait de l'ombre, le noir reste noir, le mélange n'assombrit jamais), blocs de veille (dont la mer de lave qui doit s'endormir), pression et vent (un souffle chasse la fumée, la pierre n'en prend pas, l'onde ne traverse pas un mur, elle **voyage** au bout d'un couloir, elle retombe à zéro exactement et le bac se rendort, `wakeAll()` l'efface ; une vitre proche éclate, une lointaine tient, une pièce close en casse plus ; l'onde arrache le sable d'un tas), la moitié du bac qui saute au même tick (aucune explosion perdue), rouille (l'eau la traverse et ronge l'intérieur d'une barre, une rouille sèche ne se propage pas), lapin qui se retourne avec la gravité, sac du héros (il porte ce qu'il creuse, le pose avant la palette), mondes générés (`terrain()` à échelle fixe ; `land()` : tranches dans le désordre = une passe, fenêtres décalées qui coïncident ; `shift()` : aller-retour au bit près, même partie 200 ticks plus tard, raccord avec `land()`, héros qui glisse), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |
+| [test/libm.ts](../../test/libm.ts) | les fonctions mathématiques déterministes : à au plus un ulp de `Math` sous V8 sur des centaines de milliers d'arguments (voisins des multiples de π/4 compris), un cas de référence de la crate `libm` au bit près, cas particuliers (±0, infinis, NaN, débordements) et la limite assumée de sin / cos. Leur **déterminisme** (mêmes bits que la crate) est vérifié par `npm run rust` | `sim/libm.ts` |
+| [test/ui.ts](../../test/ui.ts) | logique pure du panneau, touches réassignables ; ce que voit le héros ; rapports d'erreur (une fois chacun, cinq au plus, plafond) ; décodage des cartes de sources de `npm run pile` (`decode()`, `locate()` : VLQ, valeurs relatives d'une ligne à l'autre) ; réglages purs du son (volumes, forme d'une explosion, stéréo, un curseur par famille de `MIX` dans index.html) ; recherche de la galerie (`matches()`), couleurs des joueurs (`peerColor()`), réglage renommé relu sous son ancien nom (`savedValue()`) | `ui.ts`, `sight.ts`, `reporter()` d'`errors.ts`, fonctions pures de `sound.ts`, `decode()` / `locate()` de test/pile.ts |
+| [test/api.ts](../../test/api.ts) | routes, validation, jetons, en-têtes, cache, vues sous débit et **une par IP** (en-tête `cf-connecting-ip`), ménage (récents + plus vus + plus aimés), remix (`parent`) et « J'aime » (**un par IP**), routage des messages du salon, pseudos (`nick()`, `unique()` : « Alice 2 » ; `claim()` : un pseudo reste `KEEP` à la clé qui l'a porté), numéros (`freeId()`), verrou (`lock` de l'hôte seulement), curseurs refaits par le DO (`cursor()`) et liste des joueurs ; classement des défis (`TRIALS` = les noms de `CHALLENGES`, même `TRIAL_TICKS` que la page, dépôt validé, records servis du plus court au plus long avec leur rejeu, ménage à `BOARD` par défi) ; `/api/error` (ce qui est journalisé, `console.error` capturé ; vide, trop lourd, débit) | `app.ts` via `app.request()` (store mémoire, pas de wrangler), `relay.ts` |
+| [test/sandbox.ts](../../test/sandbox.ts) | protocole ordres / nouvelles (dont le son : une explosion dans la seule frame qui l'a jouée, le fond sonore des stats muet en pause) ; salon en lockstep, dont les messages mal formés d'un pair (geste d'invité, `turn` et départ de l'hôte) ; la copie de secours (`grid`) porte la largeur de son bac ; classement des défis : Débâcle gagné remonte avec sa partie, que `verdict()` rejoue et trouve gagnante — et refuse un tick de moins, un autre défi, la partie sans son geste, une autre grille de départ ; `fair()` refuse plus de cinq minutes et un morceau collé ; annuler pendant le défi laisse la victoire hors classement ; mode exploration : `origin` dans la frame, refus (annuler, enregistrer, autre taille), fin du mode (salon, autre monde), et `Explore` sur un moteur — la fenêtre glisse au-delà des trois chunks du milieu, un chunk neuf est celui de la graine, un chunk rangé revient tel quel, bâti d'avance = bâti d'un coup, un miroir rebâti de frame en frame comme world.ts (`glide()` puis les bandes) reste la grille du bac après quatre glissements, sans que la frame du glissement porte toute la grille ; un chunk rangé relu brut ou après encodage redonne la même grille, chaleur comprise ; une partie rangée (`save()`) puis reprise (`resume()`) redonne fenêtre, grain, héros piloté et chunks rangés, un chunk abîmé revient tel que la graine le bâtit, et côté protocole la copie `grid` porte la partie (`voyage`) que l'ordre `explore` avec `saved` reprend, une partie illisible étant dite (héros déplacé à la main) | `Sandbox` avec un rappel `send` qui empile ; `Engine` et `Explore` |
+| [test/browser.ts](../../test/browser.ts) (hors `check`) | les deux copies du coloriage (shader de screen.ts, `Renderer`) sur la page [test/screen.html](../../test/screen.html) ; la page du jeu : première frame, console sans erreur, module du son chargé à la première touche sans erreur, module d'exploration chargé par le Worker au clic sur Explorer sans erreur, salon à deux sur le Durable Object de workerd, chargé au premier clic (pseudos, hôte, curseur de l'autre, fantôme du coup de l'invité, verrou, promotion quand l'hôte part, une nouvelle « Alice » qui devient « Alice 2 » : le pseudo de l'absente lui reste), secours 2D dans un Chromium sans WebGL (module et fil d'éclairage chargés, aucune erreur), bac reposé après une perte du contexte WebGL ; une exception de la page arrive sur `/api/error` (`204`) ; le fil du juge (sim/judge.ts) rejoue une partie de Débâcle gagnée dans Node puis compressée : vraie, elle tient, annoncée un tick plus courte, non | un serveur Vite (`createServer`, port libre) et Chromium via `playwright` |
+| [test/pool.ts](../../test/pool.ts) | le moteur sur plusieurs fils : 400 ticks d'une partie chargée (monde généré, feu, explosifs, uranium, sodium dans l'eau, fil qui rouille, héros piloté) sur 1 fil et sur 4, **identiques au bit près**, pression comprise (le test vérifie qu'elle a bien soufflé, que le sodium a sauté et que le fil a rouillé) ; rebranchement sur un autre moteur ; fenêtre du monde infini qui glisse en pleine partie (`shift()` et `land()`, six décalages de ±128) | `Engine`, `Pool`, fils `worker_threads` ([test/helper.ts](../../test/helper.ts)) |
+| [test/rules.ts](../../test/rules.ts) | les « Règles à ne pas enfreindre » d'[AGENTS.md](../../AGENTS.md) qui se lisent dans la source, commentaires retirés par un petit découpeur qui connaît chaînes, gabarits et expressions régulières (testé sur une URL, une regex pleine de `/` et de guillemets) : aucun `Math.random()` hors la graine du constructeur, ids de matière gelés, index.html sans `style=` ni `<script>` en ligne (CSP), la page qui n'importe ni l'`Engine` ni main.ts et ne crée pas le Worker de simulation hors de world.ts (un autre fil reste permis : l'éclairage du secours 2D), `localStorage` réservé à ui.ts, pas de `SELECT *`, pas de `cloudflare:workers` dans app.ts, et le README qui liste exactement la palette | la source des fichiers, lue ; `materials.ts` pour la palette |
+
+## Les règles lues dans la source
+
+[test/rules.ts](../../test/rules.ts) garde les « Règles à ne pas enfreindre »
+d'[AGENTS.md](../../AGENTS.md) qui n'ont pas de test de comportement **et ne
+peuvent pas en avoir** : les enfreindre ne casse rien sous le V8 de la CI, ça
+casse un salon entre Chrome et Firefox (un `Math.random()` dans une règle), un
+monde déjà déposé dans la galerie (un id de matière renuméroté), la page d'un
+joueur qui bloque les cookies (un `localStorage` nu) ou servie par le Worker
+(la CSP contre `style=`). Il lit donc les fichiers, comme le fait déjà sim.ts
+pour les fonctions `Math` approchées.
+
+Y a sa place une règle **vérifiable en lisant un fichier**, dont l'infraction
+serait silencieuse. Le comportement du moteur, du panneau et de l'API reste à
+sim.ts, ui.ts et api.ts.
+
+Le script tourne en 0,3 s, ce qui lui vaut un second appelant : sous Claude
+Code, un hook `PostToolUse` le relance dès qu'une écriture touche `src/`,
+index.html ou le README, sans attendre `npm run check`
+([CLAUDE.md](../../CLAUDE.md)). Il reste la référence unique de ces règles —
+un hook ne recopie pas ses tests, il l'appelle.
+
+Chaque assert a été vérifié en cassant exprès la règle qu'il garde : un test de
+source qui ne mord pas ne se voit pas, il passe. Casser la règle avant de
+croire l'assert.
+
+Les sources sont lues **sans leurs commentaires** (`code()`), sinon le
+commentaire d'`engine.rand()` — « un `Math.random()` de plus dans ce fichier
+rouvrirait le trou » — compterait comme une infraction, et interdire une
+tournure obligerait à ne plus l'écrire même pour l'expliquer. C'est la
+différence avec l'audit `Math` de sim.ts, qui lit la source brute (d'où « un
+commentaire qui cite `Math.hypot` le ferait échouer »).
+
+Le dernier bloc compare le README à la palette : la liste des matières en tête
+du README s'était décalée d'une entrée (quarante-huit annoncées pour
+quarante-sept, la gomme absente de l'énumération, et « quarante-sept
+tabulations » pour quarante-neuf boutons). Personne ne relit une énumération de
+cinquante noms ; le compte et la liste viennent maintenant de `PALETTE`.
 
 ## Choisir une direction
+
+Avant d'ouvrir une piste, lire [performance.md](performance.md) : ce qui a déjà
+payé, et pourquoi le GPU et Rust sont restés des prototypes.
 
 Les grands mondes animés butent sur un seul cœur de processeur. `npm run
 directions` ([test/directions.ts](../../test/directions.ts)) mesure, sur la
@@ -52,8 +98,14 @@ n'est pas dans la CI :
    versions, dont deux exactes au bit près) et le compare au moteur sur trois
    scènes, dix ticks chacune ; la fonderie (1917×1077, ambiante -0) y force
    des changements d'état et des blocs incomplets. Il échoue si une version
-   exacte ne l'est plus, ou si trop peu de changements d'état sont comparés. Résultats
-   et marche à suivre dans [docs/rust.md](../rust.md).
+   exacte ne l'est plus, ou si trop peu de changements d'état sont comparés.
+   Il porte aussi la pression (`breathe()` → `air()`, deux versions exactes),
+   comparée sur une salve d'explosions au-dessus du chantier, en 1920×1080 et
+   1917×1077 ; il échoue si la salve laisse trop peu de pression à comparer.
+   Enfin, sim/libm.ts contre la crate `libm` : un million d'arguments par
+   fonction (doubles tirés bit à bit, voisins des multiples de π/4), le
+   moindre bit d'écart le fait échouer.
+   Résultats et marche à suivre dans [docs/rust.md](../rust.md).
 
 Les noyaux sont un **minorant** : le vrai moteur a cinquante matières, des
 créatures et des explosions. La dernière ligne du rapport compare le coût par
@@ -116,11 +168,13 @@ tirages**. Quand le changement est voulu :
 Si elle change alors qu'on n'a pas touché au moteur : c'est un bug, pas une
 empreinte à recopier.
 
-En fin de fichier, un test **lit la source** d'engine.ts et de terrain.ts et
-refuse toute fonction `Math` approchée (`hypot`, `sin`, `exp`…) : leur résultat
-peut différer d'un bit entre navigateurs, ce qu'aucun test de comportement ne
-voit sous un seul V8. Un commentaire qui cite `Math.hypot` le ferait échouer :
-écrire `hypot()`.
+En fin de fichier, un test **lit la source** d'engine.ts, de terrain.ts, de
+sim/explore.ts (générateur du monde infini) et de sim/libm.ts, et refuse toute fonction `Math` approchée (`hypot`, `sin`,
+`exp`…) : leur résultat peut différer d'un bit entre navigateurs, ce qu'aucun
+test de comportement ne voit sous un seul V8. Ce qu'il faut à la place est
+dans sim/libm.ts. Un commentaire qui cite `Math.hypot` le ferait échouer :
+écrire `hypot()`. Les autres règles lues dans la source sont dans
+[test/rules.ts](../../test/rules.ts), décrit plus haut.
 
 Les tests à tirage sensible prennent une graine fixe (`new Engine(W, H, 1234)`)
 plutôt qu'`engine()` : le TNT, au hasard, échouait une fois sur 4 000.
@@ -129,8 +183,22 @@ Le test de rejeu qui suit vérifie qu'une partie enregistrée retombe sur la
 même grille dans un moteur neuf : il casse si une modification de la grille
 échappe à `Recorder` (voir `stamp()` dans [simulation.md](simulation.md)).
 
+La pression (`press`) n'est pas hachée, mais le TNT de la scène souffle :
+son vent déplace fumée et flammes, donc l'empreinte. Neutraliser le vent
+(`GUST_MIN` démesuré) rend `ac832097` avec le moteur d'aujourd'hui — la
+même valeur que sans `breathe()` du tout. Un changement de la seule
+pression doit garder cette valeur-là : c'est ainsi qu'on a vérifié que
+l'élan de l'air, qui a fait passer l'empreinte de `ba5208ad` à `ce7a1a98`,
+ne la change que par le vent. (`c0b016ea`, cité ici avant, était
+celle d'un moteur plus ancien : des changements de règles l'ont déplacée
+depuis.)
+
 La scène de l'empreinte (60×40, soit 4×3 blocs) garde tous ses blocs éveillés
-— lave, pile, thermite : les blocs de veille ne l'ont pas changée. Ce sont les
+— lave, pile, thermite : les blocs de veille ne l'ont pas changée. Sortir
+acide, thermite, sel, source, pile et aimant d'`ACTIVE` ne l'a pas changée non
+plus : remis dans `ACTIVE`, la même empreinte sort — c'est ainsi qu'on a
+vérifié que leurs règles tirent la même suite qu'avant. (Un premier essai la
+changeait : la pile arrêtait son compte quand son métal devenait étincelle.) Ce sont les
 tests « Blocs de veille », en fin de fichier, qui les couvrent : un bac au
 repos ne tire plus au sort (`seed` figé), un trou, la gravité retournée et une
 ambiante sous zéro réveillent les blocs endormis, et un rejeu lancé sur un bac
@@ -138,16 +206,30 @@ ambiante sous zéro réveillent les blocs endormis, et un rejeu lancé sur un ba
 le mettre dans un bassin qu'il remplit exactement : sur un sol plat, sa
 dernière rangée incomplète glisse sans fin et tient son bloc éveillé.
 
+Pire cas de chaque matière (fin de test/sim.ts, sans chronomètre) : un bac
+64×64 plein d'une seule matière doit s'endormir (`busy` = 0) — en 30 ticks
+pour une matière inerte, en 2000 pour celles de `WORKS`, qui travaillent
+vraiment (gaz qui vieillissent, acide qui ronge le bord, uranium qui saute,
+verre fondu qui refroidit, créatures), chacune avec sa raison. Seul le héros
+ne s'endort jamais. Une nouvelle matière qui tient son bloc éveillé pour rien
+casse ce test : la faire appeler `wake(i)` quand elle a de quoi agir (voir
+« Blocs de veille » dans [simulation.md](simulation.md)). Remettre l'aimant
+dans `ACTIVE` le fait tomber. Le coût, lui, est chronométré par
+`npm run stress`.
+
 Mondes générés (fin de test/sim.ts) : même graine → même grille quel que soit
 le tirage du bac, aucun tirage consommé, poches de pétrole et de lave closes,
 uranium sans amas, et moins de 1 % des cellules qui bougent en 200 ticks. Un
 réglage du générateur qui casse ce dernier assert rend les grandes grilles
 lentes dès la naissance du monde.
 
-Côté rendu, test/sandbox.ts recompose l'image comme la page (bandes recopiées
-dans un tableau miroir) et la compare, au pixel près, à un rendu témoin tout
-neuf — après un feu, un geste bac en pause, la vue thermique et une autre
-ambiante. Le témoin se tire **juste après** une frame, sinon il consomme les
+Côté rendu, test/sandbox.ts recompose l'image comme la page (bandes posées
+dans un miroir par le même `land()` de render.ts que world.ts), vérifie que
+le miroir est la grille du moteur au bit près (température et pression
+brutes comprises), et compare l'image, au pixel près, à un rendu témoin tout
+neuf — après un feu, un geste bac en pause, la vue thermique, une autre
+ambiante et un souffle, dont la pression doit arriver au miroir, puis y
+retomber à zéro. Le témoin se tire **juste après** une frame, sinon il consomme les
 blocs changés (`engine.changed()`) à la place du bac.
 
 ## Budgets surveillés par la CI
@@ -167,15 +249,35 @@ Node 24 :
    ([docs/navigateur.md](../navigateur.md)) — SwiftShader tient lieu de carte
    graphique sur le runner.
 6. `npm run bench` — **tick ≤ 4 ms en 320×180** (surchargeable par
-   `BENCH_BUDGET_MS`). Le budget attrape un effondrement, pas une dérive. La
+   `BENCH_BUDGET_MS`). Le budget attrape un effondrement, pas une dérive
+   (c'est `npm run drift` qui la voit, étape suivante). La
    mesure dépend beaucoup de la charge de la machine (de 2,8 à 5 ms d'une
    exécution à l'autre sur un poste occupé) : relancer avant de conclure à une
    régression.
-7. **Deux budgets de bundle, 81 920 octets chacun**, non compressés
-   (`dist/client/assets`) : la **page** (`index-*.js` + `*.css`, ce qui
-   s'affiche d'abord) et le **moteur** (`worker-*.js`, le Worker de
-   simulation, qui sert aussi de fil auxiliaire). Un seul total ne disait pas
+7. `npm run stress` — les pires cas sous leurs plafonds (voir le tableau
+   ci-dessus). Il a été vérifié contre le moteur d'avant l'optimisation des
+   matières inactives : il y tombe sur l'aimant (4032 ns par cellule).
+8. **Dérive**, sur les pull requests seulement : `git fetch` de la branche
+   visée, puis `DRIFT_BASE=FETCH_HEAD npm run drift`. Une mesure gardée d'une
+   exécution à l'autre ne vaudrait rien (le runner varie de plus de 20 %) :
+   les deux côtés sont mesurés sur la même machine, dans la foulée. Sur deux
+   copies du même code, l'écart restait sous 22 % en une manche.
+9. **Deux budgets de bundle**, non compressés (`dist/client/assets`) : la
+   **page** (`index-*.js` + `*.css`, ce qui s'affiche d'abord), 86 016 octets
+   (84 Kio), et le **moteur** (`worker-*.js`, le Worker de simulation, qui sert
+   aussi de fil auxiliaire), 81 920 (80 Kio). Un seul total ne disait pas
    lequel avait grossi ; il avait dépassé 80 Ko sans que personne le voie.
+   La page est passée de 80 à 84 Kio avec le son : chargé au premier geste,
+   `sound-*.js` n'y compte pas, mais sa porte et l'assistant d'`import()` de
+   Vite (~1,5 Ko) si. Un module qui n'a rien à faire avant un geste du joueur
+   se charge de la même façon (audio.ts).
+   Le moteur fait de même pour le mode exploration : `explore-*.js`
+   (sim/explore.ts, ~4,8 Ko) n'est chargé par le Worker qu'au premier clic sur
+   Explorer (`import()` de sim/sandbox.ts) et ne compte pas dans le budget
+   du moteur. C'est pour ça que les Workers sont bâtis en modules ES
+   (`worker.format` de vite.config.ts) : l'IIFE, le défaut de Vite, ne sait
+   pas découper. Sans ça, le moteur passait à 81 647 octets, à 273 du plafond ;
+   il en fait 77 456.
    Pas de framework, pas de dépendance client ajoutée à la légère, et pas de
    second fichier qui embarquerait une autre copie du moteur.
 
@@ -192,3 +294,8 @@ le reste : `npm run dev`
 (http://localhost:5173, Vite + Worker dans workerd, store mémoire) et vérifier
 dans le navigateur. Le salon partagé se teste avec deux onglets sur le même nom
 de salon.
+
+De ces modules-là, test/rules.ts ne vérifie **que** la forme : qu'ils
+n'importent pas l'`Engine` ni main.ts, qu'ils ne créent pas le Worker de simulation et
+qu'ils ne touchent pas `localStorage` en direct. Ce qu'ils font, personne ne le
+vérifie à votre place.

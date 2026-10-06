@@ -1,9 +1,9 @@
-import { HERO_HARM, HERO_SLOTS, PILOT } from "./sim/materials.ts";
+import { HERO_HARM, HERO_SLOTS, MATERIALS, PILOT, type MaterialId } from "./sim/materials.ts";
 import { current } from "./palette.ts";
 import { bindings, held } from "./keys.ts";
 import { keyLabel, type Action } from "./ui.ts";
-import { zoom, zoomCentered, zoomInput } from "./view.ts";
-import { WIDTH, cellBox, seen } from "./world.ts";
+import { scaleTo, zoom, zoomCentered, zoomInput } from "./view.ts";
+import { WIDTH, cellBox, onResize, origin, seen } from "./world.ts";
 import { look } from "./sight.ts";
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -53,10 +53,21 @@ export function tighten(): boolean {
   return true;
 }
 
-/** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large) et la barre de statut donne les touches. */
+/**
+ * Pixels d'écran par cellule voulus à l'arrivée du héros (mode exploration),
+ * 0 pour la vue habituelle. Oublié quand le bac change de taille ou de monde
+ * (`closeUp(0)` dans `abandon()` de main.ts) : sinon un héros posé plus tard
+ * dans un bac ordinaire arrivait en gros plan.
+ */
+let close = 0;
+export function closeUp(px: number): void { close = px; }
+onResize.push(() => { close = 0; });
+
+/** Le héros vient d'apparaître : la vue s'approche (environ 160 cellules de large, ou `close` pixels par cellule) et la barre de statut donne les touches. */
 function meet(): void {
   loose = false;
-  if (zoomInput.checked && zoom < WIDTH / 160) zoomCentered(WIDTH / 160);
+  if (zoomInput.checked && close) scaleTo(close);
+  else if (zoomInput.checked && zoom < WIDTH / 160) zoomCentered(WIDTH / 160);
   const k = (a: Action) => keyLabel(bindings[a]);
   statusEl.textContent = `Héros : ${k("left")}/${k("right")} pour marcher, ${k("up")} pour sauter (et nager), ${k("down")} pour creuser dessous, ${k("dig")} devant, ${k("place")} pour poser la matière choisie (${k("up")}+${k("place")} : sous lui). ${k("nextHero")} passe au héros suivant, ${k("view")} change de vue. Le métal résiste. Touches à changer : ?`;
 }
@@ -74,9 +85,8 @@ export let heroId = 0;
 /**
  * Remplit la fiche du héros suivi : son nom vient de la frame (les noms
  * donnés vivent dans le bac), le reste de son corps dans le miroir
- * (`HERO_SLOTS`). Le champ du nom n'est pas réécrit pendant qu'on y tape.
- * ponytail: ni métier ni inventaire — il pose la matière de la palette sans
- * compter ; à ajouter le jour où creuser ramasse.
+ * (`HERO_SLOTS`), sac compris. Le champ du nom n'est pas réécrit pendant
+ * qu'on y tape.
  */
 function card(name: string): void {
   const grid = seen();
@@ -91,7 +101,11 @@ function card(name: string): void {
   hpEl.value = hp;
   hpValueEl.value = String(hp);
   const most = (n: number) => (n >= 250 ? "250+" : String(n));
-  const facts = `${18 + at(HERO_SLOTS.age)} ans · ${Math.round(grid.temp[y * w + x])} °C · ${most(at(HERO_SLOTS.dug))} cellules creusées, ${most(at(HERO_SLOTS.laid))} posées`;
+  const load = at(HERO_SLOTS.load), bag = MATERIALS[at(HERO_SLOTS.bag) as MaterialId];
+  const carried = bag && at(HERO_SLOTS.bag) !== 0 && load > 0 ? `sac : ${load} × ${bag.name.toLowerCase()}` : "sac vide";
+  // En exploration, où il en est dans le monde infini : la colonne du bac ne dit rien, elle change à chaque glissement.
+  const where = origin === null ? "" : ` · colonne ${origin + x} du monde`;
+  const facts = `${18 + at(HERO_SLOTS.age)} ans · ${Math.round(grid.temp[y * w + x])} °C · ${most(at(HERO_SLOTS.dug))} cellules creusées · ${carried}${where}`;
   if (factsEl.textContent !== facts) factsEl.textContent = facts;
 }
 

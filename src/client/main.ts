@@ -2,16 +2,17 @@ import "./style.css";
 import { EMPTY, MAGNET, MATERIALS, SHORTCUTS, SWITCH, type MaterialId } from "./sim/materials.ts";
 import { CHALLENGES, SCENES, type Challenge } from "./challenges.ts";
 import { SEEDS } from "./terrain.ts";
-import { combo, keyOf, read, stored, write, type Action } from "./ui.ts";
+import { combo, forget, keyOf, read, stored, write, type Action } from "./ui.ts";
 import { bound, held, openSettings } from "./keys.ts";
-import { MOVES, follow, panBy, scroll, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
+import { MOVES, follow, panBy, scaleTo, scroll, slideBy, zoom, zoomAt, zoomCentered, zoomInput } from "./view.ts";
 import { current, emit, select } from "./palette.ts";
-import { brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, toolInput } from "./settings.ts";
-import { FILM_LINK, captureFrame, initShare, openFilmLink } from "./share.ts";
+import { airmapInput, brush, brushInput, fit, heatmapInput, keepInput, mirrorInput, onlyInput, restore, sizeInput, soundInput, toolInput } from "./settings.ts";
+import { hear, initSound, setHum } from "./audio.ts";
+import { FILM_LINK, captureFrame, forgetOrigin, initShare, openFilmLink } from "./share.ts";
 import type { Recording } from "./replay.ts";
-import { initRoom, relay } from "./room.ts";
-import { WIDTH, askClip, cellBox, askLoad, canvas, latestGrid, listen, order, present, set, type ClipData } from "./world.ts";
-import { STEER, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
+import { initRoom, placeCursors, pointAt, relay } from "./lobby.ts";
+import { WIDTH, askClip, cellBox, askLoad, beat, canvas, latestGrid, listen, order, present, seen, set, shifted, type ClipData } from "./world.ts";
+import { STEER, closeUp, gaze, hero, heroId, loose, loosen, nameInput, nextView, pilot, tighten, track } from "./hero.ts";
 import "./theme.ts"; // jour / nuit : se branche tout seul
 
 /**
@@ -22,8 +23,18 @@ import "./theme.ts"; // jour / nuit : se branche tout seul
  */
 let running = true;
 let gravity: 1 | -1 = 1;
-/** Dernière matière et température sous le curseur, telles que le bac les a vues. */
-let probed: [MaterialId, number] | null = null;
+/**
+ * La matière sous le point `p`, lue dans le miroir de la grille (world.ts) :
+ * à jour à la dernière frame partout, pas seulement là où le curseur est passé.
+ * La sonde (`probe` de la frame) ne vaut que pour la case survolée juste avant :
+ * au doigt, sans survol, la première tape sur un interrupteur en reposait un
+ * au lieu de le basculer.
+ */
+function under(p: { x: number; y: number }): MaterialId | null {
+  const grid = seen();
+  if (!grid || p.x < 0 || p.y < 0 || p.x >= grid.width || p.y >= grid.height) return null;
+  return grid.cells[p.y * grid.width + p.x] as MaterialId;
+}
 /** Un rejeu occupe le bac : le pinceau et l'enregistrement se taisent. */
 let playing = false;
 /** Taille de la dernière partie enregistrée, ou null : le bac garde le film. */
@@ -79,7 +90,14 @@ addEventListener("keydown", (e) => {
       return;
     case "gravity": flipGravity(); return;
     case "freeze": toolInput.value = toolInput.value === "paint" ? "freeze" : "paint"; return;
-    case "heat": heatmapInput.checked = !heatmapInput.checked; set({ heatmap: heatmapInput.checked }); return;
+    // L'événement rejoué décoche l'autre vue, comme un clic.
+    case "heat": heatmapInput.checked = !heatmapInput.checked; heatmapInput.dispatchEvent(new Event("change")); return;
+    case "air": airmapInput.checked = !airmapInput.checked; airmapInput.dispatchEvent(new Event("change")); return;
+    case "mute":
+      soundInput.checked = !soundInput.checked;
+      soundInput.dispatchEvent(new Event("change"));
+      statusEl.textContent = soundInput.checked ? "Son rétabli." : "Son coupé.";
+      return;
     case "help": openSettings("settings-keys"); return;
     case "view": nextView(); return;
     case "nextHero": gesture({ t: "hero" }); return;
@@ -275,7 +293,7 @@ canvas.addEventListener("pointerdown", (e) => {
   // Pipette : Alt+clic reprend la matière sous le curseur, sans rien modifier.
   // Pipette : la matière vue par la dernière frame, pas une lecture du moteur
   // (il est sur l'autre fil). C'est la cellule sous le curseur, donc la bonne.
-  if (e.altKey) { if (probed) select(probed[0]); return; }
+  if (e.altKey) { const id = under(p); if (id !== null) select(id); return; }
   if (e.button === 2) { snapshot(); gesture({ t: "fill", x: p.x, y: p.y, id: current }); return; }
   canvas.setPointerCapture(e.pointerId);
   // Les deux outils qui se tracent en glissant. « Copier » ne modifie rien, et
@@ -289,11 +307,7 @@ canvas.addEventListener("pointerdown", (e) => {
   }
   snapshot();
   // Cliquer un interrupteur (ou un aimant) déjà posé le bascule au lieu d'en reposer un.
-  // ponytail: `probed` date de la dernière frame. À la souris elle est juste
-  // (le curseur y est passé avant le clic) ; au doigt, une première tape peut
-  // reposer un interrupteur au lieu de le basculer — geste sans effet, la
-  // seconde bascule.
-  const at = probed?.[0];
+  const at = under(p);
   if ((current === SWITCH && at === SWITCH) || (current === MAGNET && at === MAGNET)) {
     gesture({ t: "toggle", x: p.x, y: p.y });
     return;
@@ -314,7 +328,10 @@ const probeEl = document.querySelector<HTMLSpanElement>("#probe")!;
  * Matière et température sous le curseur : c'est ce qui rend la vue thermique
  * lisible. Le bac les renvoie avec chaque frame — on lui dit juste où regarder.
  */
-const probe = (p: { x: number; y: number }): void => order({ t: "cursor", x: p.x, y: p.y });
+const probe = (p: { x: number; y: number }): void => {
+  order({ t: "cursor", x: p.x, y: p.y });
+  pointAt(p.x, p.y); // les autres joueurs d'un salon voient où l'on est
+};
 
 canvas.addEventListener("pointermove", (e) => {
   if (e.pointerType === "touch" && touches.has(e.pointerId)) {
@@ -379,6 +396,7 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"] as const) {
 }
 canvas.addEventListener("pointerleave", () => {
   order({ t: "cursor", x: -1, y: -1 }); // plus de curseur, plus de sonde
+  pointAt(-1, -1);
   probeEl.textContent = "–";
   ringEl.hidden = true;
 });
@@ -437,13 +455,56 @@ document.querySelector<HTMLButtonElement>("#full")!.addEventListener("click", ()
  * bac — c'est en 1920×1080 qu'il y a le plus à explorer.
  */
 const seedInput = document.querySelector<HTMLInputElement>("#seed")!;
-document.querySelector<HTMLButtonElement>("#terrain")!.addEventListener("click", () => {
+/** La graine tapée, 0 si le champ est vide ou hors de 1..`SEEDS`. */
+function typedSeed(): number {
   const typed = Math.floor(Number(seedInput.value));
-  const seed = typed >= 1 && typed <= SEEDS ? typed : 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 0x1_0000_0000 * SEEDS);
+  return typed >= 1 && typed <= SEEDS ? typed : 0;
+}
+const pickSeed = (): number => typedSeed() || 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 0x1_0000_0000 * SEEDS);
+document.querySelector<HTMLButtonElement>("#terrain")!.addEventListener("click", () => {
+  const seed = pickSeed();
   order({ t: "terrain", seed });
   abandon();
   statusEl.textContent = `Monde n° ${seed} — la même graine redonne le même monde. Molette ou + pour zoomer, ZQSD pour se déplacer.`;
 });
+
+/** Pixels d'écran par cellule en mode exploration : le héros (sept cellules) y fait une quarantaine de pixels, comme celui de Terraria. */
+const EXPLORE_PX = 6;
+
+/**
+ * Explorer : le mode exploration (sim/explore.ts). Un monde infini en
+ * largeur, vu par une fenêtre de 1280×720 (`WINDOW_W` × `WINDOW_H`, recopiés
+ * ici : importer sim/explore.ts tirerait le générateur dans la page) qui
+ * glisse avec le héros, vu de près (`EXPLORE_PX`). La caméra suit chaque
+ * glissement dans l'image même où il est dessiné (`shifted()`, `slideBy()`).
+ * ponytail: tout le bac (1280×720) est colorié et éclairé même hors champ ;
+ * étape 6 de docs/agents/exploration.md, si les mesures le demandent.
+ */
+document.querySelector<HTMLButtonElement>("#explore")!.addEventListener("click", () => explore(typedSeed()));
+
+/**
+ * La partie d'exploration rangée (`save()` de sim/explore.ts), une seule :
+ * reprise par Explorer quand le champ de graine est vide ou porte la sienne,
+ * et au chargement de la page si on l'a quittée en explorant. Une autre
+ * graine part d'un monde neuf, qui la remplacera.
+ */
+const VOYAGE = "sandbox-rabbit:exploration";
+
+/** Explore le monde `typed` (0 : la partie rangée s'il y en a une, sinon un monde au hasard). */
+function explore(typed: number): void {
+  // La graine est en tête de la partie rangée : pas besoin de relire des
+  // mégaoctets de JSON pour savoir si c'est la même.
+  const saved = read(VOYAGE), was = Number(/^\{"seed":(\d+)/.exec(saved ?? "")?.[1] ?? 0);
+  const seed = typed || was || pickSeed(), back = saved !== null && seed === was;
+  fit(1280);
+  order({ t: "explore", seed, saved: back ? saved : undefined });
+  abandon();
+  closeUp(EXPLORE_PX);
+  // Le héros d'avant a pu laisser place au nouveau sans frame vide : `meet()`
+  // ne serait pas rappelé, on pose donc l'échelle tout de suite.
+  if (zoomInput.checked) scaleTo(EXPLORE_PX);
+  statusEl.textContent = `Exploration${back ? " reprise" : ""}, monde n° ${seed}. Molette pour ajuster le zoom.`;
+}
 
 // Surprise : un décor tiré au sort, sans objectif — juste pour regarder.
 document.querySelector<HTMLButtonElement>("#surprise")!.addEventListener("click", () => {
@@ -521,7 +582,9 @@ let startedAt = 0;
 /** Le bouton du dernier défi lancé : la touche « recommencer » le reclique. */
 let lastChallenge: HTMLButtonElement | null = null;
 
-// Meilleur temps par défi, en secondes. ponytail: local à la machine, pas de classement.
+// Meilleur temps par défi, en secondes d'horloge murale, propre à ce
+// navigateur. Le classement public (board.ts) compte en ticks : c'est ce que
+// le rejeu joint prouve.
 const RECORDS = "sandbox-rabbit:records";
 const records = stored<Record<string, number>>(RECORDS, {});
 const best = (name: string): string => (records[name] === undefined ? "" : ` (record : ${records[name]} s)`);
@@ -531,6 +594,8 @@ function startChallenge(c: Challenge): void {
   challenge = c;
   startedAt = performance.now();
   goalEl.textContent = `${c.name} — ${c.goal}${best(c.name)}`;
+  // Un classement pour les défis livrés seulement : un monde-défi n'est pas bâti en code.
+  if (CHALLENGES.includes(c)) void import("./board.ts").then((b) => b.show(c.name, watch));
 }
 
 /**
@@ -539,6 +604,8 @@ function startChallenge(c: Challenge): void {
  * son but et faisait tourner son chrono.
  */
 function abandon(): void {
+  closeUp(0); // le gros plan de l'exploration ne vaut que pour son monde
+  forgetOrigin(); // ce n'est plus le monde de la galerie : resauvegardé, il ne sera pas son remix
   if (!challenge) return;
   goalEl.textContent = `${challenge.name} — abandonné.`;
   challenge = null;
@@ -576,6 +643,7 @@ initShare({
 /* -------------------------------------------------------------------- scène */
 
 sizeInput.addEventListener("input", abandon);
+initSound();
 restore();
 
 
@@ -591,6 +659,8 @@ const kept = read(BAC);
 if (location.hash.startsWith(`#${FILM_LINK}`)) void openFilmLink(location.hash.slice(FILM_LINK.length + 1));
 else if (location.hash.length > 1) loadHash(location.hash.slice(1));
 else if (kept) loadWorld(kept);
+// Quittée en explorant (`:bac` effacé) : la partie reprend où elle était.
+else if (read(VOYAGE)) explore(0);
 
 function loadHash(raw: string): void {
   let hash: string;
@@ -622,11 +692,16 @@ addEventListener("visibilitychange", () => {
   // grille) : rien à demander, personne ne répondrait — la page s'en va.
   const grid = latestGrid();
   // Sa largeur avec, comme dans un lien : sans elle, un défi (320) rangé
-  // depuis un bac réglé en 480 revenait cisaillé à la visite suivante.
-  // ponytail: WIDTH suit un redimensionnement tout de suite, la grille un
-  // quart de seconde plus tard — quitter dans cet intervalle range l'ancienne
-  // grille sous la nouvelle largeur.
-  if (grid) write(BAC, `${WIDTH}~${grid}`);
+  // depuis un bac réglé en 480 revenait cisaillé à la visite suivante. Celle
+  // de la grille elle-même, pas `WIDTH` : juste après un redimensionnement,
+  // la copie est encore celle de l'ancien bac.
+  // En exploration, la partie entière sous sa propre clé : un bac ordinaire
+  // ne sait pas la lire. `:bac` effacé, c'est elle qui reprend à la visite
+  // suivante.
+  if (grid?.voyage) {
+    write(VOYAGE, grid.data);
+    forget(BAC);
+  } else if (grid) write(BAC, `${grid.width}~${grid.data}`);
 });
 
 /* -------------------------------------------------------------------- rejeu */
@@ -702,10 +777,16 @@ function frame(now: number): void {
   // affichait 60 fps même quand le Worker n'en livrait que 30.
   // Avec un héros, les touches le pilotent : même décrochée, la vue ne glisse
   // qu'à la souris.
+  // Dessiner d'abord, puis caler la vue : la fenêtre d'exploration a pu
+  // glisser dans ce qui vient d'être posé, et la position du héros avec.
+  if (present()) frames++;
+  const slid = shifted();
+  if (slid) slideBy(slid);
   if (hero) { if (!loose) follow(hero); }
   else if (held.size > 0) scroll();
-  if (present()) frames++;
+  beat(now);
   gaze();
+  placeCursors();
   captureFrame(); // vidéo en cours : la frame y part aussi
 
   if (now - lastReport >= 500) {
@@ -718,8 +799,10 @@ function frame(now: number): void {
 requestAnimationFrame(frame);
 
 /** Défi réussi : le bac l'a vu, la page tient le chrono et les records. */
-function win(): void {
+function win(film: Recording | null): void {
   if (!challenge) return;
+  const c = challenge;
+  if (CHALLENGES.includes(c)) void import("./board.ts").then((b) => b.won(c.name, film, watch));
   const secs = Math.round((performance.now() - startedAt) / 1000);
   const record = records[challenge.name] === undefined || secs < records[challenge.name];
   if (record) {
@@ -736,21 +819,22 @@ function win(): void {
 listen((news) => {
   switch (news.t) {
     case "frame": {
-      probed = news.probe;
       probeEl.textContent = news.probe
         ? `${MATERIALS[news.probe[0]].name} · ${Math.round(news.probe[1])} °C`
         : "–";
       if (track(news.hero)) steer();
+      hear(news.heard, news.w);
       return;
     }
     case "stats":
       filledEl.textContent = news.filled.toLocaleString("fr-FR");
+      setHum(news.hum);
       return;
     case "say":
       statusEl.textContent = news.text;
       return;
     case "won":
-      return win();
+      return win(news.film);
     case "rec": {
       film = { w: news.w, h: news.h };
       playbackButton.disabled = false;

@@ -216,6 +216,8 @@ canvas {
 .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; box-shadow: inset 0 0 0 1px light-dark(#0003, #0006); }
 
 .hint { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.78rem; min-height: 1.2em; }
+.board { margin: 0.25rem 0; padding-left: 1.5rem; font-size: 0.8rem; }
+.board button { margin-left: 0.4rem; padding: 0 0.4rem; }
 
 /* Une grille commune : tous les libellés et toutes les valeurs sont alignés. */
 .row {
@@ -291,8 +293,10 @@ button:hover { border-color: var(--edge); }
     background: var(--bg);
     border-bottom: 1px solid var(--line);
   }
-  /* Un bac plein écran ne laisserait rien voir du panneau. */
-  .stage canvas { max-height: 40vh; width: auto; }
+  /* Un bac plein écran ne laisserait rien voir du panneau. `max-width` :
+     `width: auto` donne au canvas sa taille intrinsèque, et un 640 × 360
+     dépassait d'un téléphone de 500 px, coupé par la scène. */
+  .stage canvas { max-height: 40vh; max-width: 100%; width: auto; }
   /* Le panneau passe sous le bac : plus de colonne, donc plus de bord gauche. */
   .panel { border-left: none; border-top: none; overflow: visible; }
   /* Le bac est déjà collé en haut : une seconde barre collante passerait
@@ -363,7 +367,9 @@ kbd {
 #settings-keys > * { flex: none; margin: 0; }
 #settings-keys > #bindings { flex: 1; min-height: 0; overflow-y: auto; }
 #settings-keys > button { align-self: start; }
-#settings .row { grid-template-columns: 4.2rem 1fr; }
+/* Plus large que dans le panneau : « Finesse de l'éclairage » tient sur une ligne. */
+#settings .row { grid-template-columns: 9rem 1fr; }
+#settings .row + .row { margin-top: 0.5rem; }
 /* Les onglets des paramètres, séparés par un filet des onglets de raccourcis. */
 .tabs { padding-bottom: 0.75rem; border-bottom: 1px solid var(--line); }
 #gallery::backdrop, #settings::backdrop { background: light-dark(#3339, #000a); }
@@ -438,3 +444,42 @@ canvas:fullscreen { height: 100vh; width: auto; aspect-ratio: 16 / 9; }
 .card canvas { width: 100%; cursor: inherit; }
 .card .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .date { color: var(--muted); font-size: 0.74rem; }
+
+/* Les autres joueurs d'un salon (room.ts) : un point et un nom par curseur,
+   leur couleur passée en CSSOM (--peer). Le calque couvre la scène et coupe ce
+   qui en sort quand le bac est zoomé. */
+#peers { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 2; }
+.peer { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 4px; }
+.peer::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin: -4px;
+  border-radius: 50%;
+  background: var(--peer);
+  box-shadow: 0 0 0 1px #000a;
+}
+.peer span {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--peer);
+  color: #000;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.roster { margin: 0.4rem 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; font-size: 0.8rem; }
+.roster li::before { content: "●"; margin-right: 0.3rem; color: var(--peer); }
+.roster .me { font-weight: 600; }
+
+/* La recherche prend la place libre entre le titre et le tri. */
+#gallery-search { flex: 1; min-width: 6rem; margin: 0 0.75rem; }
+.gallery-bar { gap: 0.5rem; }
+.card .remix { color: var(--muted); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot .like { position: absolute; top: 0.25rem; left: 0.25rem; padding: 0 0.35rem; font-size: 0.74rem; line-height: 1.4; }
+
+/* Le fantôme d'un coup de pinceau d'invité, le temps que la partie de l'hôte
+   le ramène (room.ts) : translucide, sa couleur passée en CSSOM. */
+.ghost { position: absolute; top: 0; left: 0; opacity: 0.5; }
+.ghost.round { border-radius: 50%; }

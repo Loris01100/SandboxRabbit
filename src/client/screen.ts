@@ -2,8 +2,8 @@
  * L'écran du bac : colorie le miroir de la grille (world.ts) dans le canvas.
  *
  * Deux façons, une interface :
- * - **WebGL2** : la grille monte en textures entières (matière, `life`, figé,
- *   grain, température au degré), et un shader colorie chaque pixel. Le Worker
+ * - **WebGL2** : la grille monte en textures (matière, `life`, figé, grain,
+ *   température et pression en flottants), et un shader colorie chaque pixel. Le Worker
  *   ne colorie plus rien — 6 ms par tick de gagnés en 1920×1080 chargé — et la
  *   page ne fait qu'envoyer à la carte le rectangle changé ;
  * - **2D** : le secours d'un navigateur sans WebGL2, le même `Renderer` qu'en
@@ -12,33 +12,78 @@
  * WebGL2 ajoute l'éclairage global (voir `SCENE`) : quelques passes de plus,
  * sur tout le bac, à chaque frame qui arrive.
  *
- * Le shader est la **copie** de `Renderer.shade()` / `shadeHeat()` (render.ts),
+ * Le shader est la **copie** de `Renderer.shade()` / `shadeHeat()` / `shadeAir()` (render.ts),
  * mêmes constantes et mêmes arrondis : une règle d'aspect changée d'un côté
  * l'est de l'autre. `preserveDrawingBuffer` garde l'image entre deux frames —
  * le PNG et la vidéo (share.ts) la relisent par `drawImage(canvas)`.
  *
- * ponytail: une perte de contexte WebGL (pilote qui redémarre) laisse le bac
- * noir jusqu'au rechargement. Écouter `webglcontextlost` / `restored` et tout
- * remonter le jour où ça se voit.
+ * Le contexte WebGL peut se perdre (pilote qui redémarre, onglet en arrière-plan
+ * sur un mobile) : `restartable()` remonte alors programmes et textures et
+ * repose tout le bac, sans quoi il restait noir jusqu'au rechargement.
  */
-import { GLOW, GLOWING, Renderer, lighting, palette, type Grid, type Tint } from "./sim/render.ts";
+import type { FlatLight } from "./sim/flatlight.ts";
+import { AIR_LEVELS, GLOW, GLOWING, LIGHT_GAIN, LIGHT_HALO, RED_HOT, Renderer, lighting, palette, type Grid, type Tint, type View } from "./sim/render.ts";
 
 export interface Screen {
   /** « webgl2 » ou « 2d » : ce qui colorie, pour le dire à qui le demande. */
   readonly kind: "webgl2" | "2d";
   /**
    * Repose le rectangle (x0, y0)–(x1, y1) exclus de `grid` ; une autre grille
-   * (nouvelle taille) repart d'une image entière. `lit` : éclairage global,
-   * WebGL2 seulement — il recalcule tout le bac, quel que soit le rectangle.
-   * `tint` : l'heure de la journée (`HOURS` de render.ts).
+   * (nouvelle taille) repart d'une image entière. `lit` : éclairage global —
+   * il recalcule tout le bac, quel que soit le rectangle (en 2D, `FlatLight`,
+   * au plus toutes les `relight()` ms).
+   * `tint` : l'heure de la journée (`HOURS` de render.ts). `view` : matière,
+   * vue thermique ou vue pression — les deux dernières sans éclairage.
    */
-  paint(grid: Grid, x0: number, y0: number, x1: number, y1: number, heatmap: boolean, lit: boolean, tint: Tint): void;
+  paint(grid: Grid, x0: number, y0: number, x1: number, y1: number, view: View, lit: boolean, tint: Tint): void;
+  /**
+   * Largeur maximale de la grille de lumière, en texels (`LIGHT_WIDTH` par
+   * défaut) : la moitié, c'est quatre fois moins de texels à éclairer, pour une
+   * carte graphique modeste. Sans effet en 2D, dont la grille est fixe (`FLAT_LIGHT`).
+   */
+  detail(width: number): void;
 }
 
 /** L'écran du canvas : WebGL2 s'il le peut, sinon 2D. Un canvas n'a qu'un contexte : le choix est définitif. */
 export function createScreen(canvas: HTMLCanvasElement): Screen {
   const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true });
-  return gl ? glScreen(gl) : flatScreen(canvas);
+  return gl ? restartable(canvas, gl) : flatScreen(canvas);
+}
+
+/**
+ * `glScreen` qui survit à une perte de contexte. Perdu, tout ce qu'il a monté
+ * (programmes, textures, framebuffers) ne vaut plus rien et chaque appel GL
+ * échoue en silence — compiler un shader lèverait même : on ne peint plus.
+ * Rendu, on remonte tout et l'on repose le dernier miroir en entier. world.ts
+ * a continué d'y recopier les bandes pendant la perte : rien n'est perdu, et
+ * un bac en pause, qui n'envoie plus de frame, réapparaît quand même.
+ */
+function restartable(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Screen {
+  let inner: Screen | null = glScreen(gl);
+  let width = LIGHT_WIDTH;
+  let last: Parameters<Screen["paint"]> | null = null;
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault(); // sans ça, le navigateur ne rend jamais le contexte
+    inner = null;
+  });
+  canvas.addEventListener("webglcontextrestored", () => {
+    inner = glScreen(gl);
+    inner.detail(width);
+    if (!last) return;
+    const [grid, , , , , view, lit, tint] = last;
+    inner.paint(grid, 0, 0, grid.width, grid.height, view, lit, tint);
+  });
+  return {
+    kind: "webgl2",
+    detail(w) {
+      if (w > 0) width = w;
+      inner?.detail(w);
+    },
+    paint(...args) {
+      last = args;
+      inner?.paint(...args);
+    },
+  };
 }
 
 const VERTEX = `#version 300 es
@@ -47,11 +92,6 @@ void main() {
   gl_Position = vec4(v * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
-/** Éclat de la lumière reçue, ajouté tel quel : le halo sur le fond sombre. */
-const LIGHT_HALO = 160;
-/** Éclat de la lumière reçue, proportionnel à la couleur : les surfaces éclairées. */
-const LIGHT_GAIN = 1.5;
-
 const FRAGMENT = `#version 300 es
 precision highp float;
 precision highp int;
@@ -59,12 +99,13 @@ uniform highp usampler2D cells;
 uniform highp usampler2D life;
 uniform highp usampler2D frozen;
 uniform highp isampler2D noise;
-uniform highp isampler2D temp;
+uniform highp sampler2D temp;
+uniform highp sampler2D press;
 uniform highp usampler2D palette;
 uniform highp usampler2D table;
 uniform vec3 tint;
 uniform float ambient;
-uniform bool heatmap;
+uniform int view;
 uniform ivec4 glowing;
 uniform sampler2D light;
 uniform bool lighting;
@@ -74,9 +115,20 @@ out vec4 color;
 void main() {
   ivec2 size = textureSize(cells, 0);
   ivec2 p = ivec2(int(gl_FragCoord.x), size.y - 1 - int(gl_FragCoord.y));
-  float t = float(texelFetch(temp, p, 0).r);
+  float t = texelFetch(temp, p, 0).r;
   vec3 c;
-  if (heatmap) {
+  if (view == 2) {
+    int l = int(min(255.0, floor(texelFetch(press, p, 0).r * ${AIR_LEVELS.toFixed(1)} + 0.5)));
+    if (l == 0) {
+      ivec3 b = ivec3(texelFetch(palette, ivec2(int(texelFetch(cells, p, 0).r), 0), 0).rgb);
+      c = vec3((b * 77) >> 8);
+    } else {
+      c = vec3(clamp(3 * l - 510, 0, 255), clamp(3 * l - 255, 0, 255), 60 + min(195, (39 * l) / 17));
+    }
+    color = vec4(floor(c) / 255.0, 1.0);
+    return;
+  }
+  if (view == 1) {
     if (t < ambient) {
       float cold = clamp((ambient - t) / 60.0, 0.0, 1.0);
       c = vec3(20.0 * (1.0 - cold), 40.0 + 80.0 * cold, 60.0 + 195.0 * cold);
@@ -138,16 +190,18 @@ void main() {
  *    texel opaque qui brille, lui, ne reçoit rien : la lumière de son voisin
  *    est la sienne, et le bord d'une mer de lave virait au jaune saturé.
  *
- * ponytail: cascades « à la vanille », sans la correction bilinéaire des
- * rayons : de légers anneaux autour d'une petite flamme isolée, et un mur
- * fin fuit un peu vu de loin (mipmaps). Passer au *bilinear fix* le jour où
- * ça se remarque.
+ * Avec le *bilinear fix* : un rayon qui hérite de la cascade du dessus
+ * marche jusqu'à chacune des quatre sondes dont il hérite (`CASCADE`), au lieu
+ * de reprendre leur lumière depuis sa propre position — sans ça, des anneaux
+ * aux frontières des cascades autour d'une petite flamme. Quatre fois plus de
+ * marche dans `CASCADE` : la finesse de l'éclairage (Paramètres) en reste le
+ * levier pour une carte modeste.
  */
 const SCENE = `#version 300 es
 precision highp float;
 precision highp int;
 uniform highp usampler2D cells;
-uniform highp isampler2D temp;
+uniform highp sampler2D temp;
 uniform highp usampler2D table;
 uniform int scale;
 out vec4 color;
@@ -162,8 +216,8 @@ void main() {
     if (p.x >= size.x || p.y >= size.y) continue;
     int id = int(texelFetch(cells, p, 0).r);
     vec4 m = vec4(texelFetch(table, ivec2(id, 0), 0)) / 255.0;
-    float t = float(texelFetch(temp, p, 0).r);
-    if (id != 0 && t > 450.0) m.rgb = max(m.rgb, vec3(1.0, 0.45, 0.1) * min(1.0, (t - 450.0) / 700.0));
+    float t = texelFetch(temp, p, 0).r;
+    if (id != 0 && t > ${RED_HOT.toFixed(1)}) m.rgb = max(m.rgb, vec3(1.0, 0.45, 0.1) * min(1.0, (t - ${RED_HOT.toFixed(1)}) / 700.0));
     sum += vec4(m.rgb * m.a, m.a);
     n += 1.0;
   }
@@ -180,6 +234,26 @@ uniform bool top;
 uniform vec2 size;
 out vec4 color;
 
+// Marche de a vers b, au pas de la cascade : la lumière ramassée (rgb) et ce
+// qui passe encore au bout (a). Le rayon s'arrête au bord ou presque opaque.
+vec4 march(vec2 a, vec2 b, float stride, float lod) {
+  vec2 seg = b - a;
+  float len = length(seg);
+  vec2 dir = seg / max(len, 1e-4);
+  vec3 rad = vec3(0.0);
+  float through = 1.0;
+  for (float s = stride * 0.5; s < len; s += stride) {
+    vec2 p = a + dir * s;
+    if (p.x < 0.0 || p.y < 0.0 || p.x >= size.x || p.y >= size.y) break;
+    vec4 m = textureLod(scene, p / size, lod);
+    float pass = pow(1.0 - m.a, stride);
+    if (m.a > 0.0) rad += through * m.rgb / m.a * (1.0 - pass);
+    through *= pass;
+    if (through < 0.01) break;
+  }
+  return vec4(rad, through);
+}
+
 void main() {
   ivec2 t = ivec2(gl_FragCoord.xy);
   int side = 2 << level;
@@ -193,35 +267,38 @@ void main() {
   float far = float((1 << (2 * level + 2)) - 1) / 3.0;
   float stride = float(max(1, (1 << level) >> 1));
   float lod = log2(stride);
-  vec3 rad = vec3(0.0);
-  float through = 1.0;
-  for (float s = near + stride * 0.5; s < far; s += stride) {
-    vec2 p = origin + dir * s;
-    if (p.x < 0.0 || p.y < 0.0 || p.x >= size.x || p.y >= size.y) break;
-    vec4 m = textureLod(scene, p / size, lod);
-    float pass = pow(1.0 - m.a, stride);
-    if (m.a > 0.0) rad += through * m.rgb / m.a * (1.0 - pass);
-    through *= pass;
-    if (through < 0.01) break;
+  vec2 start = origin + dir * near;
+  if (top) {
+    color = vec4(march(start, origin + dir * far, stride, lod).rgb, 1.0);
+    return;
   }
-  if (!top && through >= 0.01) {
-    int up = side * 2;
-    ivec2 count = textureSize(upper, 0) / up;
-    vec2 u = origin / float(2 << level) - 0.5;
-    ivec2 i0 = ivec2(floor(u));
-    vec2 f = u - floor(u);
-    vec3 sum = vec3(0.0);
-    for (int k = 0; k < 4; k++) {
-      ivec2 corner = clamp(i0 + ivec2(k & 1, k >> 1), ivec2(0), count - 1);
-      float w = ((k & 1) == 1 ? f.x : 1.0 - f.x) * ((k >> 1) == 1 ? f.y : 1.0 - f.y);
+  // *Bilinear fix* : quatre rayons, un par sonde du dessus, chacun de notre
+  // début d'anneau jusqu'au début d'anneau de cette sonde-là, puis ce qu'elle
+  // voit au-delà (ses quatre directions filles), pondérés en bilinéaire. Un
+  // seul rayon depuis notre sonde héritait de sondes décalées par rapport à
+  // lui : des anneaux autour d'une petite flamme, et un mur fin vu de loin
+  // laissait passer la lumière.
+  int up = side * 2;
+  ivec2 count = textureSize(upper, 0) / up;
+  vec2 u = origin / float(2 << level) - 0.5;
+  ivec2 i0 = ivec2(floor(u));
+  vec2 f = u - floor(u);
+  vec3 total = vec3(0.0);
+  for (int k = 0; k < 4; k++) {
+    ivec2 corner = clamp(i0 + ivec2(k & 1, k >> 1), ivec2(0), count - 1);
+    float w = ((k & 1) == 1 ? f.x : 1.0 - f.x) * ((k >> 1) == 1 ? f.y : 1.0 - f.y);
+    vec2 above = (vec2(corner) + 0.5) * float(2 << level);
+    vec4 seg = march(start, above + dir * far, stride, lod);
+    vec3 beyond = vec3(0.0);
+    if (seg.a >= 0.01) {
       for (int c = 0; c < 4; c++) {
         int child = d * 4 + c;
-        sum += w * texelFetch(upper, corner * up + ivec2(child % up, child / up), 0).rgb;
+        beyond += texelFetch(upper, corner * up + ivec2(child % up, child / up), 0).rgb;
       }
     }
-    rad += through * sum * 0.25;
+    total += w * (seg.rgb + seg.a * beyond * 0.25);
   }
-  color = vec4(rad, 1.0);
+  color = vec4(total, 1.0);
 }`;
 
 const FLUENCE = `#version 300 es
@@ -258,13 +335,13 @@ void main() {
   color = vec4(best, 1.0);
 }`;
 
-/** Largeur maximale de la grille de lumière, en texels : au-delà, un texel couvre plusieurs cellules. */
+/** Largeur maximale de la grille de lumière, en texels, d'origine : au-delà, un texel couvre plusieurs cellules. */
 const LIGHT_WIDTH = 480;
 /** Nombre maximal de cascades : la dernière porte à (4⁶ − 1)/3 = 1365 texels. */
 const CASCADES = 6;
 
 /** Les tableaux du miroir montés en textures, une unité de texture chacun dans cet ordre ; la palette et l'éclairage prennent les suivantes. */
-const LAYERS = ["cells", "life", "frozen", "noise", "temp"] as const;
+const LAYERS = ["cells", "life", "frozen", "noise", "temp", "press"] as const;
 
 /** Une cible de rendu de l'éclairage : sa texture, son framebuffer, sa taille. */
 interface Target { texture: WebGLTexture; fb: WebGLFramebuffer; w: number; h: number }
@@ -297,12 +374,14 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   gl.bindVertexArray(gl.createVertexArray());
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
-  const formats: Record<(typeof LAYERS)[number], [number, number]> = {
-    cells: [gl.R8UI, gl.UNSIGNED_BYTE],
-    life: [gl.R8UI, gl.UNSIGNED_BYTE],
-    frozen: [gl.R8UI, gl.UNSIGNED_BYTE],
-    noise: [gl.R8I, gl.BYTE],
-    temp: [gl.R16I, gl.SHORT],
+  /** Format interne, type et format des données de chaque couche. La pression, flottante, n'est lue qu'au texel près (`NEAREST`). */
+  const formats: Record<(typeof LAYERS)[number], [number, number, number]> = {
+    cells: [gl.R8UI, gl.UNSIGNED_BYTE, gl.RED_INTEGER],
+    life: [gl.R8UI, gl.UNSIGNED_BYTE, gl.RED_INTEGER],
+    frozen: [gl.R8UI, gl.UNSIGNED_BYTE, gl.RED_INTEGER],
+    noise: [gl.R8I, gl.BYTE, gl.RED_INTEGER],
+    temp: [gl.R32F, gl.FLOAT, gl.RED],
+    press: [gl.R32F, gl.FLOAT, gl.RED],
   };
   /** Une texture liée à `unit`, filtrée `filter` (les textures entières exigent `NEAREST`). */
   const texture = (unit: number, filter: number = gl.NEAREST) => {
@@ -323,7 +402,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   gl.useProgram(program);
   gl.uniform4i(gl.getUniformLocation(program, "glowing"), ...GLOWING);
   const ambient = gl.getUniformLocation(program, "ambient");
-  const heatmap = gl.getUniformLocation(program, "heatmap");
+  const viewAt = gl.getUniformLocation(program, "view");
   const lightingOn = gl.getUniformLocation(program, "lighting");
   const drawScale = gl.getUniformLocation(program, "scale");
   const tintAt = gl.getUniformLocation(program, "tint");
@@ -349,6 +428,8 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   };
   /** Ce que lit la dernière cascade, qui n'a pas de dessus : un texel noir, jamais la texture où elle écrit. */
   const none = target(UPPER, 1, 1, gl.RGBA8, gl.NEAREST);
+  /** Largeur maximale de la grille de lumière, réglable (`detail()`). */
+  let lightWidth = LIGHT_WIDTH;
   let lights: { scale: number; scene: Target; cascades: Target[]; light: Target } | null = null;
 
   /** Refait les cibles de l'éclairage pour un bac `bw` × `bh`. */
@@ -357,7 +438,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
       gl.deleteTexture(old.texture);
       gl.deleteFramebuffer(old.fb);
     }
-    const scale = Math.ceil(bw / LIGHT_WIDTH);
+    const scale = Math.ceil(bw / lightWidth);
     const lw = Math.ceil(bw / scale), lh = Math.ceil(bh / scale);
     const format = hdr ? gl.RGBA16F : gl.RGBA8;
     let count = 1;
@@ -410,7 +491,12 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   let w = 0, h = 0;
   return {
     kind: "webgl2",
-    paint(grid, x0, y0, x1, y1, heat, lit, tint) {
+    detail(width) {
+      if (width === lightWidth || !(width > 0)) return;
+      lightWidth = width;
+      if (w > 0) resize(w, h); // avant la première frame, paint() s'en charge
+    },
+    paint(grid, x0, y0, x1, y1, view, lit, tint) {
       if (grid.width !== w || grid.height !== h) {
         w = grid.width; h = grid.height;
         x0 = 0; y0 = 0; x1 = w; y1 = h;
@@ -429,17 +515,17 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
         LAYERS.forEach((name, unit) => {
           gl.activeTexture(gl.TEXTURE0 + unit);
           gl.bindTexture(gl.TEXTURE_2D, textures[unit]);
-          gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, x1 - x0, y1 - y0, gl.RED_INTEGER, formats[name][1], grid[name] as unknown as ArrayBufferView);
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, x1 - x0, y1 - y0, formats[name][2], formats[name][1], grid[name] as unknown as ArrayBufferView);
         });
         gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
         gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
         gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
       }
-      const on = lit && !heat;
+      const on = lit && view === "matter";
       if (on) illuminate();
       gl.useProgram(program);
       gl.uniform1f(ambient, grid.ambient);
-      gl.uniform1i(heatmap, heat ? 1 : 0);
+      gl.uniform1i(viewAt, view === "air" ? 2 : view === "heat" ? 1 : 0);
       gl.uniform1i(lightingOn, on ? 1 : 0);
       gl.uniform1i(drawScale, lights!.scale);
       gl.uniform3f(tintAt, ...tint);
@@ -449,23 +535,97 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
   };
 }
 
-/** Le secours sans WebGL2 : `Renderer` sur le miroir, puis `putImageData` du rectangle changé. */
+/**
+ * Intervalle minimal entre deux éclairages du secours 2D, en ms, selon la
+ * taille du bac : la lumière n'est pas locale, chaque éclairage la recalcule
+ * (~5 ms) et recolorie tout le bac. 50 ms jusqu'en 640×360 — vingt fois par
+ * seconde, une flamme vacille encore —, puis de plus en plus espacé, ~200 ms
+ * en 1920×1080. Entre deux, seul le rectangle changé est reposé, avec la
+ * lumière d'avant.
+ */
+const relight = (cells: number): number => Math.max(50, Math.min(200, cells / 10_000));
+
+/**
+ * Le secours sans WebGL2 : `Renderer` sur le miroir, puis `putImageData` du
+ * rectangle changé. L'éclairage y passe par `FlatLight` (sim/flatlight.ts),
+ * qui ressemble au shader sans en être une copie, chargé à la première frame
+ * éclairée : d'ici là, et s'il ne se charge pas, le bac est peint sans lumière.
+ * La page collecte ; le calcul part dans un fil à lui (flatlight-worker.ts),
+ * un seul à la fois, et la lumière qui revient fait repeindre le bac entier.
+ * Sans ce fil (il n'a pas pu naître), le calcul se fait ici.
+ */
 function flatScreen(canvas: HTMLCanvasElement): Screen {
   const ctx = canvas.getContext("2d", { alpha: false })!;
   let of: Grid | null = null;
   let renderer: Renderer | null = null;
   let image: ImageData | null = null;
+  let lights: FlatLight | null = null;
+  let loading = false;
+  let litAt = -Infinity;
+  let wasLit = false;
+  let worker: Worker | null = null;
+  let busy = false;
+  let alone = false; // le fil de l'éclairage n'a pas pu naître : calcul sur place
+  /** Le bac entier, repeint avec la lumière qui vient d'arriver. */
+  const repaint = (): void => {
+    if (!of || !renderer || !image || !wasLit) return;
+    renderer.paint(0, 0, of.width, of.height);
+    ctx.putImageData(image, 0, 0);
+  };
+  /** Confie le calcul au fil de l'éclairage ; false s'il n'y en a pas (calcul sur place). */
+  const solveAway = (grid: Grid): boolean => {
+    if (alone || !lights) return false;
+    if (!worker) {
+      try {
+        worker = new Worker(new URL("./sim/flatlight-worker.ts", import.meta.url), { type: "module" });
+      } catch {
+        alone = true;
+        return false;
+      }
+      worker.onmessage = (e: MessageEvent<{ light: Float32Array; width: number; height: number; scale: number }>) => {
+        busy = false;
+        lights?.adopt(e.data.light, e.data.width, e.data.height, e.data.scale);
+        repaint();
+      };
+      worker.onerror = () => { alone = true; busy = false; worker = null; };
+    }
+    if (busy) return true; // un calcul en cours : la lumière d'avant tient encore
+    busy = true;
+    const job = lights.collect(grid);
+    worker.postMessage(job, [job.emit.buffer, job.alpha.buffer]);
+    return true;
+  };
   return {
     kind: "2d",
-    paint(grid, x0, y0, x1, y1, heat, _lit, tint) {
-      if (grid !== of || !renderer || !image) {
-        of = grid;
-        renderer = new Renderer(grid);
-        image = new ImageData(renderer.pixels as Uint8ClampedArray<ArrayBuffer>, grid.width, grid.height);
-        x0 = 0; y0 = 0; x1 = grid.width; y1 = grid.height;
+    detail() {},
+    paint(grid, x0, y0, x1, y1, view, lit, tint) {
+      if (lit && !lights && !loading) {
+        loading = true;
+        // Arrivé, il éclaire dès la frame suivante, bac entier (`wasLit` le force).
+        void import("./sim/flatlight.ts").then((m) => { lights = new m.FlatLight(); });
       }
+      const on = lit && view === "matter" && lights !== null;
+      if (grid !== of || !renderer || !image || on !== wasLit) {
+        if (grid !== of || !renderer || !image) {
+          of = grid;
+          renderer = new Renderer(grid);
+          image = new ImageData(renderer.pixels as Uint8ClampedArray<ArrayBuffer>, grid.width, grid.height);
+        }
+        x0 = 0; y0 = 0; x1 = grid.width; y1 = grid.height;
+        litAt = -Infinity;
+      }
+      wasLit = on;
       if (x1 <= x0 || y1 <= y0) return;
-      renderer.heatmap = heat;
+      const now = performance.now();
+      if (on && lights && now - litAt >= relight(grid.width * grid.height)) {
+        litAt = now;
+        if (!solveAway(grid)) {
+          lights.compute(grid);
+          x0 = 0; y0 = 0; x1 = grid.width; y1 = grid.height;
+        }
+      }
+      renderer.lights = on ? lights : null;
+      renderer.view = view;
       renderer.tint = tint;
       renderer.paint(x0, y0, x1, y1);
       ctx.putImageData(image, 0, 0, x0, y0, x1 - x0, y1 - y0);

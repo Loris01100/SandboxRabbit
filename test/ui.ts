@@ -3,10 +3,13 @@
  * Seule la logique pure est ici — le reste de main.ts tient au DOM.
  */
 import assert from "node:assert/strict";
-import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, ticksFor } from "../src/client/ui.ts";
+import { ACTIONS, DEFAULT_BINDINGS, KEY_GROUPS, clampPan, combo, matches, peerColor, savedValue, framePeriod, goalText, keyLabel, keymap, panAfterZoom, parseBindings, parseGoal, pushRecent, rebind, refreshPeriod, ticksFor, wholeScale } from "../src/client/ui.ts";
 import { EMPTY, HERO, HERO_HEAD, MATERIALS, SAND, STONE, WATER } from "../src/client/sim/materials.ts";
 import { look } from "../src/client/sight.ts";
 import { REPORT, reporter } from "../src/client/errors.ts";
+import { MIX, boomShape, humLevel, panOf, rainLevel } from "../src/client/sound.ts";
+import { readFileSync } from "node:fs";
+import { decode, locate } from "./pile.ts";
 
 // Objectifs : ce qui vient d'un autre visiteur ne passe pas sans contrôle.
 {
@@ -76,6 +79,29 @@ import { REPORT, reporter } from "../src/client/errors.ts";
   assert.equal(ticksFor(1, -5, 0).ticks, 0, "une horloge qui recule ne simule rien");
 }
 
+// Cadence du Worker : la fréquence de l'écran, bornée entre 60 et 240 Hz.
+{
+  const hz144 = 1000 / 144;
+  assert.equal(refreshPeriod([hz144, hz144, 2 * hz144, hz144, 5000]), hz144, "une frame manquée ou un onglet revenu ne comptent pas");
+  assert.equal(refreshPeriod([]), 1000 / 60, "rien de mesuré : 60 Hz");
+  assert.equal(refreshPeriod([40, 40, 40]), 1000 / 60, "une page qui rame ne ralentit pas le Worker sous 60 Hz");
+  assert.equal(refreshPeriod([1, 1, 1]), 1000 / 240, "240 Hz au plus");
+  assert.equal(framePeriod(hz144, 0), hz144, "sans limite : l'écran");
+  assert.equal(framePeriod(hz144, 30), 1000 / 30, "limité à 30 images par seconde");
+  assert.equal(framePeriod(1000 / 60, 144), 1000 / 60, "une limite au-dessus de l'écran ne l'accélère pas");
+}
+
+// Échelle entière : le plus grand multiple qui tient, en pixels physiques.
+{
+  assert.equal(wholeScale(1500, 900, 320, 180, 1), 4, "4,7 → 4 : toutes les cellules font 4 px");
+  assert.equal(wholeScale(1500, 600, 320, 180, 1), 3, "la hauteur borne aussi");
+  assert.equal(wholeScale(1200, 700, 320, 180, 1.25), 4, "écran à 125 % : 1200 px CSS = 1500 pixels physiques");
+  assert.equal(wholeScale(1500, 900, 1920, 1080, 1), 0, "une cellule par pixel ne tient pas : 0, on étire");
+  assert.equal(wholeScale(-10, 0, 320, 180, 1), 0, "un cadre pas encore posé ne donne rien de négatif");
+  assert.equal(wholeScale(478, 358, 640, 360, 2), 0, "×1,49 → ×1 rétrécirait d'un tiers : on étire");
+  assert.equal(wholeScale(1500, 900, 1280, 720, 1), 1, "×1,17 → ×1 ne perd qu'un septième : entière");
+}
+
 /**
  * Ce que voit le héros : un mur de sable à sa droite, rien à sa gauche. Tourné
  * vers le mur, le rayon du milieu le voit ; son propre corps ne lui bouche pas
@@ -143,6 +169,59 @@ import { REPORT, reporter } from "../src/client/errors.ts";
   const long = reporter((text) => sent.push(text));
   long("x".repeat(REPORT + 100));
   assert.equal(sent.at(-1)!.length, REPORT, "un rapport est coupé au plafond");
+}
+
+// Son : les réglages purs de sound.ts (le reste demande un AudioContext).
+{
+  assert.equal(humLevel(0, 3000), 0, "rien ne brûle : silence");
+  assert.ok(humLevel(1, 3000) > 0.05, "une flamme seule s'entend");
+  assert.equal(humLevel(1e6, 3000), 1, "un brasier plafonne");
+  assert.ok(humLevel(200, 3000) < humLevel(400, 3000), "plus de feu, plus de bruit");
+  assert.equal(rainLevel(0), 0);
+  assert.equal(rainLevel(9), 0, "une météo inconnue se tait");
+  const tnt = boomShape(1, 5), bombe = boomShape(1, 16), chaîne = boomShape(100, 5);
+  assert.ok(bombe.seconds > tnt.seconds && bombe.cutoff < tnt.cutoff, "la bombe gronde plus longtemps, plus grave");
+  assert.ok(chaîne.gain > tnt.gain && chaîne.gain <= 1, "une chaîne sonne plus fort, sans saturer");
+  assert.equal(panOf(0, 320), -0.8);
+  assert.equal(panOf(319, 320), 0.8);
+  assert.equal(panOf(5, 1), 0, "un bac d'une colonne reste au centre");
+  // Un curseur par famille, ni plus ni moins : sans le sien, une famille ne se
+  // baisse plus ; un curseur de trop ne réglerait rien (audio.ts l'ignore).
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const curseurs = [...html.matchAll(/data-mix="(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(curseurs.sort(), [...MIX].sort(), "chaque famille de sons a son curseur dans l'onglet Son");
+}
+
+// Recherche de la galerie et couleurs des joueurs d'un salon.
+{
+  assert.ok(matches("Débâcle", "debacle"), "accents et casse ignorés");
+  assert.ok(matches("La Glace du Volcan", "volcan glace"), "chaque mot, dans n'importe quel ordre");
+  assert.ok(!matches("La Glace du Volcan", "volcan lave"), "tous les mots doivent y être");
+  assert.ok(matches("n'importe quoi", "  "), "rien de tapé : tout passe");
+  const teintes = new Set(Array.from({ length: 8 }, (_, i) => peerColor(i + 1)));
+  assert.equal(teintes.size, 8, "huit joueurs, huit couleurs");
+}
+
+// Un réglage renommé garde la valeur retenue sous son ancien nom.
+{
+  const renamed = { "light-quality": ["light-detail"], speed: ["vitesse", "rate"] };
+  assert.equal(savedValue({ "light-detail": "240" }, "light-quality", renamed), "240", "relu sous l'ancien nom");
+  assert.equal(savedValue({ "light-detail": "240", "light-quality": "120" }, "light-quality", renamed), "120", "le nouveau nom passe devant");
+  assert.equal(savedValue({ rate: 2, vitesse: 3 }, "speed", renamed), 3, "du plus récent au plus ancien");
+  assert.equal(savedValue({ x: 1 }, "brush", renamed), undefined, "jamais retenu : défaut");
+  assert.equal(savedValue({ mirror: false }, "mirror", {}), false, "false est une valeur, pas une absence");
+}
+
+// `npm run pile` : le décodage des cartes de sources (VLQ base64), sur une carte
+// écrite à la main — deux segments sur la ligne 1, un sur la ligne 2.
+{
+  const carte = decode({ sources: ["../src/a.ts"], names: ["f"], mappings: "AAAAA,KAAK;AACA" });
+  assert.deepEqual(locate(carte, 1, 1), { source: "../src/a.ts", line: 1, column: 1, name: "f" });
+  assert.deepEqual(locate(carte, 1, 9), { source: "../src/a.ts", line: 1, column: 6, name: undefined }, "le dernier segment qui commence avant la colonne");
+  // Seule la colonne générée repart de zéro à chaque ligne : la colonne
+  // d'origine reste relative au segment d'avant (5, plus 0).
+  assert.deepEqual(locate(carte, 2, 3), { source: "../src/a.ts", line: 2, column: 6, name: undefined }, "valeurs relatives au segment d'avant, d'une ligne à l'autre");
+  assert.equal(locate(carte, 9, 1), null, "au-delà de la carte : rien");
 }
 
 console.log("ok — panneau conforme");

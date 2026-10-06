@@ -114,21 +114,57 @@ quelques secondes sur le runner.
 | Fichier | Rôle |
 | --- | --- |
 | [test/browser.ts](../test/browser.ts) | le script : lance Vite et Chromium, lit le rapport, charge la page du jeu. `npm run browser` |
-| [test/screen.html](../test/screen.html), [test/screen.ts](../test/screen.ts) | la page de comparaison : une grille (monde généré + une bande de chaque matière, `life`, température et figé variés) peinte par le shader de screen.ts et par `Renderer`, aux quatre heures et en vue thermique. Ouvrable à la main : http://localhost:5173/test/screen.html sous `npm run dev` |
+| [test/screen.html](../test/screen.html), [test/screen.ts](../test/screen.ts) | la page de comparaison : une grille (monde généré + une bande de chaque matière, `life`, température et figé variés ; température et pression brutes, comme dans le miroir de la page) peinte par le shader de screen.ts et par `Renderer`, aux quatre heures, en vue thermique et en vue pression (la pression d'un souffle, plus une rampe de tous les paliers). Ouvrable à la main : http://localhost:5173/test/screen.html sous `npm run dev` |
 
 Ce qui est vérifié :
 
 1. **shader WebGL2 = `Renderer`**, à une unité près, sur moins de 2 % des
-   pixels (la vue thermique est exacte). C'est la seule garde des deux copies
+   pixels (les vues thermique et pression sont exactes : la rampe de pression
+   est calculée en entiers des deux côtés — en flottants, le GPU arrondissait
+   autrement 2 % des paliers). C'est la seule garde des deux copies
    du coloriage (voir « Le coloriage existe en deux copies » dans
-   [AGENTS.md](../AGENTS.md)). L'éclairage global (`lit`) n'existe que côté
-   shader : il n'est pas comparé ;
+   [AGENTS.md](../AGENTS.md)). L'éclairage global (`lit`) n'est pas
+   comparé : le secours 2D en a un qui ressemble (`FlatLight`), pas une copie ;
 2. **la page du jeu charge** : le bac reçoit sa première frame (le canvas
-   `#world` prend la taille de la grille) sans aucune erreur dans la console ;
-3. **les erreurs remontent** : une exception lancée dans la page part vers
+   `#world` quitte les 300 × 150 d'un canvas vide pour la taille de la grille)
+   sans aucune erreur dans la console. Puis une touche pressée : le module du
+   son (src/client/sound.ts, chargé par audio.ts au premier geste) arrive et
+   crée son contexte audio, toujours sans erreur. Puis un clic sur Explorer :
+   le Worker de simulation charge le module du mode exploration
+   (src/client/sim/explore.ts, `import()` de sim/sandbox.ts), le bac passe en
+   1280 × 720, sans erreur. C'est le seul test qui passe par ce chargement à
+   la demande dans un vrai Worker ;
+3. **le contexte WebGL se retrouve** : `WEBGL_lose_context` le perd puis le
+   rend, et le bac est reposé dès l'événement `webglcontextrestored`, avant
+   toute frame (src/client/screen.ts, `restartable()`). `restoreContext()`
+   s'appelle une tâche après l'événement `lost` : dans sa microtâche, Chromium
+   l'ignore. Sans `preventDefault()` sur la perte, l'onglet plante ;
+4. **les erreurs remontent** : une exception lancée dans la page part vers
    `POST /api/error` (src/client/errors.ts) et le Worker répond `204`. Vite
    affiche alors un `[Unhandled error] Error: essai de remontée` : c'est
-   l'exception du test, pas une panne.
+   l'exception du test, pas une panne ;
+5. **le juge du classement rejoue un record** : une partie de Débâcle gagnée
+   dans un `Sandbox` côté Node, compressée par `pack()`, part au fil de
+   sim/judge.ts créé dans la page ; elle tient, et la même annoncée un tick
+   plus courte est refusée ;
+6. **le salon tourne à deux** : deux pages entrent dans un salon neuf (nom
+   horodaté) sur le Durable Object que le plugin Cloudflare fait tourner dans
+   workerd. Chacune voit la liste des joueurs avec les pseudos (un `<b>` reste
+   du texte), l'une voit le curseur de l'autre puis le perd quand il sort du
+   bac ; un coup de pinceau de l'invité s'affiche aussitôt chez lui en
+   fantôme (`.ghost`), qui s'efface quand la partie le ramène ; l'hôte
+   coche « Invités en lecture seule » (que l'invité n'a pas) et
+   l'invité en est prévenu ; quand l'hôte ferme sa page, l'autre est promue
+   et son curseur disparaît ; une nouvelle page qui entre sous le pseudo de
+   l'absente, avec une autre clé de navigateur, devient « Alice 2 ». Le salon lui-même (room.ts) n'est chargé qu'au
+   premier clic sur « Bac partagé » : le test passe donc aussi par là. La galerie, elle, n'y est pas : elle demanderait une D1 locale
+   migrée (`wrangler d1 migrations apply --local`) sur la machine de test.
+7. **le secours 2D éclaire** : un second Chromium, lancé avec
+   `--disable-webgl --disable-webgl2`, charge la page : elle colorie par
+   `Renderer`, charge sim/flatlight.ts à la première frame éclairée et crée
+   le fil de l'éclairage (sim/flatlight-worker.ts — l'attente est armée
+   avant d'ouvrir la page, sinon le fil naît avant qu'on le guette), propose
+   la case « Éclairage » et tourne sans erreur.
 
 Ce n'est pas dans `npm run check` : il faut Chromium installé. La CI le lance
 après `check`.

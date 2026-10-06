@@ -88,6 +88,35 @@ export function ticksFor(speed: number, ms: number, pending: number, max = 8): {
 }
 
 /**
+ * La période de rafraîchissement de l'écran, en ms, tirée des derniers écarts
+ * entre deux `requestAnimationFrame` : c'est la cadence que le Worker de
+ * simulation vise, pour livrer une image par rafraîchissement — à 60 Hz fixes,
+ * un écran 144 Hz n'avait une image neuve qu'un rafraîchissement sur deux ou
+ * trois. La médiane, parce qu'une frame manquée (écart double) ou un onglet
+ * revenu (écart de plusieurs secondes) ne doit pas faire croire à un écran
+ * lent. Jamais plus lent que 60 Hz : une page qui rame mesure des écarts longs,
+ * et ralentir le Worker d'autant n'y changerait rien. Jamais plus vite que
+ * 240 Hz : au-delà, le coût des frames (envoi, stats) ne se voit plus.
+ */
+export function refreshPeriod(gaps: readonly number[]): number {
+  if (gaps.length === 0) return 1000 / 60;
+  const sorted = [...gaps].sort((a, b) => a - b);
+  const median = sorted[sorted.length >> 1];
+  return Math.min(Math.max(median, 1000 / 240), 1000 / 60);
+}
+
+/**
+ * La période que vise le Worker : celle de l'écran, ralentie jusqu'à `cap`
+ * images par seconde si le joueur l'a limitée (Paramètres › Graphismes, 0 =
+ * pas de limite). Sur un petit PC, 30 images au lieu de 60, c'est moitié
+ * moins d'envois, de copies dans le miroir et de passes d'éclairage — la
+ * simulation, elle, garde sa vitesse (`ticksFor` compte le temps écoulé).
+ */
+export function framePeriod(screen: number, cap: number): number {
+  return cap > 0 ? Math.max(screen, 1000 / cap) : screen;
+}
+
+/**
  * Décalage de la vue ramené dans ses bornes : le bac agrandi recouvre
  * toujours son cadre, on ne le pousse plus hors de l'écran. `size` est la
  * taille du cadre (le canvas sans transformation), en pixels d'écran ; le
@@ -95,6 +124,24 @@ export function ticksFor(speed: number, ms: number, pending: number, max = 8): {
  */
 export function clampPan(pan: number, size: number, zoom: number): number {
   return Math.min(0, Math.max(size * (1 - zoom), pan));
+}
+
+/**
+ * Échelle entière du bac : combien de pixels **physiques** (`dpr` compris)
+ * par cellule pour que le bac tienne dans un cadre de `boxW` × `boxH` pixels
+ * CSS. Étiré au plus grand, 320 cellules sur 1500 px en faisaient 4,7 : des
+ * lignes de 4 px à côté de lignes de 5, qu'on voit sur un fil de pierre. En
+ * pixels physiques, parce qu'un écran de portable à 125 % donne 1,25 pixel
+ * par pixel CSS — un ×4 en CSS y redevenait un ×5 inégal. 0 : on étire,
+ * soit que même une cellule par pixel ne tienne pas (1920 × 1080 sur un
+ * petit écran), soit qu'arrondir coûte plus d'un quart de la taille — sur
+ * téléphone, 640 cellules en ×1,49 tombaient à ×1, un bac rétréci d'un tiers,
+ * pire que des cellules inégales.
+ */
+export function wholeScale(boxW: number, boxH: number, w: number, h: number, dpr: number): number {
+  const fit = Math.min((boxW * dpr) / w, (boxH * dpr) / h);
+  const k = Math.floor(fit);
+  return k >= 1 && k >= fit * 0.75 ? k : 0;
 }
 
 /**
@@ -115,8 +162,8 @@ export function panAfterZoom(client: number, edge: number, size: number, pan: nu
  */
 export const ACTIONS = [
   "pause", "mat1", "mat2", "mat3", "mat4", "mat5", "mat6", "mat7", "mat8", "mat9", "eraser",
-  "brushDown", "brushUp", "gravity", "freeze", "heat", "undo", "redo", "paste", "zoomIn", "zoomOut", "help",
-  "step", "terrain", "surprise", "full", "clear", "retry", "save", "gallery",
+  "brushDown", "brushUp", "gravity", "freeze", "heat", "air", "undo", "redo", "paste", "zoomIn", "zoomOut", "help",
+  "step", "terrain", "surprise", "full", "clear", "mute", "retry", "save", "gallery",
   "left", "right", "up", "down", "dig", "place", "view", "nextHero",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
@@ -125,9 +172,9 @@ export type Bindings = Record<Action, string>;
 /** Les touches d'origine, pensées pour l'AZERTY. Une combinaison s'écrit « Ctrl+z ». */
 export const DEFAULT_BINDINGS: Bindings = {
   pause: " ", mat1: "1", mat2: "2", mat3: "3", mat4: "4", mat5: "5", mat6: "6", mat7: "7", mat8: "8", mat9: "9", eraser: "0",
-  brushDown: "[", brushUp: "]", gravity: "g", freeze: "f", heat: "h", undo: "Ctrl+z", redo: "Ctrl+y", paste: "Ctrl+v",
+  brushDown: "[", brushUp: "]", gravity: "g", freeze: "f", heat: "h", air: "b", undo: "Ctrl+z", redo: "Ctrl+y", paste: "Ctrl+v",
   zoomIn: "+", zoomOut: "-", help: "?",
-  step: ".", terrain: "n", surprise: "u", full: "p", clear: "Ctrl+Delete", retry: "t", save: "Ctrl+s", gallery: "o",
+  step: ".", terrain: "n", surprise: "u", full: "p", clear: "Ctrl+Delete", mute: "m", retry: "t", save: "Ctrl+s", gallery: "o",
   left: "q", right: "d", up: "z", down: "s", dig: "e", place: "r", view: "v", nextHero: "c",
 };
 
@@ -220,8 +267,8 @@ export const KEY_GROUPS: { name: string; actions: Action[]; mouse: [string, stri
       ["Clic", "Sur un interrupteur ou un aimant posé : le basculer"],
     ],
   },
-  { name: "Simulation", actions: ["pause", "step", "terrain", "surprise", "full", "clear", "help"], mouse: [] },
-  { name: "Physique du monde", actions: ["gravity", "heat"], mouse: [] },
+  { name: "Simulation", actions: ["pause", "step", "terrain", "surprise", "full", "clear", "mute", "help"], mouse: [] },
+  { name: "Physique du monde", actions: ["gravity", "heat", "air"], mouse: [] },
   { name: "Défis", actions: ["retry"], mouse: [] },
   { name: "Mondes", actions: ["save", "gallery"], mouse: [] },
   {
@@ -245,6 +292,7 @@ export const ACTION_NAMES: Record<Action, string> = {
   gravity: "Inverser la gravité",
   freeze: "Passer de Peindre à Figer",
   heat: "Vue thermique",
+  air: "Vue pression",
   undo: "Annuler",
   redo: "Rétablir (aussi Ctrl+Maj+Z)",
   paste: "Reposer le morceau copié, centré sur le curseur",
@@ -256,6 +304,7 @@ export const ACTION_NAMES: Record<Action, string> = {
   surprise: "Un décor tiré au sort",
   full: "Plein écran",
   clear: "Vider le bac",
+  mute: "Couper ou rendre le son",
   retry: "Recommencer le dernier défi lancé",
   save: "Sauvegarder le monde dans la galerie",
   gallery: "Ouvrir la galerie",
@@ -268,3 +317,36 @@ export const ACTION_NAMES: Record<Action, string> = {
   view: "Vue du héros : de côté, avec l'encadré de ce qu'il voit, ou à la première personne",
   nextHero: "Piloter le héros suivant (la caméra le suit)",
 };
+
+/** Un nom ramené à ce qu'on tape pour le chercher : minuscules, sans accents. */
+const plain = (s: string): string => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+/**
+ * Recherche de la galerie : chaque mot tapé doit se trouver dans le nom, dans
+ * n'importe quel ordre, accents et casse ignorés — « volcan glace » trouve
+ * « La Glace du Volcan », « debacle » trouve « Débâcle ».
+ */
+export function matches(name: string, query: string): boolean {
+  const hay = plain(name);
+  return plain(query).split(/\s+/).every((word) => hay.includes(word));
+}
+
+/**
+ * La couleur d'un joueur de salon, d'après son numéro (1 à 8) : des teintes
+ * écartées d'un angle d'or, pour que deux voisins de numéro ne se confondent
+ * pas. Lisible sur le fond sombre du bac comme sur la page en mode jour.
+ */
+export function peerColor(id: number): string {
+  return `hsl(${Math.round((id * 137.5) % 360)} 85% 60%)`;
+}
+
+/**
+ * La valeur retenue d'un réglage (blob `:reglages`) : sous son `id`, sinon
+ * sous l'un de ses anciens noms (`renamed[id]`, du plus récent au plus
+ * ancien). `undefined` s'il n'a jamais été retenu.
+ */
+export function savedValue(saved: Record<string, unknown>, id: string, renamed: Record<string, readonly string[]>): unknown {
+  if (saved[id] !== undefined) return saved[id];
+  for (const old of renamed[id] ?? []) if (saved[old] !== undefined) return saved[old];
+  return undefined;
+}

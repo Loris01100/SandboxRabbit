@@ -1,9 +1,10 @@
 import { MATERIALS, type MaterialId } from "./sim/materials.ts";
 import { CLOCK, HOURS, clockAt, hourTint } from "./sim/render.ts";
 import { current, paletteEl, select } from "./palette.ts";
-import { stored, write } from "./ui.ts";
-import { zoomInput } from "./view.ts";
-import { WIDTH, hour, light, resize, screen, set } from "./world.ts";
+import { soundMix, soundOn, soundVolume } from "./audio.ts";
+import { savedValue, stored, write } from "./ui.ts";
+import { wholePixels, zoomInput } from "./view.ts";
+import { WIDTH, airView, hour, light, lightDetail, limitFps, resize, screen, set } from "./world.ts";
 
 /** Rayon du pinceau, en cellules. */
 export let brush = 5;
@@ -71,8 +72,18 @@ export function fit(w: number): void {
 const weatherInput = document.querySelector<HTMLSelectElement>("#weather")!;
 weatherInput.addEventListener("input", () => set({ weather: Number(weatherInput.value) }));
 
+// Vue thermique et vue pression : l'une ou l'autre. Cocher l'une décoche
+// l'autre, sinon la pression, qui passe devant, masquait la thermique cochée.
 export const heatmapInput = document.querySelector<HTMLInputElement>("#heatmap")!;
-heatmapInput.addEventListener("change", () => set({ heatmap: heatmapInput.checked }));
+export const airmapInput = document.querySelector<HTMLInputElement>("#airmap")!;
+heatmapInput.addEventListener("change", () => {
+  set({ heatmap: heatmapInput.checked });
+  if (heatmapInput.checked && airmapInput.checked) { airmapInput.checked = false; airView(false); }
+});
+airmapInput.addEventListener("change", () => {
+  airView(airmapInput.checked);
+  if (airmapInput.checked && heatmapInput.checked) { heatmapInput.checked = false; set({ heatmap: false }); }
+});
 
 // Heure : la teinte du ciel, réglage de la page seule (world.ts). Le cycle
 // avance d'un cran par seconde : un fondu plus fin recolorierait tout le bac
@@ -91,15 +102,55 @@ setInterval(() => { if (hourInput.value === "cycle") tickHour(); }, 1000);
 
 const lightingInput = document.querySelector<HTMLInputElement>("#lighting")!;
 lightingInput.addEventListener("change", () => light(lightingInput.checked));
+
+// Graphismes (fenêtre Paramètres), pour les petits PC : moins d'images par
+// seconde, un éclairage plus grossier. Réglages de la page seule — le bac
+// simule pareil, le salon n'en sait rien.
+const fpsCapInput = document.querySelector<HTMLSelectElement>("#fps-cap")!;
+fpsCapInput.addEventListener("input", () => limitFps(Number(fpsCapInput.value)));
+const wholeInput = document.querySelector<HTMLInputElement>("#whole")!;
+wholeInput.addEventListener("change", () => wholePixels(wholeInput.checked));
+const lightDetailInput = document.querySelector<HTMLSelectElement>("#light-detail")!;
+lightDetailInput.addEventListener("input", () => lightDetail(Number(lightDetailInput.value)));
 if (screen.kind === "2d") {
-  lightingInput.disabled = true;
-  lightingInput.parentElement!.title = "Demande WebGL2, absent de ce navigateur";
+  lightDetailInput.disabled = true;
+  lightDetailInput.parentElement!.title = "Demande WebGL2, absent de ce navigateur";
 }
+
+// Son (fenêtre Paramètres) : réglage de la page seule, sound.ts le fabrique.
+export const soundInput = document.querySelector<HTMLInputElement>("#sound")!;
+soundInput.addEventListener("change", () => soundOn(soundInput.checked));
+const volumeInput = document.querySelector<HTMLInputElement>("#volume")!;
+const volumeValue = document.querySelector<HTMLOutputElement>("#volume-value")!;
+volumeInput.addEventListener("input", () => {
+  soundVolume(Number(volumeInput.value) / 100);
+  volumeValue.value = `${volumeInput.value} %`;
+});
+// Un curseur par famille de sons (explosions, tonnerre, feu…), nommée par son `data-mix`.
+const mixInputs = [...document.querySelectorAll<HTMLInputElement>("[data-mix]")];
+for (const input of mixInputs) {
+  const out = input.nextElementSibling as HTMLOutputElement;
+  input.addEventListener("input", () => {
+    soundMix(input.dataset.mix!, Number(input.value) / 100);
+    out.value = `${input.value} %`;
+  });
+}
+
+// Pseudo des salons (onglet Général) : room.ts le lit en entrant, il n'a qu'à être retenu.
+const nickInput = document.querySelector<HTMLInputElement>("#nick")!;
 
 // Réglages retenus d'une visite à l'autre. On rejoue l'événement "input" plutôt
 // que de dupliquer les handlers ci-dessus.
-// ponytail: un blob JSON sans version — un réglage renommé repart au défaut.
 const SETTINGS = "sandbox-rabbit:reglages";
+
+/**
+ * Les anciens noms d'un réglage renommé : `{ "nouvel-id": ["ancien-id"] }`, du
+ * plus récent au plus ancien. Le blob range chaque réglage sous l'`id` de son
+ * contrôle : sans cette table, changer un `id` dans index.html faisait
+ * repartir le réglage au défaut chez tous ceux qui l'avaient changé. Vide tant
+ * qu'aucun n'a été renommé ; voir recettes.md, « Ajouter un contrôle au panneau ».
+ */
+const RENAMED: Record<string, readonly string[]> = {};
 
 /**
  * Les réglages retenus, désignés par leur `id` — les clés du blob sont donc
@@ -108,7 +159,8 @@ const SETTINGS = "sandbox-rabbit:reglages";
  */
 const SAVED = [
   brushInput, speedInput, windInput, ambientInput, sizeInput,
-  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, lightingInput, hourInput,
+  toolInput, keepInput, onlyInput, mirrorInput, zoomInput, weatherInput, heatmapInput, airmapInput, lightingInput, hourInput,
+  fpsCapInput, lightDetailInput, wholeInput, soundInput, volumeInput, ...mixInputs, nickInput,
 ];
 const isCheck = (el: Element): el is HTMLInputElement =>
   el instanceof HTMLInputElement && el.type === "checkbox";
@@ -136,7 +188,8 @@ export function restore(): void {
   if (!saved) return;
   if (MATERIALS[saved.current as MaterialId]) select(saved.current as MaterialId);
   for (const el of SAVED) {
-    const value = typeof saved[el.id] === "boolean" && !isCheck(el) ? Number(saved[el.id]) : saved[el.id];
+    const kept = savedValue(saved, el.id, RENAMED);
+    const value = typeof kept === "boolean" && !isCheck(el) ? Number(kept) : kept;
     if (value === undefined) continue; // réglage absent d'une version précédente
     if (isCheck(el)) {
       el.checked = Boolean(value);

@@ -24,13 +24,11 @@ export type Gesture =
   | { t: "hero" };
 
 /**
- * Les noms d'origine des héros : leur numéro (`HERO_SLOTS.name`, 1 à 250 —
- * tiré de sa place quand on le pose, au hasard s'il n'en a pas au premier
- * tick) en choisit un. Deux héros peuvent tomber sur le même nom (un sur
- * quarante), et sur le même numéro (un sur 250) : ils partagent alors aussi
- * celui qu'on leur donne, et obéissent ensemble quand l'un est piloté.
- * ponytail: numéro tiré au hasard, sans chercher s'il est pris — à revoir le
- * jour où un monde garde des dizaines de héros.
+ * Les noms d'origine des héros : leur numéro (`HERO_SLOTS.name`, 1 à 250, donné
+ * par `enlist()` dans engine.ts, qui garantit qu'aucun n'est pris deux fois)
+ * en choisit un. Deux héros peuvent donc porter le même **nom** — quarante
+ * noms pour 250 numéros —, mais jamais le même numéro : ils obéiraient
+ * ensemble aux touches et partageraient celui qu'on leur donne à la main.
  */
 export const NAMES = [
   "Alix", "Basile", "Camille", "Dany", "Élie", "Fanny", "Gaspard", "Hélène", "Inès", "Jules",
@@ -130,6 +128,8 @@ export function weather(engine: Engine, level: number): void {
  */
 function bolt(engine: Engine, x: number, y: number): void {
   const g = engine.gravity;
+  engine.heard.bolts++;
+  engine.heard.boltAt = x;
   for (; engine.inBounds(x, y); y += g) {
     if (!open(engine, x, y) && !(falling(engine, x, y) && open(engine, x, y + g))) break;
     engine.set(x, y, FIRE);

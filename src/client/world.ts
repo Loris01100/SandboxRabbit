@@ -14,10 +14,11 @@
  * dépend de la taille s'inscrit dans `onResize`.
  */
 import type { Knobs, News, Order } from "./sim/sandbox.ts";
-import { HOURS, type Grid, type Tint } from "./sim/render.ts";
+import { HOURS, glide, land, type Grid, type Mirror, type Tint } from "./sim/render.ts";
 import type { Recording } from "./replay.ts";
 import { createScreen } from "./screen.ts";
 import { watchErrors } from "./errors.ts";
+import { framePeriod, refreshPeriod } from "./ui.ts";
 
 export const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
 /** Ce qui colorie le canvas : WebGL2, sinon 2D (screen.ts). */
@@ -77,6 +78,17 @@ export function light(on: boolean): void {
 }
 
 /**
+ * La vue pression : l'air coloré par sa pression (`shadeAir` de render.ts).
+ * Réglage de la page seule, comme l'éclairage ; elle passe devant la vue
+ * thermique si les deux sont cochées.
+ */
+export function airView(on: boolean): void {
+  if (on === airmap) return;
+  airmap = on;
+  repaint = true;
+}
+
+/**
  * L'heure de la journée (`HOURS` de render.ts). Réglage de la page seule,
  * comme l'éclairage : le bac et le salon n'en savent rien, on recolorie tout.
  */
@@ -98,10 +110,14 @@ export function listen(fn: (news: News) => void): void {
  * quand il a changé — toutes les 250 ms en 640×360, plus rarement au-delà.
  * Elle sert à ranger le bac dans la mémoire locale quand la page part en
  * arrière-plan, sans attendre le Worker : aucune promesse n'y serait tenue.
- * Sauvegarder et partager demandent une grille fraîche (`askGrid`).
+ * Sauvegarder et partager demandent une grille fraîche (`askGrid`). Elle
+ * porte la largeur du bac qui l'a faite : `WIDTH` suit un redimensionnement
+ * tout de suite, la copie un quart de seconde plus tard, et ranger l'une sous
+ * l'autre cisaillait le bac à la visite suivante. En exploration (`voyage`),
+ * c'est la partie entière, fenêtre et chunks rangés, pas une grille.
  */
-let latest = "";
-export const latestGrid = (): string => latest;
+let latest: { width: number; data: string; voyage: boolean } | null = null;
+export const latestGrid = (): { width: number; data: string; voyage: boolean } | null => latest;
 
 /** Les questions dont on attend une réponse : un numéro, une promesse. */
 let asked = 0;
@@ -151,15 +167,16 @@ export function askClip(x: number, y: number, x2: number, y2: number): Promise<C
 
 /**
  * Le miroir de la grille, tenu à jour par les bandes reçues (`blit()`) :
- * matière, `life`, figé, grain et température au degré — ce que l'écran
- * colorie. Remplacé en entier quand la taille change.
+ * matière, `life`, figé, grain, température au degré et pression par palier
+ * — ce que l'écran colorie. Remplacé en entier quand la taille change.
  */
-let mirror: Grid & { temp: Int16Array } | null = null;
+let mirror: Mirror | null = null;
 /** Une frame est arrivée depuis le dernier `present()`. */
 let fresh = false;
 /** Tout recolorier au prochain `present()` : vue thermique basculée, ambiante changée. */
 let repaint = false;
 let heatmap = false;
+let airmap = false;
 let lit = true;
 let tint: Tint = HOURS["apres-midi"];
 /** Le rectangle changé depuis le dernier `present()`, en cellules, bords droit et bas exclus. */
@@ -180,25 +197,51 @@ function blit(frame: Extract<News, { t: "frame" }>): void {
     mirror = {
       width: w, height: h, ambient: frame.ambient,
       cells: new Uint8Array(n), life: new Uint8Array(n), frozen: new Uint8Array(n),
-      noise: new Int8Array(n), temp: new Int16Array(n),
+      noise: new Int8Array(n), temp: new Float32Array(n), press: new Float32Array(n),
     };
   }
-  if (mirror.ambient !== frame.ambient) { mirror.ambient = frame.ambient; repaint = true; }
-  for (const p of frame.patches) {
-    for (let r = 0; r < p.h; r++) {
-      const from = r * p.w, to = (p.y + r) * w + p.x;
-      mirror.cells.set(p.cells.subarray(from, from + p.w), to);
-      mirror.life.set(p.life.subarray(from, from + p.w), to);
-      mirror.frozen.set(p.frozen.subarray(from, from + p.w), to);
-      mirror.temp.set(p.temp.subarray(from, from + p.w), to);
-      if (p.noise) mirror.noise.set(p.noise.subarray(from, from + p.w), to);
+  const m = mirror;
+  if (m.ambient !== frame.ambient) { m.ambient = frame.ambient; repaint = true; }
+  if (frame.origin !== origin) {
+    // La fenêtre d'exploration a glissé : le miroir glisse d'autant, comme la
+    // grille du bac (`Engine.shift()`), avant que les bandes de la frame — la
+    // bande neuve et ce qu'ont changé les ticks — s'y posent. Le bac n'envoie
+    // plus que celles-là : 11 Mo par chunk traversé, c'étaient deux ou trois
+    // images sautées.
+    if (frame.origin !== null && origin !== null) {
+      const dx = frame.origin - origin;
+      slid += dx;
+      glide(m, dx);
+      repaint = true;
     }
+    origin = frame.origin;
+  }
+  for (const p of frame.patches) {
+    land(m, p);
     left = Math.min(left, p.x);
     top = Math.min(top, p.y);
     right = Math.max(right, p.x + p.w);
     bottom = Math.max(bottom, p.y + p.h);
   }
   fresh = true;
+}
+
+/** En exploration, la colonne du monde qui est la colonne 0 du bac ; null hors du mode. */
+export let origin: number | null = null;
+/** Colonnes dont la fenêtre d'exploration a glissé depuis le dernier `present()`. */
+let slid = 0;
+
+/**
+ * Colonnes dont la fenêtre a glissé dans ce qu'a posé le dernier `present()`,
+ * remises à zéro. La caméra se décale d'autant **dans la même image** que le
+ * dessin (`slideBy()` de view.ts) : décalée à l'arrivée de la frame, elle
+ * montrait une image l'ancien bac au mauvais endroit ; pas décalée du tout,
+ * elle rattrapait le héros en dix images, la vue filant d'un chunk.
+ */
+export function shifted(): number {
+  const d = slid;
+  slid = 0;
+  return d;
 }
 
 /** Le miroir de la grille, en lecture : ce que voit le héros (sight.ts) s'y calcule. Null avant la première frame. */
@@ -223,22 +266,77 @@ export function present(): boolean {
     repaint = true;
   }
   if (repaint) { left = 0; top = 0; right = mirror.width; bottom = mirror.height; }
-  screen.paint(mirror, left, top, right, bottom, heatmap, lit, tint);
+  screen.paint(mirror, left, top, right, bottom, airmap ? "air" : heatmap ? "heat" : "matter", lit, tint);
   fresh = false;
   repaint = false;
   left = Infinity; top = Infinity; right = 0; bottom = 0;
   return arrived;
 }
 
+/** Les derniers écarts entre deux rafraîchissements, la période de l'écran, la limite choisie et la période déjà dite au Worker. */
+const gaps: number[] = [];
+let lastBeat = 0;
+let refresh = 1000 / 60;
+let cap = 0;
+let told = 1000 / 60;
+
+/** Dit au Worker la période visée (`pace`), si elle a bougé de plus de 5 % : le bruit des mesures ne doit pas faire un message par seconde. */
+function pace(): void {
+  const period = framePeriod(refresh, cap);
+  if (Math.abs(period - told) / told < 0.05) return;
+  told = period;
+  sim.postMessage({ t: "pace", ms: period });
+}
+
+/**
+ * À appeler à chaque `requestAnimationFrame` : mesure la fréquence de l'écran
+ * et la dit au Worker, qui cadence ses frames dessus. Remesurée en continu —
+ * une fenêtre passée sur un autre écran change de fréquence.
+ */
+export function beat(now: number): void {
+  if (lastBeat > 0) gaps.push(now - lastBeat);
+  lastBeat = now;
+  if (gaps.length < 60) return;
+  refresh = refreshPeriod(gaps);
+  gaps.length = 0;
+  pace();
+}
+
+/**
+ * Limite les images par seconde du Worker (0 : celles de l'écran). Réglage
+ * de la page seule (Paramètres › Graphismes) : le bac simule à la même
+ * vitesse, le salon n'en sait rien.
+ */
+export function limitFps(hz: number): void {
+  cap = hz;
+  pace();
+}
+
+/**
+ * La finesse de l'éclairage : largeur de sa grille en texels (screen.ts).
+ * Réglage de la page seule, comme l'éclairage lui-même ; on recolorie tout.
+ */
+export function lightDetail(width: number): void {
+  screen.detail(width);
+  repaint = true;
+}
+
 sim.addEventListener("message", (e: MessageEvent<News>) => {
   const news = e.data;
   if (news.t === "frame") blit(news);
-  if (news.t === "grid") latest = news.full;
+  if (news.t === "grid") latest = { width: news.w, data: news.full, voyage: news.voyage };
   if (news.t === "reply") {
     waiting.get(news.ask)?.(news.value);
     waiting.delete(news.ask);
   }
   for (const fn of listeners) fn(news);
+  // Les bandes sont posées dans le miroir : leur tampon repart au Worker, qui
+  // le réutilise plutôt que d'en allouer un neuf (`recycle()` de render.ts).
+  // Après les abonnés, qui reçoivent encore la frame intacte.
+  if (news.t === "frame" && news.patches.length > 0) {
+    const buffer = news.patches[0].cells.buffer as ArrayBuffer;
+    sim.postMessage({ t: "spare", buffer }, [buffer]);
+  }
 });
 
 /**

@@ -2,12 +2,15 @@ import {
   EMBER, EMPTY, FIRE, GLASS, ICE, LAVA, MAGNET, MATERIALS, MOLTEN_GLASS, SPARK, SWITCH, THERMITE, URANIUM,
 } from "./materials.ts";
 import { type Engine } from "./engine.ts";
+import type { FlatLight } from "./flatlight.ts";
 
 /**
  * Ce qu'il faut pour colorier un bac : la grille et son état, sans le moteur.
  * Le moteur l'est (le Worker, les tests), le miroir de la page aussi
  * (world.ts) — c'est ce qui laisse colorier aussi bien d'un côté que de
- * l'autre. `temp` : en °C, flottants dans le moteur, arrondis dans le miroir.
+ * l'autre. `temp` : en °C, flottants. `press` : la pression de l'air,
+ * flottante ; la vue pression la ramène à ses paliers (`airLevel()`, et
+ * `floor(p·8 + 0,5)` dans le shader).
  */
 export interface Grid {
   width: number;
@@ -18,14 +21,17 @@ export interface Grid {
   frozen: Uint8Array;
   noise: Int8Array;
   temp: ArrayLike<number>;
+  press: ArrayLike<number>;
 }
 
 /**
  * Une bande de bac à reposer en (x, y) : les données brutes de ses cellules,
  * rangée par rangée, pas des pixels. C'est la carte graphique de la page qui
- * les colorie (screen.ts) ; la température y voyage arrondie au degré, de quoi
- * la lumière et la vue thermique. `noise`, fixe pour un moteur, ne voyage
- * qu'avec la première frame.
+ * les colorie (screen.ts). Température et pression voyagent **brutes**, et
+ * restent brutes jusqu'au shader : les arrondir coûtait 10 ms par frame en
+ * 1920×1080 tout changé (nanites), au fil du bac d'abord, puis à la page. Le
+ * shader et `Renderer` lisent les flottants tels quels. `noise`, fixe pour un
+ * moteur, ne voyage qu'avec la première frame.
  */
 export interface Patch {
   x: number;
@@ -35,8 +41,52 @@ export interface Patch {
   cells: Uint8Array;
   life: Uint8Array;
   frozen: Uint8Array;
-  temp: Int16Array;
+  temp: Float32Array;
+  press: Float32Array;
   noise?: Int8Array;
+}
+
+/** Ce que la page garde du bac pour le colorier : la grille, température et pression brutes, comme dans le moteur. */
+export type Mirror = Grid & { temp: Float32Array; press: Float32Array };
+
+/**
+ * Pose une bande dans le miroir de la page (world.ts, et les tests qui en
+ * refont un) : rien que des copies, une par rangée et par couche. Les arrondis
+ * qu'on y faisait prenaient 15 ms en 1920×1080 tout changé ; le shader lit
+ * maintenant les flottants (textures R32F).
+ */
+export function land(m: Mirror, p: Patch): void {
+  const w = m.width;
+  for (let r = 0; r < p.h; r++) {
+    const from = r * p.w, to = (p.y + r) * w + p.x;
+    m.cells.set(p.cells.subarray(from, from + p.w), to);
+    m.life.set(p.life.subarray(from, from + p.w), to);
+    m.frozen.set(p.frozen.subarray(from, from + p.w), to);
+    if (p.noise) m.noise.set(p.noise.subarray(from, from + p.w), to);
+    m.temp.set(p.temp.subarray(from, from + p.w), to);
+    m.press.set(p.press.subarray(from, from + p.w), to);
+  }
+}
+
+/**
+ * Fait glisser le miroir de `dx` colonnes, comme `Engine.shift()` la grille
+ * du bac (vers la gauche si `dx` > 0) : la fenêtre d'exploration a glissé
+ * (`origin` de la frame). À faire **avant** de poser les bandes de la frame,
+ * qui sont déjà dans la grille glissée et recouvrent la bande libérée — le
+ * bac ne renvoie que la bande neuve et ce que les ticks ont changé, pas toute
+ * la grille. Un glissement plus large que le miroir ne garde rien : les bandes
+ * recouvrent alors tout.
+ */
+export function glide(m: Mirror, dx: number): void {
+  const w = m.width, k = Math.abs(dx);
+  if (k === 0 || k >= w) return;
+  for (const a of [m.cells, m.life, m.frozen, m.noise, m.temp, m.press]) {
+    for (let y = 0; y < m.height; y++) {
+      const r = y * w;
+      if (dx > 0) a.copyWithin(r, r + k, r + w);
+      else a.copyWithin(r + k, r, r + w - k);
+    }
+  }
 }
 
 /**
@@ -49,23 +99,72 @@ export interface Patch {
  * Colorier ici coûtait 6 ms par tick en 1920×1080 chargé (npm run
  * directions) : c'est le shader de la page qui le fait maintenant.
  */
+/**
+ * Les tampons de bandes que la page a rendus (`recycle()`), prêts à resservir.
+ * Un tampon neuf de 23 Mo, c'est 1,7 ms de mise à zéro par frame en 1920×1080
+ * tout changé ; un tampon rendu, rien. Trois au plus : une frame en route vers
+ * la page, une en retour, une d'avance.
+ */
+const spares: ArrayBuffer[] = [];
+
+/** Rend un tampon de bandes (worker.ts, message `spare` de la page). */
+export function recycle(buffer: ArrayBuffer): void {
+  spares.push(buffer);
+  if (spares.length > 3) spares.shift();
+}
+
+/** Un tampon d'au moins `bytes` octets : le plus petit des rendus qui suffit, sinon un neuf. */
+function claim(bytes: number): ArrayBuffer {
+  let best = -1;
+  for (let k = 0; k < spares.length; k++) {
+    if (spares[k].byteLength >= bytes && (best < 0 || spares[k].byteLength < spares[best].byteLength)) best = k;
+  }
+  return best < 0 ? new ArrayBuffer(bytes) : spares.splice(best, 1)[0];
+}
+
 export class Tracker {
   private readonly engine: Engine;
   private readonly dirty: Uint8Array;
   private full = true;
+  /** Les bandes de la prochaine frame portent leur grain (`grained()`). */
+  private grain = false;
 
   constructor(engine: Engine) {
     this.engine = engine;
     this.dirty = new Uint8Array(engine.cols * engine.rows);
   }
 
+  /**
+   * Les bandes de la prochaine frame porteront leur grain. Après un
+   * glissement de la fenêtre d'exploration (`Engine.shift()`) : la page fait
+   * glisser son miroir, grain compris, mais celui de la bande neuve, elle ne
+   * l'a pas. Le grain ne partait qu'avec une frame entière (la première d'un
+   * moteur) ; en renvoyer une à chaque glissement coûtait 11 Mo et deux ou
+   * trois images sautées. Seules les bandes changées partent, avec leur grain.
+   */
+  grained(): void {
+    this.grain = true;
+  }
+
+  /**
+   * Les bandes changées depuis l'appel précédent. Toutes découpées dans **un
+   * seul tampon** par frame, que la page reçoit sans copie (worker.ts le
+   * transfère une fois) : un tableau neuf par bande et par couche, c'était
+   * 340 allocations par frame en 1920×1080 tout changé, 9 ms sur le fil du
+   * bac pour mettre à zéro de quoi l'écraser aussitôt. Le tampon est pris
+   * parmi ceux que la page a rendus (`claim()`) : chaque octet des vues est
+   * écrit ci-dessous, ce qui traîne d'une frame précédente n'est jamais lu.
+   */
   take(): Patch[] {
-    const { chunk, cols, rows, width: w, height: h, cells, life, frozen, temp, noise } = this.engine;
+    const { chunk, cols, rows, width: w, height: h, cells, life, frozen, temp, press, noise } = this.engine;
     const { dirty } = this;
     this.engine.changed(dirty);
-    const full = this.full;
+    const full = this.full, grained = full || this.grain;
     if (full) { dirty.fill(1); this.full = false; }
-    const patches: Patch[] = [];
+    this.grain = false;
+    // D'abord les rectangles, pour tailler le tampon d'un coup.
+    const rects: [number, number, number, number][] = [];
+    let total = 0;
     for (let cy = 0; cy < rows; cy++) {
       let first = -1, last = -1;
       for (let cx = 0; cx < cols; cx++) {
@@ -76,19 +175,33 @@ export class Tracker {
       if (first < 0) continue;
       const x = first * chunk, y0 = cy * chunk;
       const pw = Math.min(w, (last + 1) * chunk) - x, ph = Math.min(h, y0 + chunk) - y0;
+      rects.push([x, y0, pw, ph]);
+      total += pw * ph;
+    }
+    if (total === 0) return [];
+    // Les flottants en tête : leurs vues exigent un décalage multiple de 4.
+    const buffer = claim(total * (8 + 3 + (grained ? 1 : 0)));
+    let floats = 0, bytes = total * 8;
+    const patches: Patch[] = [];
+    for (const [x, y0, pw, ph] of rects) {
+      const n = pw * ph;
       const p: Patch = {
         x, y: y0, w: pw, h: ph,
-        cells: new Uint8Array(pw * ph), life: new Uint8Array(pw * ph),
-        frozen: new Uint8Array(pw * ph), temp: new Int16Array(pw * ph),
+        temp: new Float32Array(buffer, floats, n), press: new Float32Array(buffer, floats + n * 4, n),
+        cells: new Uint8Array(buffer, bytes, n), life: new Uint8Array(buffer, bytes + n, n),
+        frozen: new Uint8Array(buffer, bytes + 2 * n, n),
       };
-      if (full) p.noise = new Int8Array(pw * ph);
+      floats += n * 8;
+      bytes += n * 3;
+      if (grained) { p.noise = new Int8Array(buffer, bytes, n); bytes += n; }
       for (let r = 0; r < ph; r++) {
         const from = (y0 + r) * w + x, to = r * pw;
         p.cells.set(cells.subarray(from, from + pw), to);
         p.life.set(life.subarray(from, from + pw), to);
         p.frozen.set(frozen.subarray(from, from + pw), to);
         p.noise?.set(noise.subarray(from, from + pw), to);
-        for (let k = 0; k < pw; k++) p.temp[to + k] = Math.max(-32768, Math.min(32767, Math.round(temp[from + k])));
+        p.temp.set(temp.subarray(from, from + pw), to);
+        p.press.set(press.subarray(from, from + pw), to);
       }
       patches.push(p);
     }
@@ -109,6 +222,22 @@ export function palette(): Uint8Array {
   return out;
 }
 
+/**
+ * Paliers de pression par unité : la vue pression distingue 1/8 d'unité, et
+ * sature à 255 paliers (≈ 32, le cœur d'un souffle). Une bande n'en porte
+ * qu'un octet par cellule ; le miroir range `palier / AIR_LEVELS`, que
+ * `airLevel()` rend tel quel.
+ */
+export const AIR_LEVELS = 8;
+
+/** Le palier d'une pression : arrondi au plus proche comme `floor(p·8 + 0,5)` du shader, borné à 255. */
+export function airLevel(p: number): number {
+  return Math.min(255, Math.floor(p * AIR_LEVELS + 0.5));
+}
+
+/** Ce que montre le bac : la matière, la température (`h`) ou la pression de l'air (`b`). */
+export type View = "matter" | "heat" | "air";
+
 /** Les quatre matières dont `life` change l'aspect, dans l'ordre qu'attend le shader. */
 export const GLOWING = [URANIUM, THERMITE, SWITCH, MAGNET] as const;
 
@@ -120,11 +249,8 @@ export const GLOW = 40;
  * 256 × RGBA : ce qu'elle émet (rouge, vert, bleu), puis ce qu'elle arrête
  * (255 = opaque). Le verre laisse passer, l'eau atténue, la pierre fait
  * de l'ombre. Le feu, gaz, arrête un peu : sans ça, une flamme n'émettrait
- * rien. La chaleur ajoute son rougeoiement dans le shader, au-delà de 450 °C.
- *
- * ponytail: seul le shader éclaire — `Renderer` (secours 2D, tests) n'en a
- * pas de copie, l'effet ne tient qu'en WebGL2. À recopier le jour où le
- * secours doit ressembler.
+ * rien. La chaleur ajoute son rougeoiement au-delà de `RED_HOT` °C. Lue par
+ * le shader (screen.ts) et par `FlatLight`, l'éclairage du secours 2D.
  */
 export function lighting(): Uint8Array {
   const out = new Uint8Array(256 * 4);
@@ -145,6 +271,12 @@ export function lighting(): Uint8Array {
   return out;
 }
 
+/** Température à partir de laquelle toute matière rougeoie dans la grille de lumière, en °C ; pleine lueur `RED_HOT` + 700. */
+export const RED_HOT = 450;
+/** Éclat de la lumière reçue, ajouté tel quel : le halo sur le fond sombre. */
+export const LIGHT_HALO = 160;
+/** Éclat de la lumière reçue, proportionnel à la couleur : les surfaces éclairées. */
+export const LIGHT_GAIN = 1.5;
 /** Une teinte d'heure : rouge, vert, bleu, multipliés à la couleur des matières qui n'émettent pas. */
 export type Tint = readonly [number, number, number];
 
@@ -207,10 +339,12 @@ export class Renderer {
   private readonly glows = new Uint8Array(256);
   /** 1 pour les matières qui émettent (`lighting()`) : l'heure ne les assombrit pas. */
   private readonly emits = new Uint8Array(256);
-  /** Affiche `temp` au lieu de la matière. */
-  heatmap = false;
+  /** La matière, la température (`shadeHeat`) ou la pression (`shadeAir`). */
+  view: View = "matter";
   /** L'heure de la journée, voir `HOURS`. */
   tint: Tint = HOURS["apres-midi"];
+  /** L'éclairage global du secours 2D, ou rien (tests, case décochée) : ajouté en vue matière seulement. */
+  lights: FlatLight | null = null;
 
   private readonly grid: Grid;
 
@@ -242,49 +376,78 @@ export class Renderer {
     const w = this.grid.width;
     const warm = this.grid.ambient + GLOW;
     for (let y = y0; y < y1; y++) {
-      if (this.heatmap) this.shadeHeat(y * w + x0, y * w + x1);
+      if (this.view === "air") this.shadeAir(y * w + x0, y * w + x1);
+      else if (this.view === "heat") this.shadeHeat(y * w + x0, y * w + x1);
       else this.shade(y * w + x0, y * w + x1, warm);
     }
   }
 
   /** Les cellules `from` à `to` (exclu) d'une rangée, en couleurs de matière. `warm` : seuil de lumière. */
   private shade(from: number, to: number, warm: number): void {
-    const { cells, noise, frozen, life, width, temp } = this.grid;
-    const { buffer, palette, grain, glows, emits } = this;
+    const { buffer, lights } = this;
     const [tr, tg, tb] = this.tint;
-    for (let i = from; i < to; i++) {
-      const id = cells[i];
-      const base = palette[id];
-      // Lumière : `temp` est déjà diffusé par le moteur, donc l'air autour
-      // d'une flamme est chaud — c'est un halo tout prêt, sans flou à calculer.
-      const t = temp[i];
-      const lit = t > warm ? Math.min(1, (t - warm) / 400) : 0;
-      if (id === EMPTY) {
-        const sky = dim(base, tr, tg, tb);
-        buffer[i] = lit === 0 ? sky : light(sky, lit);
-        continue;
-      }
-      // Quatre matières seulement s'éclairent selon leur `life` — l'interrupteur
-      // fermé et l'aimant inversé (qui n'ont pas de couleur propre pour ça), la
-      // thermite allumée, l'uranium qui s'emballe et pâlit avant de sauter. Une
-      // table dit lesquelles : ailleurs, `life` n'est même pas lu.
-      const glow = glows[id] === 0 ? 0
-        : id === URANIUM ? life[i] >> 1
-        : id === THERMITE ? (life[i] > 0 ? 110 : 0)
-        : life[i] === 1 ? 55
-        : 0;
-      // Le bruit par cellule décale les 3 canaux d'un même delta : la teinte
-      // reste identique, seule la luminosité varie. Une cellule figée est
-      // tramée en damier, pour la distinguer au premier coup d'œil.
-      const d = frozen[i]
-        ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
-        : glow || (noise[i] * grain[id]) >> 7;
-      const r = clamp((base & 0xff) + d);
-      const g = clamp(((base >> 8) & 0xff) + d);
-      const b = clamp(((base >> 16) & 0xff) + d);
-      const raw = 0xff000000 | (b << 16) | (g << 8) | r;
-      const shade = emits[id] ? raw : dim(raw, tr, tg, tb);
-      buffer[i] = lit === 0 ? shade : light(shade, lit);
+    for (let i = from; i < to; i++) buffer[i] = this.shadeOne(i, warm, tr, tg, tb);
+    if (lights) this.illuminate(lights, from, to);
+  }
+
+  /** La couleur d'une cellule en vue matière, avant l'éclairage global. */
+  private shadeOne(i: number, warm: number, tr: number, tg: number, tb: number): number {
+    const { cells, noise, frozen, life, width, temp } = this.grid;
+    const { palette, grain, glows, emits } = this;
+    const id = cells[i];
+    const base = palette[id];
+    // Lumière : `temp` est déjà diffusé par le moteur, donc l'air autour
+    // d'une flamme est chaud — c'est un halo tout prêt, sans flou à calculer.
+    const t = temp[i];
+    const lit = t > warm ? Math.min(1, (t - warm) / 400) : 0;
+    if (id === EMPTY) {
+      const sky = dim(base, tr, tg, tb);
+      return lit === 0 ? sky : light(sky, lit);
+    }
+    // Quatre matières seulement s'éclairent selon leur `life` — l'interrupteur
+    // fermé et l'aimant inversé (qui n'ont pas de couleur propre pour ça), la
+    // thermite allumée, l'uranium qui s'emballe et pâlit avant de sauter. Une
+    // table dit lesquelles : ailleurs, `life` n'est même pas lu.
+    const glow = glows[id] === 0 ? 0
+      : id === URANIUM ? life[i] >> 1
+      : id === THERMITE ? (life[i] > 0 ? 110 : 0)
+      : life[i] === 1 ? 55
+      : 0;
+    // Le bruit par cellule décale les 3 canaux d'un même delta : la teinte
+    // reste identique, seule la luminosité varie. Une cellule figée est
+    // tramée en damier, pour la distinguer au premier coup d'œil.
+    const d = frozen[i]
+      ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
+      : glow || (noise[i] * grain[id]) >> 7;
+    const r = clamp((base & 0xff) + d);
+    const g = clamp(((base >> 8) & 0xff) + d);
+    const b = clamp(((base >> 16) & 0xff) + d);
+    const raw = 0xff000000 | (b << 16) | (g << 8) | r;
+    const shade = emits[id] ? raw : dim(raw, tr, tg, tb);
+    return lit === 0 ? shade : light(shade, lit);
+  }
+
+  /**
+   * Ajoute l'éclairage global aux cellules `from` à `to` (une rangée) déjà
+   * coloriées, comme le `FRAGMENT` du shader : un halo constant
+   * (`LIGHT_HALO`) et une part proportionnelle à la couleur (`LIGHT_GAIN`).
+   */
+  private illuminate(lights: FlatLight, from: number, to: number): void {
+    const { buffer } = this;
+    const w = this.grid.width, y = (from / w) | 0, x0 = from - y * w;
+    const { band, left, right, frac } = lights.row(y, w);
+    for (let i = from, x = x0; i < to; i++, x++) {
+      const l = left[x], r = right[x], f = frac[x];
+      const lr = band[l] + (band[r] - band[l]) * f;
+      const lg = band[l + 1] + (band[r + 1] - band[l + 1]) * f;
+      const lb = band[l + 2] + (band[r + 2] - band[l + 2]) * f;
+      if (lr + lg + lb < 0.002) continue; // dans le noir : rien à ajouter
+      const c = buffer[i];
+      const cr = c & 0xff, cg = (c >> 8) & 0xff, cb = (c >> 16) & 0xff;
+      const R = Math.min(255, cr + lr * (LIGHT_HALO + cr * LIGHT_GAIN));
+      const G = Math.min(255, cg + lg * (LIGHT_HALO + cg * LIGHT_GAIN));
+      const B = Math.min(255, cb + lb * (LIGHT_HALO + cb * LIGHT_GAIN));
+      buffer[i] = 0xff000000 | (B << 16) | (G << 8) | R;
     }
   }
 
@@ -306,6 +469,30 @@ export class Renderer {
         g = 255 * clamp01(u * 3 - 1);
         b = 255 * clamp01(u * 3 - 2);
       }
+      buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
+    }
+  }
+
+  /**
+   * La pression de l'air, par palier (`airLevel`) : bleu profond, cyan, puis
+   * blanc à 255 paliers. Sans pression, la matière assombrie aux 77/256, en
+   * entiers comme le shader : on voit où l'onde se heurte aux murs et quelle
+   * vitre elle presse. Tout en entiers, rampe comprise : en flottants, le
+   * GPU arrondissait autrement 2 % des paliers.
+   */
+  private shadeAir(from: number, to: number): void {
+    const { press, cells } = this.grid;
+    const { buffer, palette } = this;
+    for (let i = from; i < to; i++) {
+      const l = airLevel(press[i]);
+      if (l === 0) {
+        const base = palette[cells[i]];
+        const r = ((base & 0xff) * 77) >> 8, g = (((base >> 8) & 0xff) * 77) >> 8, b = (((base >> 16) & 0xff) * 77) >> 8;
+        buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
+        continue;
+      }
+      const r = Math.max(0, Math.min(255, 3 * l - 510)), g = Math.max(0, Math.min(255, 3 * l - 255));
+      const b = 60 + Math.min(195, Math.floor((39 * l) / 17)); // 195 × 3l / 255
       buffer[i] = 0xff000000 | (b << 16) | (g << 8) | r;
     }
   }

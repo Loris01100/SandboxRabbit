@@ -5,6 +5,7 @@
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { createStore, type World } from "./store.ts";
+import { nick } from "./relay.ts";
 
 export interface Env {
   ASSETS: Fetcher;
@@ -14,6 +15,13 @@ export interface Env {
   RL?: RateLimit;
   /** Salons du bac partagé. Absent des tests en mémoire : la route répond 503. */
   ROOM?: DurableObjectNamespace;
+  /**
+   * Sel des empreintes de votants et de visiteurs (`who()`), un secret :
+   * `npx wrangler secret put SALT`. Sans lui, un sel fixe — les empreintes
+   * restent distinctes par monde, mais une IP se retrouverait en essayant
+   * toutes les adresses.
+   */
+  SALT?: string;
 }
 
 /**
@@ -44,6 +52,20 @@ const HEADERS: Record<string, string> = {
  * dimensions fantaisistes la feraient tomber.
  */
 const CELLS = 1920 * 1080;
+
+/**
+ * Qui vote ou regarde, sans garder son IP : les 16 premiers octets d'un
+ * SHA-256 du sel, du monde et de l'IP. Le monde y entre pour qu'on ne puisse
+ * pas suivre un même visiteur d'un monde à l'autre dans les tables.
+ */
+async function who(c: Context<{ Bindings: Env }>, world: string): Promise<string> {
+  const ip = c.req.header("cf-connecting-ip") ?? "anonyme";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${c.env.SALT ?? "sandbox-rabbit"}:${world}:${ip}`));
+  return [...new Uint8Array(digest).slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Forme d'un `id` de monde (`crypto.randomUUID()`). */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -82,7 +104,7 @@ app.get("/api/worlds/:id", async (c) => {
   const store = createStore(c.env);
   const world = await store.get(c.req.param("id"));
   if (!world) return c.json({ error: "introuvable" }, 404);
-  if (!(await flooding(c, "vue:"))) await store.see(world.id);
+  if (!(await flooding(c, "vue:"))) await store.see(world.id, await who(c, world.id));
   return c.json(world);
 });
 
@@ -123,6 +145,11 @@ app.post("/api/worlds", async (c) => {
   if (body.goal != null && !/^(ge|lt):\d{1,3}:\d{1,6}$/.test(body.goal)) {
     return c.json({ error: "objectif invalide" }, 400);
   }
+  // Remix : l'`id` du monde dont celui-ci est repris. Sa forme seulement — le
+  // parent peut disparaître au ménage suivant, la galerie le dit alors.
+  if (body.parent != null && !(typeof body.parent === "string" && UUID.test(body.parent))) {
+    return c.json({ error: "parent invalide" }, 400);
+  }
 
   const id = crypto.randomUUID();
   // Le jeton de suppression est tiré ici, pas envoyé par le client : c'est la
@@ -137,6 +164,8 @@ app.post("/api/worlds", async (c) => {
     createdAt: new Date().toISOString(),
     views: 0,
     goal: body.goal ?? null,
+    parent: body.parent ?? null,
+    likes: 0,
     token,
   });
   // Rendu une seule fois : aucune route de lecture ne le renvoie ensuite.
@@ -151,6 +180,82 @@ app.delete("/api/worlds/:id", async (c) => {
   const gone = await createStore(c.env).remove(c.req.param("id"), token);
   if (!gone) return c.json({ error: "pas votre monde" }, 403);
   return c.body(null, 204);
+});
+
+/**
+ * « J'aime » : un vote par IP et par monde, sans compte (`who()`, table
+ * `votes`) ; revoter rend le même total. Le débit a son compteur (20 par
+ * minute et par IP), sinon voter empêchait de sauvegarder.
+ */
+app.post("/api/worlds/:id/like", async (c) => {
+  if (await flooding(c, "vote:")) return c.json({ error: "trop de requêtes" }, 429);
+  const id = c.req.param("id");
+  if (!UUID.test(id)) return c.json({ error: "introuvable" }, 404);
+  const likes = await createStore(c.env).like(id, await who(c, id));
+  if (likes === null) return c.json({ error: "introuvable" }, 404);
+  return c.json({ likes });
+});
+
+/**
+ * Les défis qui ont un classement : ceux livrés avec le jeu, par leur nom
+ * (`CHALLENGES` de src/client/challenges.ts, que le Worker n'importe pas — il
+ * tirerait le moteur avec lui). test/api.ts vérifie que les deux listes
+ * coïncident. Un monde-défi de la galerie n'en a pas : sa grille n'est pas
+ * bâtie en code, le juge n'aurait rien à quoi comparer le départ du rejeu.
+ */
+export const TRIALS = [
+  "Débâcle", "Mèche lente", "Court-circuit", "Puits", "Désamorçage", "Coup de grisou", "Jardin", "Coffrage", "Ferraille", "Grand froid",
+];
+/** Ticks au plus d'un record : `TRIAL_TICKS` de src/client/replay.ts (cinq minutes), que test/api.ts compare. */
+export const TRIAL_TICKS = 5 * 60 * 60;
+/** Poids au plus d'un rejeu compressé, en caractères : celui d'un monde. */
+const FILM_CHARS = 200_000;
+
+/**
+ * Le classement d'un défi : les meilleurs records, **rejeux compris** — la
+ * page les rejoue tous pour n'afficher que ceux qui tiennent (sim/verdict.ts).
+ * Rien n'y est vérifié ici : rejouer une partie coûterait des secondes de
+ * calcul par record.
+ */
+app.get("/api/records/:challenge", async (c) => {
+  const challenge = c.req.param("challenge");
+  if (!TRIALS.includes(challenge)) return c.json({ error: "défi inconnu" }, 404);
+  return c.json(await createStore(c.env).board(challenge));
+});
+
+/**
+ * Déposer un record : son défi, un pseudo, la durée en ticks et le rejeu
+ * compressé. Le Worker ne lit pas le rejeu (il faudrait le décompresser et le
+ * rejouer) : il en vérifie la forme, et le juge de chaque visiteur fait le
+ * reste. Débit à part (`record:`), 20 par minute et par IP.
+ *
+ * ponytail: un faux record (un rejeu qui ne gagne pas) entre au classement et
+ * en chasse un vrai ; la page l'écarte, mais `BOARD` faux records déposés
+ * vident le classement de tous ses visiteurs jusqu'au ménage. Juger côté
+ * Worker (offre payante : ~9 s de calcul pour cinq minutes de partie) le jour
+ * où un tricheur s'y met.
+ */
+app.post("/api/records", async (c) => {
+  if (await flooding(c, "record:")) return c.json({ error: "trop de requêtes" }, 429);
+  const body = await c.req.json<{ challenge?: unknown; name?: unknown; ticks?: unknown; film?: unknown }>().catch(() => null);
+  if (!body || typeof body.challenge !== "string" || !TRIALS.includes(body.challenge)) {
+    return c.json({ error: "défi inconnu" }, 400);
+  }
+  if (typeof body.ticks !== "number" || !Number.isInteger(body.ticks) || body.ticks < 1 || body.ticks > TRIAL_TICKS) {
+    return c.json({ error: "durée invalide" }, 400);
+  }
+  if (typeof body.film !== "string" || !/^[\w-]+$/.test(body.film)) return c.json({ error: "rejeu invalide" }, 400);
+  if (body.film.length > FILM_CHARS) return c.json({ error: "rejeu trop lourd" }, 413);
+  const id = crypto.randomUUID();
+  await createStore(c.env).enter({
+    id,
+    challenge: body.challenge,
+    name: nick(body.name) || "Anonyme",
+    ticks: body.ticks,
+    film: body.film,
+    createdAt: new Date().toISOString(),
+  });
+  return c.json({ id }, 201);
 });
 
 /** Bac partagé : une websocket par joueur, un Durable Object par salon. */

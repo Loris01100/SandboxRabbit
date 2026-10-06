@@ -5,9 +5,10 @@
  * laissait aucune trace. Ni la grille ni rien qui désigne le joueur : le
  * message et la pile, le navigateur se lit dans l'en-tête de la requête.
  *
- * ponytail: les piles de production pointent dans le bundle minifié
- * (`index-….js:1:48213`). Construire avec `build.sourcemap: "hidden"` et
- * décoder à la main le jour où une pile ne suffit plus à retrouver l'erreur.
+ * Les piles de production pointent dans le bundle minifié
+ * (`index-….js:1:48213`) : `npm run pile < pile.txt` (test/pile.ts) les
+ * retraduit dans les sources, en reconstruisant le même commit avec ses
+ * cartes de sources, jamais publiées.
  */
 
 /** Plafond d'un rapport, en caractères : une pile tient largement dedans. Le Worker refuse au-delà de 16 Kio (`/api/error`). */

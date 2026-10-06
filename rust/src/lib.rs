@@ -1,6 +1,7 @@
-//! Prototype : `thermal()` d'engine.ts porté en Rust, compilé en WASM, pour
-//! mesurer ce qu'un noyau Rust ferait gagner au moteur (`npm run rust`,
-//! test/rust.ts). Pas branché sur le bac : le moteur reste engine.ts.
+//! Prototype : `thermal()` et la pression (`breathe()`, ici `air()`, en fin de
+//! fichier) d'engine.ts portés en Rust, compilés en WASM, pour mesurer ce
+//! qu'un noyau Rust ferait gagner au moteur (`npm run rust`, test/rust.ts).
+//! Pas branché sur le bac : le moteur reste engine.ts.
 //!
 //! Comme engine.ts, un bloc à l'ambiante exacte est recopié sans calcul
 //! (`flat()`). Pour les autres, trois façons de faire la diffusion, choisies
@@ -444,5 +445,240 @@ fn settle_chunk(g: &mut Grid, c: usize) {
     for y in y0..y1 {
         let (a, b) = (y * g.w + x0, y * g.w + x1);
         g.temp[a..b].copy_from_slice(&g.next[a..b]);
+    }
+}
+
+// ─── Pression de l'air ────────────────────────────────────────────────────
+//
+// `breathe()` d'engine.ts : `AIR_STEPS` sous-pas sur les blocs éveillés,
+// chacun en deux passes — l'élan des faces entre cellules d'air
+// (`windChunk()`), puis la pression de chaque cellule selon ce que ses faces
+// apportent ou emportent (`airChunk()`) ; au dernier, un bloc calme est remis à
+// zéro, un bloc agité réveille ses voisins, et `hushChunk()` vide l'autre
+// tampon et l'élan des blocs calmés. Même calcul que JavaScript (f64, rangé en
+// f32, même ordre d'additions) : au bit près. Le mode SIMD (f64×2) mesurait
+// l'ancienne diffusion ; il n'a pas été refait pour l'élan (voir docs/rust.md).
+
+const AIR_STEPS: usize = 3;
+const WIND_K: f64 = 0.25;
+const DRAG: f64 = 0.97;
+const DAMP: f64 = 0.98;
+const CALM_P: f64 = 0.02;
+const CALM_V: f64 = 0.005;
+
+/// Ce que lit un sous-pas : la grille et la table `OPEN` d'engine.ts (1 = air).
+struct Air<'a> {
+    w: usize,
+    h: usize,
+    cols: usize,
+    cells: &'a [u8],
+    open: &'a [u8; 256],
+}
+
+impl Air<'_> {
+    #[inline(always)]
+    fn open(&self, i: usize) -> bool {
+        self.open[self.cells[i] as usize] != 0
+    }
+
+    fn bounds(&self, c: usize) -> (usize, usize, usize, usize) {
+        let x0 = (c % self.cols) << SHIFT;
+        let y0 = (c / self.cols) << SHIFT;
+        (x0, y0, (x0 + CHUNK).min(self.w), (y0 + CHUNK).min(self.h))
+    }
+}
+
+/// `breathe()` sur un seul fil, CTL.gust supposé levé : l'appelant ne
+/// l'appelle que s'il y a de la pression. Le résultat est dans `next`, l'autre
+/// tampon dans `press` (trois sous-pas, donc un nombre impair d'échanges, comme
+/// JavaScript). Rend 1 si un bloc reste agité (le `CTL.gust` suivant).
+///
+/// # Safety
+/// Chaque pointeur désigne un tableau de la bonne taille réservé par `reserve`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn air(
+    w: usize, h: usize,
+    cells: *const u8, press: *mut f32, next: *mut f32, wind_x: *mut f32, wind_y: *mut f32,
+    awake: *const u8, stir: *mut u8, hush: *mut u8, jobs: *mut u32,
+    open: *const u8,
+) -> u32 {
+    let n = w * h;
+    let cols = w.div_ceil(CHUNK);
+    let rows = h.div_ceil(CHUNK);
+    let chunks = cols * rows;
+    let (a, p, q, vx, vy, awake, stir, hush, jobs) = unsafe {
+        (
+            Air { w, h, cols, cells: core::slice::from_raw_parts(cells, n), open: &*(open as *const [u8; 256]) },
+            core::slice::from_raw_parts_mut(press, n),
+            core::slice::from_raw_parts_mut(next, n),
+            core::slice::from_raw_parts_mut(wind_x, n),
+            core::slice::from_raw_parts_mut(wind_y, n),
+            core::slice::from_raw_parts(awake, chunks),
+            core::slice::from_raw_parts_mut(stir, chunks),
+            core::slice::from_raw_parts_mut(hush, chunks),
+            core::slice::from_raw_parts_mut(jobs, chunks),
+        )
+    };
+    let mut count = 0;
+    for c in 0..chunks {
+        if awake[c] != 0 {
+            jobs[count] = c as u32;
+            count += 1;
+        }
+    }
+    let mut gust = 0;
+    for s in 0..AIR_STEPS {
+        // Sous-pas pairs : `press` → `next` ; impairs : l'inverse.
+        let (src, dst) = if s % 2 == 0 { (&*p, &mut *q) } else { (&*q, &mut *p) };
+        for &c in &jobs[..count] {
+            wind_chunk(&a, src, vx, vy, c as usize);
+        }
+        let last = s == AIR_STEPS - 1;
+        for &c in &jobs[..count] {
+            let c = c as usize;
+            let loud = if hushed(&a, src, vx, vy, c) {
+                fill_chunk(&a, dst, c);
+                if last {
+                    hush[c] = 1;
+                }
+                continue;
+            } else {
+                air_chunk(&a, src, dst, vx, vy, c)
+            };
+            if !last {
+                continue;
+            }
+            if loud {
+                hush[c] = 0;
+                stir[c] = 1;
+                let (cx, cy) = (c % cols, c / cols);
+                if cx > 0 { stir[c - 1] = 1; }
+                if cx < cols - 1 { stir[c + 1] = 1; }
+                if cy > 0 { stir[c - cols] = 1; }
+                if cy < rows - 1 { stir[c + cols] = 1; }
+                gust = 1;
+            } else {
+                hush[c] = 1;
+                fill_chunk(&a, dst, c);
+            }
+        }
+    }
+    // `hushChunk()` : un bloc calmé vide aussi `press` et son élan.
+    for &c in &jobs[..count] {
+        let c = c as usize;
+        if hush[c] != 0 {
+            fill_chunk(&a, p, c);
+            fill_chunk(&a, vx, c);
+            fill_chunk(&a, vy, c);
+        }
+    }
+    gust
+}
+
+/// `hushed()` d'engine.ts : pression et élan nuls sur le bloc et sa bordure.
+fn hushed(a: &Air, src: &[f32], vx: &[f32], vy: &[f32], c: usize) -> bool {
+    let (x0, y0, x1, y1) = a.bounds(c);
+    let (ya, yb) = (y0.saturating_sub(1), (y1 + 1).min(a.h));
+    let (xa, xb) = (x0.saturating_sub(1), (x1 + 1).min(a.w));
+    (ya..yb).all(|y| (y * a.w + xa..y * a.w + xb).all(|i| src[i] == 0.0 && vx[i] == 0.0 && vy[i] == 0.0))
+}
+
+/// `still()` d'engine.ts : pression nulle sur le bloc et sa bordure, élan nul sur le bloc seul.
+fn still(a: &Air, src: &[f32], vx: &[f32], vy: &[f32], c: usize) -> bool {
+    let (x0, y0, x1, y1) = a.bounds(c);
+    let (ya, yb) = (y0.saturating_sub(1), (y1 + 1).min(a.h));
+    let (xa, xb) = (x0.saturating_sub(1), (x1 + 1).min(a.w));
+    (ya..yb).all(|y| src[y * a.w + xa..y * a.w + xb].iter().all(|&p| p == 0.0))
+        && (y0..y1).all(|y| (y * a.w + x0..y * a.w + x1).all(|i| vx[i] == 0.0 && vy[i] == 0.0))
+}
+
+/// Remet à zéro le bloc `c` d'un tampon.
+fn fill_chunk(a: &Air, buf: &mut [f32], c: usize) {
+    let (x0, y0, x1, y1) = a.bounds(c);
+    for y in y0..y1 {
+        buf[y * a.w + x0..y * a.w + x1].fill(0.0);
+    }
+}
+
+/// `windChunk()` d'engine.ts : l'élan des faces que tient le bloc (à droite et en dessous de ses cellules).
+fn wind_chunk(a: &Air, p: &[f32], vx: &mut [f32], vy: &mut [f32], c: usize) {
+    if still(a, p, vx, vy, c) {
+        return;
+    }
+    let (x0, y0, x1, y1) = a.bounds(c);
+    let (w, h) = (a.w, a.h);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let i = y * w + x;
+            if !a.open(i) {
+                vx[i] = 0.0;
+                vy[i] = 0.0;
+                continue;
+            }
+            vx[i] = if x < w - 1 && a.open(i + 1) {
+                ((vx[i] as f64 + WIND_K * (p[i] as f64 - p[i + 1] as f64)) * DRAG) as f32
+            } else {
+                0.0
+            };
+            vy[i] = if y < h - 1 && a.open(i + w) {
+                ((vy[i] as f64 + WIND_K * (p[i] as f64 - p[i + w] as f64)) * DRAG) as f32
+            } else {
+                0.0
+            };
+        }
+    }
+}
+
+/// `airChunk()` d'engine.ts : la pression selon ce que les faces apportent ou emportent. Rend `true` si le bloc reste agité.
+fn air_chunk(a: &Air, src: &[f32], dst: &mut [f32], vx: &[f32], vy: &[f32], c: usize) -> bool {
+    let (x0, y0, x1, y1) = a.bounds(c);
+    let w = a.w;
+    let mut loud = false;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let i = y * w + x;
+            if !a.open(i) {
+                dst[i] = 0.0;
+                continue;
+            }
+            let in_x = if x > 0 { vx[i - 1] as f64 } else { 0.0 };
+            let in_y = if y > 0 { vy[i - w] as f64 } else { 0.0 };
+            let next = (src[i] as f64 + in_x - vx[i] as f64 + in_y - vy[i] as f64) * DAMP;
+            dst[i] = if next > 0.0 { next as f32 } else { 0.0 };
+            if next >= CALM_P || (vx[i] as f64).abs() >= CALM_V || (vy[i] as f64).abs() >= CALM_V {
+                loud = true;
+            }
+        }
+    }
+    loud
+}
+
+// ─── Fonctions mathématiques ──────────────────────────────────────────────
+//
+// La référence de src/client/sim/libm.ts : la crate `libm` (musl en pur
+// Rust), dont le TypeScript est la copie ligne à ligne. test/rust.ts lui
+// passe des millions d'arguments et exige les mêmes bits. Un futur moteur
+// Rust appellerait ces fonctions-là directement.
+
+/// Applique la fonction `op` à `n` arguments : 0 sin, 1 cos, 2 atan, 3 exp,
+/// 4 log, 5 atan2 (`ys[i]`, `xs[i]`). Résultats dans `out`.
+///
+/// # Safety
+/// `xs`, `ys` et `out` désignent chacun `n` f64 réservés par `reserve`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn math(op: u32, xs: *const f64, ys: *const f64, out: *mut f64, n: usize) {
+    let (xs, ys, out) = unsafe {
+        (core::slice::from_raw_parts(xs, n), core::slice::from_raw_parts(ys, n), core::slice::from_raw_parts_mut(out, n))
+    };
+    for i in 0..n {
+        let x = xs[i];
+        out[i] = match op {
+            0 => libm::sin(x),
+            1 => libm::cos(x),
+            2 => libm::atan(x),
+            3 => libm::exp(x),
+            4 => libm::log(x),
+            _ => libm::atan2(ys[i], x),
+        };
     }
 }

@@ -6,13 +6,17 @@
  * Il porte aussi un budget, et sort en erreur au-delà : c'est ce qui rend la
  * mesure utile en CI, où personne ne lit le tableau.
  *
- * ponytail: un seuil unique sur la plus petite grille plutôt qu'un suivi de la
- * courbe. Il attrape un effondrement (le tick était à 1,6 ms avant les tableaux
- * typés), pas une dérive de 20 % — un runner partagé varie déjà plus que ça.
- * Comparer à la mesure de `main` demanderait de la stocker quelque part.
+ * Le budget est un seuil absolu : il attrape un effondrement (le tick était
+ * à 1,6 ms avant les tableaux typés), pas une dérive de 20 % — un runner
+ * partagé varie déjà plus que ça d'une exécution à l'autre. La dérive, c'est
+ * `npm run drift` (test/drift.ts) qui la voit : il mesure la branche de base
+ * sur la même machine, dans la foulée, et compare. `BENCH_JSON=fichier` écrit
+ * ici les mesures pour lui.
  */
+import { writeFileSync } from "node:fs";
 import { Engine } from "../src/client/sim/engine.ts";
 import { FIRE, OIL, SAND, STONE, WATER, WOOD } from "../src/client/sim/materials.ts";
+import { EXPLORE_SCALE, STRIP, land } from "../src/client/sim/explore.ts";
 
 const TICKS = 300;
 /** Budget du tick en 320×180, en ms. Large : le runner de CI n'est pas cette machine. */
@@ -40,6 +44,7 @@ function scene(width: number, height: number): Engine {
 console.log(`${TICKS} ticks par mesure\n`);
 console.log("grille        cellules   ms/tick   ticks/s   fps à ×1");
 let budget = 0;
+const measured: Record<string, { value: number; unit: string }> = {};
 for (const [w, h] of [[320, 180], [480, 270], [640, 360], [1280, 720], [1920, 1080]] as const) {
   const e = scene(w, h);
   for (let t = 0; t < 30; t++) e.step(); // chauffe le JIT
@@ -49,6 +54,7 @@ for (const [w, h] of [[320, 180], [480, 270], [640, 360], [1280, 720], [1920, 10
   // À vitesse ×1 la boucle fait un tick par frame : le tick doit tenir dans 16,7 ms.
   const fps = Math.min(60, 1000 / ms);
   if (w === 320) budget = ms;
+  measured[`tick ${w}×${h}`] = { value: ms, unit: "ms" };
   console.log(
     `${w}×${h}`.padEnd(14) +
       String(w * h).padEnd(11) +
@@ -57,6 +63,29 @@ for (const [w, h] of [[320, 180], [480, 270], [640, 360], [1280, 720], [1920, 10
       `${Math.round(fps)}`.padStart(11),
   );
 }
+
+// Une tranche du monde infini (`land()`, docs/agents/exploration.md) : ce que
+// coûtera chaque chunk qui entre dans la fenêtre. Mesurée, pas budgétée : le
+// mode la bâtira d'avance, hors du tick (étape 3).
+{
+  const e = new Engine(1280, 720, 1);
+  for (let k = 0; k < 3; k++) land(e, 4217, EXPLORE_SCALE, k * STRIP, 0, STRIP);
+  const runs = 10, start = performance.now();
+  for (let k = 0; k < runs; k++) land(e, 4217, EXPLORE_SCALE, (k + 3) * STRIP, 0, STRIP);
+  const ms = (performance.now() - start) / runs;
+  measured[`tranche ${STRIP}×720`] = { value: ms, unit: "ms" };
+  console.log(`\ntranche du monde infini (${STRIP}×720) : ${ms.toFixed(1)} ms`);
+
+  // Le décalage lui-même (`shift()`), sans la tranche : ce qu'il coûte au tick où il tombe.
+  for (let k = 0; k < 3; k++) { e.shift(STRIP); e.shift(-STRIP); }
+  const t0 = performance.now();
+  for (let k = 0; k < runs; k++) { e.shift(STRIP); e.shift(-STRIP); }
+  const slid = (performance.now() - t0) / (2 * runs);
+  measured[`décalage 1280×720`] = { value: slid, unit: "ms" };
+  console.log(`décalage de la fenêtre (1280×720, ${STRIP} colonnes) : ${slid.toFixed(1)} ms`);
+}
+
+if (process.env.BENCH_JSON) writeFileSync(process.env.BENCH_JSON, JSON.stringify(measured));
 
 if (budget > BUDGET) {
   console.error(`
