@@ -25,6 +25,10 @@ une base fournie comme dossier (`DRIFT_BASE`) ne lance pas Git.
 Il n'y a **pas de framework de test** ni de linter. Node ≥ 24 exécute le
 TypeScript directement.
 
+Les scripts utilisent `Math.trunc()` pour les coordonnées et les valeurs
+affichées sous forme entière. Cette conversion garde les empreintes du
+moteur et les résultats de libm.ts inchangés.
+
 | Script | Couvre | Charge |
 | --- | --- | --- |
 | [test/sim.ts](../../test/sim.ts) | règles du moteur, registre, codec, défis, gestes, rejeu (et son export : lien, fichier, crible `vet()`, plafond de décompression), table d'éclairage (`lighting()` : qui émet arrête un peu), éclairage du secours 2D (`FlatLight` : la lave éclaire, un mur fait de l'ombre, le noir reste noir, le mélange n'assombrit jamais), blocs de veille (dont la mer de lave qui doit s'endormir), pression et vent (un souffle chasse la fumée, la pierre n'en prend pas, l'onde ne traverse pas un mur, elle **voyage** au bout d'un couloir, elle retombe à zéro exactement et le bac se rendort, `wakeAll()` l'efface ; une vitre proche éclate, une lointaine tient, une pièce close en casse plus ; l'onde arrache le sable d'un tas), la moitié du bac qui saute au même tick (aucune explosion perdue), rouille (l'eau la traverse et ronge l'intérieur d'une barre, une rouille sèche ne se propage pas), lapin qui se retourne avec la gravité, sac du héros (il porte ce qu'il creuse, le pose avant la palette), mondes générés (`terrain()` à échelle fixe ; `land()` : tranches dans le désordre = une passe, fenêtres décalées qui coïncident ; `shift()` : aller-retour au bit près, même partie 200 ticks plus tard, raccord avec `land()`, héros qui glisse), empreinte | `Engine`, `codec`, `gestures`, `replay`, `challenges` |

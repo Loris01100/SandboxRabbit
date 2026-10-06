@@ -125,11 +125,11 @@ export class FlatLight {
     emit.fill(0);
     alpha.fill(0);
     const count = new Uint16Array(alpha.length);
-    const step = Math.max(1, (scale / 4) | 0);
+    const step = Math.max(1, Math.trunc(scale / 4));
     for (let y = 0; y < h; y += step) {
-      const row = ((y / scale) | 0) * lw;
+      const row = Math.trunc(y / scale) * lw;
       for (let x = 0; x < w; x += step) {
-        const i = y * w + x, id = cells[i], t = row + ((x / scale) | 0);
+        const i = y * w + x, id = cells[i], t = row + Math.trunc(x / scale);
         count[t]++;
         if (id === 0) continue;
         const a = table[id * 4 + 3] / 255;

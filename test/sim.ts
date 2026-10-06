@@ -735,7 +735,7 @@ function count(e: Engine, id: MaterialId): number {
     e.step();
     hot = Math.max(hot, e.temp[e.index(30, 26)]);
   }
-  assert.ok(hot > 300, `le tas chauffe avant de sauter (${hot | 0} °C)`);
+  assert.ok(hot > 300, `le tas chauffe avant de sauter (${Math.trunc(hot)} °C)`);
   assert.ok(count(e, URANIUM) <= 8, `le tas a sauté (${count(e, URANIUM)} grains projetés restent, isolés : ils ne s'emballent plus)`);
   assert.ok(count(e, STONE) < stone - 50, `le souffle creuse (${stone - count(e, STONE)})`);
   assert.ok(count(e, FALLOUT) > 20, `il reste des retombées (${count(e, FALLOUT)})`);
@@ -770,7 +770,7 @@ function count(e: Engine, id: MaterialId): number {
   e.gravity = -1;
   for (let t = 0; t < 120; t++) e.step();
   assert.equal(count(e, RABBIT), 1, "retourné, il vit encore");
-  const cœur = e.cells.indexOf(RABBIT), x = cœur % W, y = (cœur / W) | 0;
+  const cœur = e.cells.indexOf(RABBIT), x = cœur % W, y = Math.trunc(cœur / W);
   assert.ok(y < H / 2, `il est tombé vers le plafond (cœur en y = ${y})`);
   assert.equal(e.get(x, y + 2), RABBIT_BODY, "l'oreille est sous le cœur");
   assert.equal(count(e, RABBIT_BODY) + count(e, RABBIT_EYE) + count(e, RABBIT_TAIL), 8, "le corps entier");
@@ -809,7 +809,7 @@ function count(e: Engine, id: MaterialId): number {
   chute.paint(30, 5, 1, RABBIT);
   for (let t = 0; t < 60; t++) chute.step();
   assert.equal(corps(chute), 9, "la chute ne le démembre pas");
-  assert.equal((chute.cells.indexOf(RABBIT) / W) | 0, SOL, "il est posé sur le sol");
+  assert.equal(Math.trunc(chute.cells.indexOf(RABBIT) / W), SOL, "il est posé sur le sol");
 
   // Il broute la prairie sous ses pattes.
   const repas = pré(12);
@@ -851,7 +851,7 @@ function count(e: Engine, id: MaterialId): number {
   let fond = false;
   for (let t = 0; t < 400; t++) {
     mare.step();
-    if (mare.cells.indexOf(RABBIT) >= 0) fond ||= ((mare.cells.indexOf(RABBIT) / W) | 0) === SOL;
+    if (mare.cells.indexOf(RABBIT) >= 0) fond ||= Math.trunc(mare.cells.indexOf(RABBIT) / W) === SOL;
   }
   assert.ok(fond, "il a coulé jusqu'au fond");
   assert.equal(corps(mare), 0, "et il s'y est noyé");
@@ -1243,7 +1243,7 @@ function top(e: Engine, id: MaterialId): number {
     let n = 0, sum = 0;
     for (let i = 0; i < e.cells.length; i++) {
       if (e.cells[i] !== SMOKE) continue;
-      const x = (i % e.width) - 80, y = ((i / e.width) | 0) - 45;
+      const x = (i % e.width) - 80, y = Math.trunc(i / e.width) - 45;
       n++;
       sum += Math.sqrt(x * x + y * y);
     }
@@ -1813,7 +1813,7 @@ function top(e: Engine, id: MaterialId): number {
   };
   const où = (e: Engine): [number, number] => {
     assert.equal(e.cells[e.hero], HERO, "le héros est vivant");
-    return [e.hero % W, (e.hero / W) | 0];
+    return [e.hero % W, Math.trunc(e.hero / W)];
   };
   const tenir = (e: Engine, keys: number, ticks: number) => {
     applyGesture(e, { t: "pilot", keys });
@@ -1956,7 +1956,7 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(paire.spawnHero(10, SOL - 6), 1750, "un autre sur la marche, 250 cellules plus tôt");
   paire.step();
   const numéros = [...paire.cells].flatMap((id, at) =>
-    id === HERO ? [paire.life[paire.index(at % W + HERO_SLOTS.name[0], ((at / W) | 0) + HERO_SLOTS.name[1])]] : []);
+    id === HERO ? [paire.life[paire.index(at % W + HERO_SLOTS.name[0], Math.trunc(at / W) + HERO_SLOTS.name[1])]] : []);
   assert.equal(new Set(numéros).size, 2, `deux numéros distincts (${numéros})`);
   assert.ok(!numéros.includes(0), "et aucun héros sans numéro");
 
@@ -1966,7 +1966,7 @@ function top(e: Engine, id: MaterialId): number {
   paire.adopt(paire.cells.slice());
   paire.step();
   const rendus = [...paire.cells].flatMap((id, at) =>
-    id === HERO ? [paire.life[paire.index(at % W + HERO_SLOTS.name[0], ((at / W) | 0) + HERO_SLOTS.name[1])]] : []);
+    id === HERO ? [paire.life[paire.index(at % W + HERO_SLOTS.name[0], Math.trunc(at / W) + HERO_SLOTS.name[1])]] : []);
   assert.ok(!rendus.includes(0) && new Set(rendus).size === 2, `renumérotés, toujours distincts (${rendus})`);
   applyGesture(nommé, { t: "name", id: numéro, name: "  Robert le Lapin des Bois  " });
   assert.equal(heroName(nommé, numéro), "Robert le Lapin des", "renommé, sans blancs autour, 20 caractères au plus");

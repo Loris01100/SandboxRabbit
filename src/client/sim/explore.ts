@@ -65,7 +65,7 @@ function grains(h: number): Int8Array {
   let g = GRAINS.get(h);
   if (!g) {
     g = new Int8Array(STRIP * h);
-    for (let y = 0; y < h; y++) for (let x = 0; x < STRIP; x++) g[y * STRIP + x] = ((lattice(0x67a1, x, y) * 255) | 0) - 128;
+    for (let y = 0; y < h; y++) for (let x = 0; x < STRIP; x++) g[y * STRIP + x] = Math.trunc(lattice(0x67a1, x, y) * 255) - 128;
     GRAINS.set(h, g);
   }
   return g;

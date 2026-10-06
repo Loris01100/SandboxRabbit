@@ -338,7 +338,7 @@ export class Sandbox {
       at < 0 ? null : [this.engine.cells[at] as MaterialId, this.engine.temp[at]];
     const heart = this.engine.hero;
     const hero: [number, number, string] | null = heart >= 0 && this.engine.cells[heart] === HERO
-      ? [heart % w, (heart / w) | 0, heroName(this.engine, this.engine.life[heart + HERO_SLOTS.name[1] * w + HERO_SLOTS.name[0]])]
+      ? [heart % w, Math.trunc(heart / w), heroName(this.engine, this.engine.life[heart + HERO_SLOTS.name[1] * w + HERO_SLOTS.name[0]])]
       : null;
     // Relevé puis vidé à chaque frame : la page joue ce qui vient d'arriver,
     // pas ce qui s'est accumulé pendant une pause.

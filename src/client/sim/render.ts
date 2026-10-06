@@ -417,7 +417,7 @@ export class Renderer {
     // reste identique, seule la luminosité varie. Une cellule figée est
     // tramée en damier, pour la distinguer au premier coup d'œil.
     const d = frozen[i]
-      ? ((i + ((i / width) | 0)) & 1 ? 45 : -45)
+      ? ((i + Math.trunc(i / width)) & 1 ? 45 : -45)
       : glow || (noise[i] * grain[id]) >> 7;
     const r = clamp((base & 0xff) + d);
     const g = clamp(((base >> 8) & 0xff) + d);
@@ -434,7 +434,7 @@ export class Renderer {
    */
   private illuminate(lights: FlatLight, from: number, to: number): void {
     const { buffer } = this;
-    const w = this.grid.width, y = (from / w) | 0, x0 = from - y * w;
+    const w = this.grid.width, y = Math.trunc(from / w), x0 = from - y * w;
     const { band, left, right, frac } = lights.row(y, w);
     for (let i = from, x = x0; i < to; i++, x++) {
       const l = left[x], r = right[x], f = frac[x];

@@ -657,7 +657,7 @@ export class Engine {
     this.shown = new Uint8Array(chunks);
     if (memory) return;
     this.temp.fill(this.ambient);
-    for (let i = 0; i < n; i++) this.noise[i] = ((this.rand() * 255) | 0) - 128;
+    for (let i = 0; i < n; i++) this.noise[i] = Math.trunc(this.rand() * 255) - 128;
     this.stir.fill(1);
     this.hero = -1;
   }
@@ -704,7 +704,7 @@ export class Engine {
     const hearts: number[] = [];
     for (let i = 0; i < cells.length; i++) if (cells[i] === RABBIT) hearts.push(i);
     for (const i of hearts) {
-      const x = i % w, y = (i / w) | 0, ny = y - old;
+      const x = i % w, y = Math.trunc(i / w), ny = y - old;
       const f = this.intact(RABBIT_SHAPE, x, y, 1) >= this.intact(RABBIT_SHAPE, x, y, -1) ? 1 : -1;
       const fed = life[i];
       for (let k = 0; k < id.length; k++) {
@@ -849,7 +849,7 @@ export class Engine {
 
   /** Le bloc de la cellule `i` a changé : il est diffusé à ce tick et balayé au suivant, avec ses voisins. */
   private wake(i: number): void {
-    const y = (i / this.width) | 0;
+    const y = Math.trunc(i / this.width);
     this.stir[(y >> SHIFT) * this.cols + ((i - y * this.width) >> SHIFT)] = 1;
   }
 
@@ -881,7 +881,7 @@ export class Engine {
     for (let c = 0; c < awake.length; c++) {
       if (awake[c]) this.busy++;
       if (!awake[c] || was[c]) continue;
-      const x0 = (c % cols) << SHIFT, y0 = ((c / cols) | 0) << SHIFT;
+      const x0 = (c % cols) << SHIFT, y0 = Math.trunc(c / cols) << SHIFT;
       const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
       for (let y = y0; y < y1; y++) clock.fill(before, y * w + x0, y * w + x1);
     }
@@ -1132,7 +1132,7 @@ export class Engine {
     while (stack.length > 0) {
       const i = stack.pop()!;
       if (this.cells[i] !== from || this.frozen[i]) continue;
-      this.become(i % this.width, (i / this.width) | 0, id);
+      this.become(i % this.width, Math.trunc(i / this.width), id);
       const cx = i % this.width;
       if (cx > 0) stack.push(i - 1);
       if (cx < this.width - 1) stack.push(i + 1);
@@ -1325,7 +1325,7 @@ export class Engine {
    */
   private block(b: number): void {
     const { width: w, height: h, cells, frozen, clock, life, awake, stir, cols, parity } = this;
-    const x0 = (b % this.parts) << PART_SHIFT, y0 = ((b / this.parts) | 0) << PART_SHIFT;
+    const x0 = (b % this.parts) << PART_SHIFT, y0 = Math.trunc(b / this.parts) << PART_SHIFT;
     const x1 = Math.min(w, x0 + PART), y1 = Math.min(h, y0 + PART);
     this.state = mix(this.tickSeed ^ Math.imul(b + 1, 0x9e3779b1));
     const leftToRight = parity === 0;
@@ -1409,12 +1409,12 @@ export class Engine {
     const down = this.fall === 1, leftToRight = this.parity === 0;
     const order = this.waiting.subarray(0, count);
     for (let k = 0; k < count; k++) {
-      const at = order[k], x = at % w, y = (at / w) | 0;
+      const at = order[k], x = at % w, y = Math.trunc(at / w);
       order[k] = (down ? h - 1 - y : y) * w + (leftToRight ? x : w - 1 - x);
     }
     order.sort();
     for (let k = 0; k < count; k++) {
-      const ry = (order[k] / w) | 0, rx = order[k] - ry * w;
+      const ry = Math.trunc(order[k] / w), rx = order[k] - ry * w;
       const x = leftToRight ? rx : w - 1 - rx, y = down ? h - 1 - ry : ry, i = y * w + x;
       if (!held[i]) continue; // déplacée par `swap()` : voir plus haut
       held[i] = 0;
@@ -1458,7 +1458,7 @@ export class Engine {
     const down = this.fall === 1, leftToRight = this.parity === 0;
     const order = new Float64Array(count);
     for (let k = 0; k < count; k++) {
-      const at = later[k], x = at % w, y = (at / w) | 0;
+      const at = later[k], x = at % w, y = Math.trunc(at / w);
       asked[at] = 0;
       order[k] = (down ? h - 1 - y : y) * w + (leftToRight ? x : w - 1 - x);
     }
@@ -1765,7 +1765,7 @@ export class Engine {
     if (this.rand() > 0.08) return;
     this.become(x + NX[water], y + NY[water], PLANT);
     // Une pousse peut partir vers le haut ou en biais.
-    const dx = (this.rand() * 3 | 0) - 1;
+    const dx = Math.trunc(this.rand() * 3) - 1;
     const up = y - this.gravity;
     if (this.get(x + dx, up) === EMPTY && this.rand() < 0.5) this.become(x + dx, up, PLANT);
   }
@@ -1973,7 +1973,7 @@ export class Engine {
     let sum = 0;
     while (head < tail) {
       const i = queue[head++];
-      const x = i % w, y = (i / w) | 0, dx = x - cx, dy = y - cy;
+      const x = i % w, y = Math.trunc(i / w), dx = x - cx, dy = y - cy;
       sum += reach - Math.sqrt(dx * dx + dy * dy);
       for (let k = 0; k < 4; k++) {
         const nx = x + NX[k], ny = y + NY[k];
@@ -1987,7 +1987,7 @@ export class Engine {
     if (sum <= 0) { for (let k = 0; k < tail; k++) seen[queue[k]] = 0; return; }
     const scale = BLOW * Math.min(CONFINED, gas(reach) / sum);
     for (let k = 0; k < tail; k++) {
-      const i = queue[k], dx = (i % w) - cx, dy = ((i / w) | 0) - cy;
+      const i = queue[k], dx = (i % w) - cx, dy = Math.trunc(i / w) - cy;
       seen[i] = 0;
       this.puff(i, scale * (reach - Math.sqrt(dx * dx + dy * dy)));
     }
@@ -2280,7 +2280,7 @@ export class Engine {
    */
   private heatChunk(c: number): void {
     const { width: w, cells, temp } = this;
-    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x0 = (c % this.cols) << SHIFT, y0 = Math.trunc(c / this.cols) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(this.height, y0 + CHUNK);
     for (let y = y0; y < y1; y++) {
       for (let i = y * w + x0, end = y * w + x1; i < end; i++) {
@@ -2295,7 +2295,7 @@ export class Engine {
   /** Passe 2 : diffusion du bloc `c` vers l'autre tampon, changements d'état, et le bloc dit s'il est refroidi (`awake[c] = 2`). */
   private diffuseChunk(c: number): void {
     const { width: w, height: h, cells, temp, tempNext, ambient, awake, stir } = this;
-    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x0 = (c % this.cols) << SHIFT, y0 = Math.trunc(c / this.cols) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
     const cols = this.cols;
     const upAsleep = y0 > 0 && awake[c - cols] === 0, downAsleep = y1 < h && awake[c + cols] === 0;
@@ -2366,7 +2366,7 @@ export class Engine {
   private settleChunk(c: number): void {
     if (this.awake[c] !== 2) return;
     const { width: w, temp, tempNext } = this;
-    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x0 = (c % this.cols) << SHIFT, y0 = Math.trunc(c / this.cols) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(this.height, y0 + CHUNK);
     for (let y = y0; y < y1; y++) {
       for (let i = y * w + x0, end = y * w + x1; i < end; i++) temp[i] = tempNext[i];
@@ -2421,7 +2421,7 @@ export class Engine {
    */
   private windChunk(c: number): void {
     const { width: w, height: h, cells, press: p, windX: vx, windY: vy } = this;
-    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x0 = (c % this.cols) << SHIFT, y0 = Math.trunc(c / this.cols) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
     // Pression nulle autour et élan nul ici : il le reste. Pas l'élan de la
     // bordure, que les blocs voisins écrivent pendant cette même passe — le
@@ -2449,7 +2449,7 @@ export class Engine {
    */
   private airChunk(c: number, last: boolean): void {
     const { width: w, height: h, cells, press: p, pressNext: q, windX: vx, windY: vy } = this;
-    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x0 = (c % this.cols) << SHIFT, y0 = Math.trunc(c / this.cols) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
     if (this.hushed(x0, y0, x1, y1)) {
       if (last) this.hush[c] = 1;
@@ -2471,7 +2471,7 @@ export class Engine {
     if (loud) {
       this.hush[c] = 0;
       this.stir[c] = 1;
-      const { cols, rows } = this, cx = c % cols, cy = (c / cols) | 0;
+      const { cols, rows } = this, cx = c % cols, cy = Math.trunc(c / cols);
       if (cx > 0) this.stir[c - 1] = 1;
       if (cx < cols - 1) this.stir[c + 1] = 1;
       if (cy > 0) this.stir[c - cols] = 1;
@@ -2520,7 +2520,7 @@ export class Engine {
   private hushChunk(c: number): void {
     if (!this.hush[c]) return;
     const { width: w, pressNext: q, windX: vx, windY: vy } = this;
-    const x0 = (c % this.cols) << SHIFT, y0 = ((c / this.cols) | 0) << SHIFT;
+    const x0 = (c % this.cols) << SHIFT, y0 = Math.trunc(c / this.cols) << SHIFT;
     const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(this.height, y0 + CHUNK);
     for (let y = y0; y < y1; y++) {
       q.fill(0, y * w + x0, y * w + x1);
@@ -2597,7 +2597,7 @@ export class Engine {
    */
   private pick(heart: number): void {
     if (heart < 0 || this.cells[heart] !== HERO) return;
-    const x = heart % this.width, y = (heart / this.width) | 0, [dx, dy] = HERO_SLOTS.name;
+    const x = heart % this.width, y = Math.trunc(heart / this.width), [dx, dy] = HERO_SLOTS.name;
     if (!this.inBounds(x + dx, y + dy)) return;
     const head = this.index(x + dx, y + dy);
     if (this.life[head] === 0) this.enlist();
@@ -2655,7 +2655,7 @@ export class Engine {
 
   /** La cellule où le héros de cœur `i` garde son numéro, -1 si elle est hors du bac. */
   private named(i: number, dx: number, dy: number, w: number): number {
-    const x = i % w + dx, y = ((i / w) | 0) + dy;
+    const x = i % w + dx, y = Math.trunc(i / w) + dy;
     return this.inBounds(x, y) ? this.index(x, y) : -1;
   }
 
@@ -2669,7 +2669,7 @@ export class Engine {
     this.seek = false;
     const [dx, dy] = HERO_SLOTS.name, w = this.width;
     for (let i = 0; i < this.cells.length && this.chosen !== 0; i++) {
-      if (this.cells[i] !== HERO || !this.inBounds(i % w + dx, ((i / w) | 0) + dy)) continue;
+      if (this.cells[i] !== HERO || !this.inBounds(i % w + dx, Math.trunc(i / w) + dy)) continue;
       if (this.life[i + dy * w + dx] === this.chosen) { this.hero = i; return; }
     }
     this.chosen = 0;
@@ -2681,7 +2681,7 @@ export class Engine {
   private piloted(): boolean {
     const at = this.hero;
     if (at < 0 || this.cells[at] !== HERO) return false;
-    const x = at % this.width, y = (at / this.width) | 0, [dx, dy] = HERO_SLOTS.name;
+    const x = at % this.width, y = Math.trunc(at / this.width), [dx, dy] = HERO_SLOTS.name;
     return this.inBounds(x + dx, y + dy) && this.life[this.index(x + dx, y + dy)] === this.chosen;
   }
 

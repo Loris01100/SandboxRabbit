@@ -8,6 +8,12 @@ ne sont gardés par **aucun** test visible, seulement par l'empreinte globale
 
 ## État
 
+Les conversions vers un entier utilisent `Math.trunc()` : coordonnées de
+cellules, indices de blocs, grain du rendu et réductions d'argument de libm.ts.
+Ces valeurs restent dans la plage des entiers signés de 32 bits. Les masques
+et décalages binaires restent utilisés pour les commandes du héros et le
+générateur déterministe ; `Math.trunc()` ne remplace pas ces opérations.
+
 Tableaux plats de taille `width * height`, **aucun objet par cellule** — c'est
 délibéré, pour pouvoir remplacer l'intérieur d'`Engine` par du Rust/WASM en
 gardant l'interface (`step`, `paint`, `cells`).

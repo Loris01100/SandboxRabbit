@@ -282,7 +282,7 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   const téléporte = (e: Engine, x: number): number => {
     for (let i = 0; i < e.cells.length; i++) {
       const id = e.cells[i];
-      if (id === HERO || id === HERO_HEAD || id === HERO_BODY || id === HERO_LEGS) e.set(i % e.width, (i / e.width) | 0, EMPTY);
+      if (id === HERO || id === HERO_HEAD || id === HERO_BODY || id === HERO_LEGS) e.set(i % e.width, Math.trunc(i / e.width), EMPTY);
     }
     for (let at = x; ; at++) {
       let y = 0;

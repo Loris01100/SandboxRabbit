@@ -31,7 +31,7 @@ function scene(width: number, height: number): Engine {
     for (let y = bowl; y < height; y++) e.set(x, y, STONE);
   }
   const block = (x0: number, y0: number, x1: number, y1: number, id: number): void => {
-    for (let x = x0 * s; x < x1 * s; x++) for (let y = y0 * s; y < y1 * s; y++) e.set(x | 0, y | 0, id);
+    for (let x = x0 * s; x < x1 * s; x++) for (let y = y0 * s; y < y1 * s; y++) e.set(Math.trunc(x), Math.trunc(y), id);
   };
   block(40, 40, 120, 80, SAND);
   block(180, 30, 280, 70, WATER);

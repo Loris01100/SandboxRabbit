@@ -72,7 +72,7 @@ export function applyGesture(engine: Engine, g: Gesture): void {
   }
   if (g.t === "pilot") {
     const id = (g.keys >> 8) & 255;
-    engine.pilot = ((g.keys | 0) & 63) | (placeable(id) ? id << 8 : 0);
+    engine.pilot = (Math.trunc(g.keys) & 63) | (placeable(id) ? id << 8 : 0);
     return;
   }
   if (!whole(g.x, g.y)) return;
@@ -112,7 +112,7 @@ export function weather(engine: Engine, level: number): void {
   if (!(level > 0)) return;
   const id = engine.ambient <= 0 ? SNOW : WATER;
   const y = engine.gravity === 1 ? 0 : engine.height - 1;
-  for (let n = Math.max(2, (engine.width / 160) | 0); n > 0; n--) {
+  for (let n = Math.max(2, Math.trunc(engine.width / 160)); n > 0; n--) {
     engine.set(Math.floor(engine.rand() * engine.width), y, id);
   }
   if (level > 1 && engine.rand() < BOLT[level]) bolt(engine, Math.floor(engine.rand() * engine.width), y);

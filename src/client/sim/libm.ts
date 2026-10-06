@@ -137,7 +137,7 @@ let n = 0, y0 = 0, y1 = 0;
 /** La réduction de `rem_pio2` pour |x| < 2^20·π/2 : jusqu'à trois tours de Cody-Waite. */
 function medium(x: number, ix: number): void {
   const fn = x * INV_PIO2 + TO_INT - TO_INT; // arrondi au plus proche de x / (π/2)
-  n = fn | 0;
+  n = Math.trunc(fn);
   let r = x - fn * PIO2_1;
   let w = fn * PIO2_1T;
   y0 = r - w;
@@ -351,7 +351,7 @@ export function exp(x: number): number {
   }
   let hi: number, lo: number, k: number;
   if (hx > 0x3fd62e42) { // |x| > ln2 / 2
-    if (hx >= 0x3ff0a2b2) k = (INVLN2 * x + (sign ? -0.5 : 0.5)) | 0; // |x| ≥ 1,5·ln2
+    if (hx >= 0x3ff0a2b2) k = Math.trunc(INVLN2 * x + (sign ? -0.5 : 0.5)); // |x| ≥ 1,5·ln2
     else k = 1 - sign - sign;
     hi = x - k * LN2HI; // exact
     lo = k * LN2LO;
