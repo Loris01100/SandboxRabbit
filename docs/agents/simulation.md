@@ -65,6 +65,8 @@ tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
    gravité**, le sens en x alternant avec `parity`, en sautant la portion de
    rangée d'un bloc de veille endormi. Pour chaque cellule non vide, non
    figée, dont `clock` ≠ `parity` : `clock = parity`, puis `update()`.
+   Le saut avance l'indice du nombre de cellules restantes dans le bloc
+   endormi, selon le sens horizontal ; l'incrément de boucle passe au suivant.
 3. `update()` : d'abord un `switch` sur les ids à règle propre (feu, lave,
    acide, TNT, étincelle…), sinon mouvement générique selon `kind`
    (`powder` / `liquid` / `gas`, `static` ne bouge pas).

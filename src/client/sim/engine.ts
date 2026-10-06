@@ -1337,7 +1337,7 @@ export class Engine {
         const x = leftToRight ? j : x1 - 1 - (j - x0);
         const c = row + (x >> SHIFT);
         if (!awake[c]) {
-          j = leftToRight ? x | (CHUNK - 1) : x1 - 1 - (x & ~(CHUNK - 1)) + x0;
+          j += leftToRight ? (CHUNK - 1) - (x & (CHUNK - 1)) : x & (CHUNK - 1);
           continue;
         }
         const i = y * w + x;
