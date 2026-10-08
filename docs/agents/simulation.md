@@ -393,6 +393,11 @@ tirage. Lire `MATERIALS[id].density` dans `displaces()` ou
 `.noise` dans `draw()` annule le gain (le tick est passé de 1,6 à 0,7 ms en
 320×180). Une nouvelle propriété lue dans le chemin chaud mérite sa table.
 
+La bonne table n'est pas toujours la plus évidente : la mine demande « est-ce
+que ça coule ? », ce que `FALLS` dit déjà — mais `FALLS` exclut les créatures,
+or le lapin et le héros sont des poudres et marcher sur une mine doit la faire
+sauter. `updateMine()` compare donc `KIND` à `KINDS.powder` / `KINDS.liquid`.
+
 Pour savoir ce qui coûte : `node --cpu-prof` sur un script qui fait tourner
 une scène, puis additionner le temps propre (`timeDeltas`) par fonction du
 `.cpuprofile`. V8 intègre les petites règles dans `update()` : son temps

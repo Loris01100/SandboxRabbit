@@ -1840,12 +1840,19 @@ export class Engine {
     this.updatePowder(i, x, y, SODIUM);
   }
 
-  /** Mine : seul ce qui coule appuie dessus, on peut donc la murer sans la faire sauter. */
+  /**
+   * Mine : seul ce qui coule appuie dessus, on peut donc la murer sans la faire
+   * sauter. Le `kind` vient de `KIND`, pas de `MATERIALS[id].kind` : une mine
+   * par cellule de bac plein, c'est une lecture d'objet et deux comparaisons de
+   * chaînes par tick dans le chemin chaud. Et pas `FALLS`, qui exclut les
+   * créatures : le lapin et le héros sont des poudres, et marcher sur une mine
+   * doit la faire sauter.
+   */
   private updateMine(x: number, y: number): void {
     const above = y - this.gravity;
     if (!this.inBounds(x, above)) return;
-    const kind = MATERIALS[this.cells[this.index(x, above)]].kind;
-    if (kind === "powder" || kind === "liquid") this.blast(x, y);
+    const kind = KIND[this.cells[this.index(x, above)]];
+    if (kind === KINDS.powder || kind === KINDS.liquid) this.blast(x, y);
   }
 
   /**
