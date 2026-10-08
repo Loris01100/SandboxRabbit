@@ -12,6 +12,7 @@ Le test des encadrés de raccourcis dans test/ui.ts compare leurs actions à
 | --- | --- |
 | `npm run typecheck` | **quatre** projets tsc : `tsconfig.json` (client, lib DOM), `tsconfig.worker.json` (Worker, types générés, pas de DOM), `tsconfig.test.json` (tout `test/` sauf api.ts : types Node + DOM) et `tsconfig.test-worker.json` (test/api.ts : types Node + Worker). Node exécute les tests **sans** vérifier leurs types : sans ces deux derniers, un champ disparu n'y était vu qu'à l'exécution, et jamais dans test/gpu.ts, qui ne tourne pas en CI |
 | `npm run check` | les sept scripts d'`assert`, dans l'ordre : sim, libm, ui, api, sandbox, pool, rules |
+| `npm run coverage` | les **mêmes** sept scripts, mais lancés par le runner de tests de Node (`node --test`) avec `--experimental-test-coverage`, pour écrire `coverage/lcov.info` à destination de SonarCloud ([Couverture](#couverture-et-sonarcloud)). Un assert qui tombe fait échouer la commande comme dans `check` ; ~5 min, contre 1 min 40 pour `check` |
 | `npm run browser` | dans Chromium sans fenêtre (Playwright) : le shader WebGL2 contre `Renderer` à une unité près, la page du jeu qui charge sans erreur, démarre le son au premier geste et survit à une perte du contexte WebGL. Demande `npx playwright install chromium` une fois par machine ; tout est dans [docs/navigateur.md](../navigateur.md) |
 | `npm run bench` | le tick du moteur sur 320×180, 480×270, 640×360, 1280×720, 1920×1080 ; échoue au-delà du budget (mesuré en 320×180 seulement). Mesure aussi, sans budget, une tranche 256×720 du monde infini (`land()`) et un décalage de la fenêtre 1280×720 (`shift()`, [exploration.md](exploration.md)) |
 | `npm run drift` | la dérive : bench et stress de la branche de base (`DRIFT_BASE`, `origin/main` par défaut, ou un dossier) extraite dans une copie de travail temporaire, contre ici, en alternance sur la même machine, meilleur de 3 manches de chaque côté ([test/drift.ts](../../test/drift.ts)). Échoue au-delà de +30 % (`DRIFT_MAX`), sauf les « pire tick » et sous le plancher de bruit (0,5 ms, 50 ns par cellule). Une base qui n'écrit pas ses mesures (`BENCH_JSON`, `STRESS_JSON`) est sautée. En CI, sur les pull requests |
@@ -309,6 +310,62 @@ Node 24 :
 
 Les actions sont épinglées par SHA et le workflow n'a que `contents: read` :
 garder ces deux propriétés en modifiant la CI.
+
+## Couverture et SonarCloud
+
+Un **second job** du même workflow, `sonar`, publie la couverture des tests sur
+SonarCloud. Il est à part du job `check` pour une raison de temps :
+l'instrumentation de couverture de V8 triple le coût du moteur, et les sept
+scripts passent de 1 min 40 à ~5 min. Un job parallèle ne rallonge pas la CI ;
+la même mesure glissée dans `check` l'aurait rallongée de 5 min à chaque push.
+
+`npm run coverage` relance **les mêmes sept scripts** que `npm run check`, mais
+sous le runner de tests de Node (`node --test`) plutôt qu'un par un :
+
+- un script d'`assert` sans `test()` est un fichier de test valide pour le
+  runner — il l'exécute, et ne le compte en échec que s'il lève. Un assert qui
+  tombe fait donc échouer `coverage` comme il fait échouer `check` : le job ne
+  publie jamais la couverture d'une suite rouge ;
+- le rapport sort par le **reporter** `lcov` de Node
+  (`--test-reporter=lcov --test-reporter-destination=coverage/lcov.info`), pas
+  par un `--test-coverage-lcov` : ce drapeau-là n'existe pas. Un second
+  reporter (`spec` vers `stdout`) garde le journal lisible ;
+- les chemins du LCOV sont **relatifs à la racine** du dépôt, ce que Sonar
+  attend. Lancer la commande ailleurs qu'à la racine donne une couverture à
+  0 % sans la moindre erreur ;
+- Node n'ouvre pas `coverage/` tout seul (`ENOENT` sur le fichier) : le script
+  le crée d'abord, par un `node -e` plutôt qu'un `mkdir -p` qui ne marcherait
+  pas sous `cmd`. `coverage/` est dans `.gitignore` ;
+- le runner lance les sept fichiers en parallèle. Aucun ne partage d'état avec
+  un autre (chacun a son processus), mais une mesure de temps y vaut moins que
+  dans `check` : les budgets restent à `bench`, `stress` et `drift`, jamais ici.
+
+[sonar-project.properties](../../sonar-project.properties) porte le reste.
+Deux pièges y sont commentés : `sonar.tests=test` est indispensable (sans lui,
+test/ compte comme du code à couvrir, et comme la couverture de Node exclut les
+fichiers de test, les sept scripts apparaîtraient à 0 %), et déclarer
+`sonar.tests` oblige à déclarer `sonar.sources` — sinon la racine entière est
+source et un fichier serait indexé deux fois.
+
+Deux réglages sont à faire **hors du dépôt**, une fois :
+
+1. un secret `SONAR_TOKEN` dans les secrets Actions du dépôt. Sans lui l'étape
+   d'analyse est sautée (le job reste vert) : c'est ce qui permet à une pull
+   request venue d'un fork, qui n'a pas le secret, de ne pas échouer ;
+2. l'**analyse automatique** de SonarCloud désactivée dans le projet
+   (Administration > Analysis Method). Elle n'exécute pas les tests, donc ne
+   produit aucune couverture, et les deux analyses se recouvrent : la passe
+   automatique ramènerait la couverture à zéro.
+
+Ce que Sonar affichera : ~96 % de lignes sur les 21 fichiers que les tests
+chargent, mais ~69 % sur `src/` entier. L'écart, ce sont les 20 modules de
+[Ce qui n'est pas testé automatiquement](#ce-qui-nest-pas-testé-automatiquement)
+ci-dessous, que rien n'importe jamais dans Node : ils n'apparaissent pas du
+tout dans le LCOV, et Sonar les compte à 0 %. C'est exact, pas un défaut de
+réglage — un `sonar.coverage.exclusions` les cacherait au lieu de les couvrir.
+Le chiffre qui vaut quelque chose est celui du **code neuf** : d'où le
+`fetch-depth: 0` du job, sans lequel le clone superficiel fait passer tout le
+dépôt pour neuf à chaque analyse.
 
 ## Ce qui n'est pas testé automatiquement
 

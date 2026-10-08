@@ -24,8 +24,9 @@ fichiers-là, pas celui-ci.
 ### Permissions
 
 [.claude/settings.json](.claude/settings.json) laisse passer sans demander les
-commandes de la section « Commandes » d'AGENTS.md (`typecheck`, `check`, `bench`,
-`stress`, `browser`, `build`, `directions`, `loc`, `rust`, un `node test/…`) et la
+commandes de la section « Commandes » d'AGENTS.md (`typecheck`, `check`,
+`coverage`, `bench`, `stress`, `browser`, `build`, `directions`, `loc`, `rust`,
+un `node test/…`) et la
 lecture du dépôt (`cat`, `sed -n`, `grep`, `git diff`, `git log`…) : « Avant de
 rendre la main » les réclame à chaque tour, et refuser l'une d'elles n'a jamais
 de sens.

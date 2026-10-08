@@ -67,3 +67,41 @@ jobs:
           echo "moteur : $engine octets (budget 81920)"
           test "$page" -le 86016
           test "$engine" -le 81920
+
+  # SonarCloud, dans son propre job : la couverture coûte 5 min là où `npm run
+  # check` en prend 1 min 40 (l'instrumentation V8 triple le temps du moteur),
+  # et un job parallèle ne rallonge pas la CI. L'analyse automatique de
+  # SonarCloud ne saurait pas produire ce rapport : elle ne lance pas les tests.
+  sonar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Sonar attribue les problèmes et la couverture au « code neuf » à
+          # partir de l'historique : avec le clone superficiel par défaut, tout
+          # le dépôt passe pour neuf à chaque analyse.
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # Les mêmes sept scripts que `npm run check`, lancés par le runner de
+      # tests de Node pour son rapport LCOV. Un assert qui tombe fait échouer
+      # l'étape ici aussi : le job ne publie pas une couverture de tests rouges.
+      - run: npm run coverage
+      # Le secret manque sur une pull request venue d'un fork : l'analyse est
+      # alors sautée plutôt que de faire échouer la CI d'une contribution.
+      # `secrets` ne se lit pas dans un `if` : il faut le traverser par une
+      # sortie d'étape, et seul `${VAR:+...}` sort un oui/non sans jamais
+      # écrire le jeton dans le journal.
+      - name: Jeton SonarCloud présent ?
+        id: jeton
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: echo "present=${SONAR_TOKEN:+oui}" >> "$GITHUB_OUTPUT"
+      - name: Analyse SonarCloud
+        if: steps.jeton.outputs.present == 'oui'
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

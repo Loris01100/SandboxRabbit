@@ -3,6 +3,7 @@
     "allow": [
       "Bash(npm run typecheck:*)",
       "Bash(npm run check:*)",
+      "Bash(npm run coverage:*)",
       "Bash(npm run bench:*)",
       "Bash(npm run stress:*)",
       "Bash(npm run browser:*)",

@@ -4,3 +4,4 @@ dist/
 .dev.vars
 *.log
 rust/target/
+coverage/

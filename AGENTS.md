@@ -22,6 +22,7 @@ npm install
 npm run dev        # Vite + Worker dans workerd (http://localhost:5173), HMR, D1 local (migrations : --local)
 npm run typecheck  # QUATRE projets tsc : client (DOM), Worker, tests (Node + DOM), test/api.ts (Node + Worker)
 npm run check      # asserts : test/sim.ts, test/libm.ts, test/ui.ts, test/api.ts, test/sandbox.ts, test/pool.ts, test/rules.ts (Node exécute le TS)
+npm run coverage   # les mêmes asserts par le runner de tests de Node, avec la couverture : coverage/lcov.info pour SonarCloud (~5 min)
 npm run browser    # Chromium (Playwright) : shader WebGL2 = Renderer, page qui charge sans erreur (docs/navigateur.md)
 npm run bench      # tick du moteur sur cinq tailles ; échoue au-delà de 4 ms en 320×180
 npm run stress     # pires cas : bac plein de chaque matière, explosions, pression, lave, aimants, bandes 1920×1080 ; chacun sous un plafond
@@ -251,7 +252,7 @@ local, faute de frappe, refactor interne). Le dire explicitement.
 | `challenges.ts`, `terrain.ts` | README (défis, décors, mondes générés) ; `terrain.ts` → [architecture.md](docs/agents/architecture.md) (modules) |
 | `main.ts`, `index.html`, `style.css`, `ui.ts`, `share.ts`, `room.ts`, `theme.ts` | [architecture.md](docs/agents/architecture.md) (modules, galerie, salon, clés `localStorage`) ; README si une fonctionnalité visible change |
 | `src/worker/*`, `migrations/`, `wrangler.jsonc` | [architecture.md](docs/agents/architecture.md) (API, stockage) ; README (tableau de l'API) |
-| `test/*`, scripts de `package.json`, `.github/` | [tests.md](docs/agents/tests.md) ; section Commandes de ce fichier ; `test/browser.ts`, `test/screen.*` → [docs/navigateur.md](docs/navigateur.md) |
+| `test/*`, scripts de `package.json`, `.github/`, `sonar-project.properties` | [tests.md](docs/agents/tests.md) ; section Commandes de ce fichier ; `test/browser.ts`, `test/screen.*` → [docs/navigateur.md](docs/navigateur.md) |
 | `screen.ts` | [rendu.md](docs/agents/rendu.md) (textures, programmes, éclairage) ; [simulation.md](docs/agents/simulation.md) si la règle d'aspect change des deux côtés |
 | une optimisation (moteur, rendu, boucle, budgets) | [performance.md](docs/agents/performance.md) (« Ce qui a déjà payé », avec le gain mesuré) |
 | `rust/` | [docs/rust.md](docs/rust.md) (et ses résultats, s'ils changent) |
