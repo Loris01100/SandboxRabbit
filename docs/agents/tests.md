@@ -262,7 +262,9 @@ blocs changés (`engine.changed()`) à la place du bac.
 ## Budgets surveillés par la CI
 
 [.github/workflows/ci.yml](../../.github/workflows/ci.yml), à chaque push et PR,
-Node 24 :
+Node 24. Le workflow a **deux** jobs, qui tournent en parallèle : `check`,
+détaillé ici, et `sonar` ([Couverture](#couverture-et-sonarcloud)). Les étapes
+ci-dessous sont celles de `check` :
 
 1. `npm ci --ignore-scripts` — les scripts de cycle de vie des paquets ne
    s'exécutent pas à l'installation ; les commandes de build et de test sont
