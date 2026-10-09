@@ -1749,7 +1749,7 @@ function top(e: Engine, id: MaterialId): number {
   const bande = b.copy(0, 0, D - 1, H - 1);
   const chaud = Array.from({ length: H }, (_, y) => b.temp.slice(y * W, y * W + D));
   const grain = b.noise.slice();
-  const avant = { cells: b.cells.slice(), life: b.life.slice(), temp: b.temp.slice(), press: b.press.slice(), clock: b.clock.slice() };
+  const avant = { cells: b.cells.slice(), life: b.life.slice(), temp: b.temp.slice(), press: b.press.slice(), flags: b.flags.slice() };
 
   b.shift(D);
   assert.equal(b.cells[300 * W + 580 - D], avant.cells[300 * W + 580], "la matière glisse de D colonnes vers la gauche");

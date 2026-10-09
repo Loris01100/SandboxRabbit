@@ -172,8 +172,8 @@ reformule.
 ```
 
 Utilitaires de test/sim.ts : `engine()`, `runUntil(e, id, ticks)`,
-`count(e, id)`. Pense à `clock` : une cellule fraîchement posée peut sauter un
-tick, d'où les boucles de deux pas ou plus.
+`count(e, id)`. Pense à `F_CLOCK` (dans `flags`) : une cellule fraîchement
+posée peut sauter un tick, d'où les boucles de deux pas ou plus.
 
 Le script se termine par un `console.log("ok — …")` : un nouveau fichier de
 test doit être ajouté à `check` dans package.json.

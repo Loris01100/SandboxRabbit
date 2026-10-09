@@ -31,7 +31,7 @@ ne simule qu'autour du joueur.
 Pourquoi pas une grande grille : 8400×2400 (un grand monde Terraria) fait
 20 millions de cellules, soit environ 30 octets chacune dans le moteur
 (`cells`, `life`, deux tampons de `temp` et de `press`, `windX`/`windY`,
-`clock`, `frozen`, `noise`, tampons de travail du multi-fils), plus le miroir de
+`flags`, `frozen`, `noise`, tampons de travail du multi-fils), plus le miroir de
 la page. Ça donne autour de 600 Mo, des textures WebGL hors des limites de
 beaucoup de GPU, un codec et une API (1920×1080 au plus) à refaire. Les blocs
 de veille économisent le calcul, pas la mémoire.
@@ -146,12 +146,12 @@ Le plan d'origine :
 `dx` est un multiple de 256, positif ou négatif. Entre deux ticks :
 
 1. `copyWithin` sur chaque tableau par cellule, rangée par rangée : `cells`,
-   `life`, `frozen`, `clock`, `noise`, `windX`, `windY`, et le tampon
+   `life`, `frozen`, `flags`, `noise`, `windX`, `windY`, et le tampon
    **courant** de `temp` et de `press` (l'autre n'est que du travail) ;
 2. le même décalage, en blocs, sur `stir`, `awake`, `was`, `hush` ;
 3. `hero -= dx` (ou -1 s'il sort, ce qui ne doit pas arriver) ;
 4. la bande libérée est vidée (température `ambient`, pression nulle,
-   `clock` neutre) : c'est l'appelant qui la remplit (étape 3) ;
+   horloge neutre) : c'est l'appelant qui la remplit (étape 3) ;
 5. la bande neuve et ses voisins sont réveillés, comme après un `paste()`.
 
 **Doit prouver** :
@@ -164,7 +164,7 @@ Le plan d'origine :
   sous `SLICE`, 12 ms, génération comprise).
 
 Points délicats à relire (aucun test ne les verrait tous) : la parité de
-`clock` après le décalage, la pression qui touchait le bord sortant (passer
+`F_CLOCK` après le décalage, la pression qui touchait le bord sortant (passer
 par `puff()` si on en réinjecte), les cellules de `HERO_SLOTS` (le corps du
 héros ne doit jamais être coupé par la bande sortante : la marge de l'étape 3
 y veille).
@@ -428,7 +428,7 @@ fenêtre, que la copie de secours faisait déjà (10 ms en 1280×720), et
   jusqu'à une seconde de retard en 1280×720. Aucun format de plus dans le
   codec : la fenêtre et les chunks restent des grilles du codec de toujours,
   et c'est le JSON qui les assemble ;
-- ni `clock`, ni la pression, ni le vent ne sont rangés, comme pour le bac
+- ni les horloges (`F_CLOCK`), ni la pression, ni le vent ne sont rangés, comme pour le bac
   ordinaire : une explosion en cours au moment de quitter ne reprend pas.
 
 Le plan d'origine :

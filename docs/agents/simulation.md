@@ -32,7 +32,7 @@ gardant l'interface (`step`, `paint`, `cells`).
 | `life` | `Uint8Array` | compteur multi-usage, voir plus bas |
 | `temp` | `Float32Array` | °C, **réassigné à chaque tick** (double tampon) |
 | `press` | `Float32Array` | pression de l'air (≥ 0, nulle hors de l'air), **réassignée à chaque sous-pas** (double tampon). Voir [Pression et vent](#pression-et-vent) |
-| `clock` | `Uint8Array` | parité du tick où la cellule a déjà bougé |
+| `flags` | `Uint8Array` | drapeaux de la cellule : `F_CLOCK` (parité du tick où elle a déjà bougé), `F_HELD` (différée par `hold()`) |
 | `frozen` | `Uint8Array` | 1 = figée à la main |
 | `noise` | `Int8Array` | grain fixe par cellule (rendu) |
 
@@ -52,23 +52,35 @@ damier) et par l'éclair de la météo (gestures.ts) ; sandbox.ts le relève dan
 chaque frame et le remet à zéro. **Aucune règle ne le lit** : il ne pèse ni sur
 l'empreinte ni sur le salon — ne jamais en faire dépendre la simulation.
 
+Deux drapeaux par cellule plutôt que deux tableaux : le balayage les lit d'un
+seul accès, et c'est la mémoire qui plafonne le tick dès 1280×720
+([performance.md](performance.md)). `frozen` est resté à part — il part tel
+quel dans les bandes et dans le codec, où il se recopie d'un bloc — et `asked`
+aussi, qu'`Atomics.exchange` veut pour lui seul.
+
 Blocs de veille (privés, un octet par bloc de 16×16) : `stir` (bloc écrit ou
 tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
 `was` (`awake` du tick d'avant). Voir [Blocs de veille](#blocs-de-veille).
+
+Différés du tick (privés, remis à zéro par `release()`) : `heldRow` (un octet
+par rangée) et `heldSeg` (un par rangée et par colonne de bloc de veille) —
+où `hold()` a différé quelque chose.
 
 ## Un tick (`step()`)
 
 1. `parity ^= 1`, puis `rouse()` : les blocs de `stir` et leurs huit voisins
    forment `awake` (`busy` en compte le nombre) ; un bloc qui vient de se
-   réveiller remet `clock` à `parity ^ 1`.
+   réveiller remet `F_CLOCK` à `parity ^ 1` (un `fill` : entre deux ticks,
+   `F_HELD` est partout à zéro).
 2. **Le damier** : la grille est découpée en blocs de 32×32 (`PART`), traités
    en quatre phases — (x pair, y pair), (impair, pair), (pair, impair),
    (impair, impair). Chaque bloc (`block()`) est balayé **dans le sens de la
-   gravité**, le sens en x alternant avec `parity`, en sautant la portion de
-   rangée d'un bloc de veille endormi. Pour chaque cellule non vide, non
-   figée, dont `clock` ≠ `parity` : `clock = parity`, puis `update()`.
-   Le saut avance l'indice du nombre de cellules restantes dans le bloc
-   endormi, selon le sens horizontal ; l'incrément de boucle passe au suivant.
+   gravité**, le sens en x alternant avec `parity`. Une rangée du bloc est
+   parcourue **par portions de `CHUNK` cellules** (une colonne de bloc de
+   veille), dans le sens du balayage : `awake` et `stir` ne changent pas à
+   l'intérieur d'une portion, et une portion endormie se saute d'un coup.
+   Pour chaque cellule non vide, non figée, dont `F_CLOCK` ≠ `parity` :
+   `F_CLOCK = parity`, puis `update()`.
 3. `update()` : d'abord un `switch` sur les ids à règle propre (feu, lave,
    acide, TNT, étincelle…), sinon mouvement générique selon `kind`
    (`powder` / `liquid` / `gas`, `static` ne bouge pas).
@@ -82,15 +94,19 @@ tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
    vide ou du gaz se trouve à moins de 15 cellules : au-delà, un fil d'une
    autre phase peut écrire. Une très longue colonne garde donc une rangée
    trouée toutes les 16 environ. Une cellule posée sur une cellule différée
-   est différée aussi (`held`). `swap()` efface la marque de la place
+   est différée aussi (`F_HELD`). `swap()` efface la marque de la place
    d'arrivée : une cellule différée qu'un liquide plus dense passe dessous a
    bougé, et sa place d'avant porte ce qui l'a remplacée — qui, rejoué par
    `release()`, faisait un pas de trop.
-4. `release()` : les cellules différées, triées dans l'ordre du balayage
-   (celles du bas d'abord) et jouées seules, avec une graine à elles
+4. `release()` : les cellules différées, dans l'ordre du balayage (celles du
+   bas d'abord) et jouées seules, avec une graine à elles
    (`mix(tick ^ 0x27d4eb2f)`) : ni le nombre de fils ni l'ordre où ils les
-   ont posées (`waiting`, `CTL.held`) ne comptent. Une place dont `held` a
-   été effacé est sautée.
+   ont posées ne comptent. Cet ordre se retrouve en balayant les rangées et
+   les portions que `hold()` a marquées (`heldRow`, `heldSeg`), et non en
+   triant une liste de cellules : un chantier 1280×720 en diffère 28 000 par
+   tick, et le tri seul coûtait 1,8 ms. Une place dont `F_HELD` a été effacé
+   est sautée ; aucune ne peut échapper au balayage en route, qui descend
+   quand une cellule poussée descend.
 5. `settle()` : les explosions mises de côté pendant le damier (`blast()`),
    jouées une à une dans l'ordre du balayage, au souffle de leur matière
    (`BLAST`). Une charge déjà emportée par une voisine ne saute plus.
@@ -107,7 +123,7 @@ tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
 Chaque passe (une phase du damier, une passe de chaleur) est une liste de
 travaux (`jobs`) que `run()` fait seul ou répartit entre les fils du `pool` —
 voir [Plusieurs fils](#plusieurs-fils). Toucher à l'ordre du balayage ou à
-`clock` introduit des dérives visibles.
+`F_CLOCK` introduit des dérives visibles.
 
 ## Plusieurs fils
 
@@ -133,7 +149,8 @@ au bit près. Ce qui le garantit — et ce qu'une nouvelle règle doit respecter
   `settle()` d'une graine à lui ; l'état global avance d'un cran par tick
   (`xorshift`), quoi que les blocs aient tiré. Jamais d'état partagé tiré
   pendant le damier.
-- **Écritures partagées idempotentes** : `stir` (des 1), `awake[c]` et
+- **Écritures partagées idempotentes** : `stir`, `heldRow` et `heldSeg`
+  (des 1), `awake[c]` et
   `hush[c]` du seul bloc de veille traité, `hero`, le compteur d'explosions
   et `CTL.gust` (des 1) par `Atomics`.
 - **Réglages publiés** : un fil auxiliaire relit gravité, vent, ambiante,
@@ -150,7 +167,7 @@ tout seul. Une passe de moins de quatre travaux ne réveille personne.
 Tout tient dans deux tampons partagés, sans un `postMessage` par passe — il y en
 a sept par tick.
 
-- **La mémoire** (`Memory`) : la taille du bac et dix-huit tampons nommés, en
+- **La mémoire** (`Memory`) : la taille du bac et vingt et un tampons nommés, en
   `SharedArrayBuffer` quand la plateforme le permet (Node, page isolée),
   en `ArrayBuffer` sinon. Un fil auxiliaire fait
   `new Engine(w, h, 1, memory)` : une **vue** sur la même mémoire, qui ne
@@ -159,10 +176,12 @@ a sept par tick.
 - **`control`** (`Int32Array`, cases de `CTL`), lue et écrite par `Atomics`
   seulement : `gen` (génération de passe, c'est là qu'on attend), `job` (le genre
   de travail, `JOB`), `count` (combien), `next` (prochain travail à prendre),
-  `done` (fils qui ont fini), `later` et `held` (compteurs des explosions et des
-  cellules différées — la file `later` a une place par cellule, et `asked`, un
-  octet par cellule, n'y laisse entrer chaque cellule qu'une fois par tick), `hero` (le cœur du héros piloté), `gust` (« il y a de la
-  pression quelque part »).
+  `done` (fils qui ont fini), `later` (compteur des explosions — la file
+  `later` a une place par cellule, et `asked`, un octet par cellule, n'y
+  laisse entrer chaque cellule qu'une fois par tick), `hero` (le cœur du
+  héros piloté), `gust` (« il y a de la pression quelque part »). Les
+  différés n'ont pas de compteur : ils laissent des 1 dans `heldRow` et
+  `heldSeg`, que `release()` relit.
 - **`params`** (`Float64Array`, cases de `PARAM`) : ce que le coordinateur
   **publie** avant le tick (`publish()`) et qu'un fil **relit** avant chaque
   travail (`sync()`) — parité, graine du tick, gravité, vent, ambiante, matière
@@ -226,7 +245,7 @@ milliseconde par tick, au lieu de 30. Un bloc est traité si lui ou un voisin a
   `wake(i)` se pose **avant** le tirage qui peut échouer (acide, sel), et la
   source tire toujours en premier : éveillées, ces règles tirent la même
   suite qu'avant, et l'empreinte n'a pas bougé ;
-- **une cellule qui passe son tour** à cause de `clock` (filet : un grain
+- **une cellule qui passe son tour** à cause de `F_CLOCK` (filet : un grain
   peint dans le vide garde l'horloge quelconque de la cellule vide) ;
 - **un liquide bloqué d'un côté mais libre de l'autre** (`canMove()`) : il ne
   tente qu'un côté par tick, tiré au sort, et resterait suspendu ;
@@ -276,7 +295,7 @@ Invariants :
   les tirages.
 - **`shift(dx)`** (mode exploration, [exploration.md](exploration.md)) fait
   glisser la fenêtre de `dx` colonnes, multiple de `CHUNK`, entre deux ticks
-  seulement. Tout glisse avec la grille : `cells`, `life`, `frozen`, `clock`,
+  seulement. Tout glisse avec la grille : `cells`, `life`, `frozen`, `flags`,
   `noise`, l'élan, et **les deux** tampons de `temp` et de `press` (un bloc
   endormi lit l'un ou l'autre) ; `stir`, `awake`, `was`, `hush` d'autant de
   blocs. La bande neuve est vide, à l'ambiante, sans pression ni grain,
@@ -340,8 +359,11 @@ Invariants :
 - Changer **l'ordre** des tirages d'une règle change l'empreinte, même à
   comportement visible identique. C'est voulu.
 - Rejouer en cours de partie exige les tableaux **plus** `seed`, `scan` et
-  `clock` (une cellule fraîchement peinte garde l'horloge de ce qui l'occupait).
-  C'est pour ça que `clock` est publique et que replay.ts la sérialise. Depuis
+  `flags` (une cellule fraîchement peinte garde l'horloge de ce qui l'occupait).
+  C'est pour ça que `flags` est publique et que replay.ts la sérialise — sous
+  le nom `clock` de l'enregistrement, et aux mêmes octets : entre deux ticks,
+  `F_HELD` est nul partout, donc un enregistrement d'avant se rejoue tel quel.
+  Depuis
   les blocs de veille, `put()` remet toutes les horloges au premier tick : la
   sérialiser ne coûte rien et reste juste si ce réveil change un jour.
 

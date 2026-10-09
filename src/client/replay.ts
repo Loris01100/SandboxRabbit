@@ -84,7 +84,10 @@ const same = (a: Scene, b: Scene): boolean =>
  */
 function snap(e: Engine): { grid: string; clock: string } {
   const grid = encode(e.cells, e.frozen, e.life, e.temp, e.names);
-  const clock = encode(e.clock);
+  // `flags` entre deux ticks, c'est l'horloge seule : `F_HELD` y est à zéro
+  // partout (`release()` l'a rendu). Les octets sont ceux qu'écrivait le
+  // tableau `clock` d'avant — un enregistrement d'alors se rejoue tel quel.
+  const clock = encode(e.flags);
   put(e, grid, clock, e.ambient);
   return { grid, clock };
 }
@@ -96,7 +99,7 @@ function snap(e: Engine): { grid: string; clock: string } {
  */
 export function put(e: Engine, grid: string, clock: string | null, ambient: number): void {
   const n = e.cells.length;
-  if (clock !== null) e.clock.set(decode(clock, n));
+  if (clock !== null) e.flags.set(decode(clock, n));
   e.adopt(decode(grid, n));
   e.frozen.set(decodeFrozen(grid, n));
   e.life.set(decodeLife(grid, n) ?? new Uint8Array(n));

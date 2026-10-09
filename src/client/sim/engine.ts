@@ -337,10 +337,23 @@ BLAST[URANIUM] = NUKE | 256;
 const EXPLOSIVE = new Uint8Array(256);
 for (let id = 0; id < 256; id++) EXPLOSIVE[id] = BLAST[id] > 0 ? 1 : 0;
 
+/**
+ * Les bits de `flags`, un octet par cellule. Deux drapeaux qui tenaient chacun
+ * leur tableau : le balayage les lisait l'un après l'autre, soit deux flux de
+ * mémoire au lieu d'un — et c'est la mémoire, pas le calcul, qui plafonne le
+ * tick dès 1280×720 (docs/agents/performance.md).
+ *
+ * `frozen` et `asked` sont restés dehors : le premier part tel quel dans les
+ * bandes (`Tracker`) et dans le codec, où il se recopie d'un bloc ; le second
+ * est pris par `Atomics.exchange`, qui veut un octet à lui.
+ */
+const F_CLOCK = 1;
+const F_HELD = 2;
+
 /** Les travaux que `run()` répartit entre les fils, exécutés par `job()`. */
 export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, air: 5, gust: 6, hush: 7, wind: 8, stop: 9 } as const;
 /** Cases de `control` (Int32 partagé) : génération, travail, prochain, finis, nombre, différés, héros, de la pression quelque part. */
-export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6, held: 7, gust: 8 } as const;
+export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6, gust: 7 } as const;
 /** Cases de `params` (Float64 partagé) : ce qu'un fil auxiliaire recopie avant chaque travail (`sync`). */
 const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pilot: 6, flip: 7, chosen: 8, airFlip: 9, gusty: 10 } as const;
 
@@ -353,7 +366,7 @@ const PARAM = { parity: 0, seed: 1, gravity: 2, wind: 3, ambient: 4, emit: 5, pi
 export interface Memory {
   width: number;
   height: number;
-  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "pressA" | "pressB" | "windX" | "windY" | "hush" | "clock" | "frozen" | "noise" | "awake" | "stir" | "later" | "asked" | "held" | "waiting" | "jobs" | "control" | "params", ArrayBufferLike>;
+  buffers: Record<"cells" | "life" | "tempA" | "tempB" | "pressA" | "pressB" | "windX" | "windY" | "hush" | "flags" | "frozen" | "noise" | "awake" | "stir" | "later" | "asked" | "heldRow" | "heldSeg" | "jobs" | "control" | "params", ArrayBufferLike>;
 }
 
 /** Le constructeur de tampon à employer : partagé si la plateforme le permet (Node, page isolée). */
@@ -468,8 +481,9 @@ export interface Clip {
  *  - `life`  : compteur de vie (feu, fumée, vapeur) ; pour une `SOURCE`, la
  *              matière qu'elle émet
  *  - `temp`  : température en °C, diffusée à chaque tick
- *  - `clock` : parité de la frame où la cellule a déjà bougé (évite qu'une
- *              cellule descende plusieurs fois dans le même tick)
+ *  - `flags` : drapeaux de la cellule (`F_CLOCK`, `F_HELD`) : la parité de la
+ *              frame où elle a déjà bougé (évite qu'elle descende plusieurs
+ *              fois dans le même tick), et si `hold()` l'a différée
  *  - `frozen`: cellules figées à la main, que la simulation saute
  *
  * Le balayage part du bas et alterne le sens en x d'une frame à l'autre, sinon
@@ -522,10 +536,19 @@ export class Engine {
   private readonly later: Int32Array;
   /** 1 = cellule dont l'explosion est déjà demandée à ce tick ; `settle()` remet à zéro celles qu'il a lues. */
   private readonly asked: Uint8Array;
-  /** 1 = cellule différée à ce tick par `hold()` ; remis à 0 par `release()`. */
-  private readonly held: Uint8Array;
-  /** Les cellules différées du tick, dans l'ordre où les fils les ont posées ; `release()` les trie. */
-  private readonly waiting: Int32Array;
+  /**
+   * Où `hold()` a différé une cellule à ce tick : une rangée, et une rangée
+   * d'un bloc de veille (`y * cols + x >> SHIFT`). `release()` n'a plus qu'à
+   * les parcourir dans l'ordre du balayage pour retrouver les cellules
+   * différées, au lieu de trier une liste — un tas de sable en diffère 28 000
+   * par tick en 1280×720, et le tri seul coûtait 1,8 ms.
+   *
+   * Un fil auxiliaire n'y écrit que des 1, jamais un 0 : deux fils qui
+   * tombent sur la même rangée y écrivent la même chose, et il n'y a rien à
+   * sérialiser. `release()` les remet à zéro, seul, après le damier.
+   */
+  private readonly heldRow: Uint8Array;
+  private readonly heldSeg: Uint8Array;
   /**
    * Les fils auxiliaires, quand il y en a : posé par `Pool.bind()` une fois
    * qu'ils sont prêts. Sans lui, `run()` fait tout le travail ici, au même
@@ -550,8 +573,12 @@ export class Engine {
   /** Blocs du damier par rangée et par colonne (voir `PART`). */
   private readonly parts: number;
   private readonly partRows: number;
-  /** Publique pour le rejeu : sans elle, une partie ne repart pas au même tick. */
-  readonly clock: Uint8Array;
+  /**
+   * Un octet de drapeaux par cellule (`F_CLOCK`, `F_HELD`) : la parité du tick
+   * où la cellule a déjà bougé, et si `hold()` l'a différée. Publique pour le
+   * rejeu : sans la parité, une partie ne repart pas au même tick.
+   */
+  readonly flags: Uint8Array;
   /** 1 = cellule figée : elle ne bouge plus et rien ne peut la pousser. */
   readonly frozen: Uint8Array;
   private parity = 0;
@@ -629,13 +656,12 @@ export class Engine {
       cells: new Shareable(n), life: new Shareable(n), tempA: new Shareable(n * 4), tempB: new Shareable(n * 4),
       pressA: new Shareable(n * 4), pressB: new Shareable(n * 4), hush: new Shareable(chunks),
       windX: new Shareable(n * 4), windY: new Shareable(n * 4),
-      clock: new Shareable(n), frozen: new Shareable(n), noise: new Shareable(n),
+      flags: new Shareable(n), frozen: new Shareable(n), noise: new Shareable(n),
       awake: new Shareable(chunks), stir: new Shareable(chunks),
       // Une demande d'explosion par cellule au plus (`blast()`) : la file tient toujours.
       later: new Shareable(Math.max(64, n) * 4), asked: new Shareable(n), jobs: new Shareable(chunks * 4),
-      // Au pire, toutes les cellules des rangées paires de blocs : la moitié du bac, plus une rangée de blocs.
-      held: new Shareable(n), waiting: new Shareable(((n >> 1) + PART * width) * 4),
-      control: new Shareable(9 * 4), params: new Shareable(11 * 8),
+      heldRow: new Shareable(height), heldSeg: new Shareable(height * this.cols),
+      control: new Shareable(8 * 4), params: new Shareable(11 * 8),
     };
     this.memory = { width, height, buffers: b };
     this.cells = new Uint8Array(b.cells);
@@ -651,15 +677,15 @@ export class Engine {
     this.windX = new Float32Array(b.windX);
     this.windY = new Float32Array(b.windY);
     this.hush = new Uint8Array(b.hush);
-    this.clock = new Uint8Array(b.clock);
+    this.flags = new Uint8Array(b.flags);
     this.frozen = new Uint8Array(b.frozen);
     this.noise = new Int8Array(b.noise);
     this.awake = new Uint8Array(b.awake);
     this.stir = new Uint8Array(b.stir);
     this.later = new Int32Array(b.later);
     this.asked = new Uint8Array(b.asked);
-    this.held = new Uint8Array(b.held);
-    this.waiting = new Int32Array(b.waiting);
+    this.heldRow = new Uint8Array(b.heldRow);
+    this.heldSeg = new Uint8Array(b.heldSeg);
     this.jobs = new Int32Array(b.jobs);
     this.control = new Int32Array(b.control);
     this.params = new Float64Array(b.params);
@@ -785,8 +811,8 @@ export class Engine {
    * rangées ; celles qui entrent sont vidées (vide, `ambient`, sans pression,
    * grain nul), à lui de les remplir (`land()`, ou le chunk rangé).
    *
-   * Entre deux ticks seulement : les tampons du tick (`later`, `held`,
-   * `asked`, mouvements du lapin) y sont vides. Tout le reste glisse avec la
+   * Entre deux ticks seulement : les tampons du tick (`later`, `heldRow`,
+   * `heldSeg`, `F_HELD`, `asked`, mouvements du lapin) y sont vides. Tout le reste glisse avec la
    * grille, **les deux** tampons de `temp` et de `press` compris : un bloc
    * endormi lit l'un ou l'autre selon la passe, et n'en glisser qu'un lui
    * rendait au réveil la chaleur ou la pression d'un autre endroit. Les
@@ -815,7 +841,7 @@ export class Engine {
       }
     };
     const air = this.air;
-    for (const a of [this.cells, this.life, this.frozen, this.clock, this.noise]) slide(a, w, h, dx, 0);
+    for (const a of [this.cells, this.life, this.frozen, this.flags, this.noise]) slide(a, w, h, dx, 0);
     // Tant que rien n'a soufflé (`CTL.gust` à 0), pression et élan sont nuls
     // partout, dans les deux tampons : un bloc qui se calme est remis à zéro
     // (`airChunk()`, `hushChunk()`), un bloc endormi l'est déjà, et `puff()`
@@ -874,7 +900,7 @@ export class Engine {
    * toujours sur la même parité — toutes ses cellules passaient leur tour.
    */
   private rouse(): void {
-    const { awake, was, stir, cols, rows, clock, width: w, height: h } = this;
+    const { awake, was, stir, cols, rows, flags, width: w, height: h } = this;
     was.set(awake);
     awake.fill(0);
     for (let cy = 0; cy < rows; cy++) {
@@ -893,7 +919,9 @@ export class Engine {
       if (!awake[c] || was[c]) continue;
       const x0 = (c % cols) << SHIFT, y0 = Math.trunc(c / cols) << SHIFT;
       const x1 = Math.min(w, x0 + CHUNK), y1 = Math.min(h, y0 + CHUNK);
-      for (let y = y0; y < y1; y++) clock.fill(before, y * w + x0, y * w + x1);
+      // `before` seul, et non un masque : entre deux ticks, `F_HELD` est
+      // partout à zéro (`release()` l'a rendu), et `rouse()` ouvre le tick.
+      for (let y = y0; y < y1; y++) flags.fill(before, y * w + x0, y * w + x1);
     }
   }
 
@@ -932,7 +960,7 @@ export class Engine {
     return this.parity;
   }
 
-  /** À poser avec `clock` : les deux ensemble disent qui a déjà bougé. */
+  /** À poser avec `flags` : les deux ensemble disent qui a déjà bougé. */
   set scan(value: number) {
     this.parity = value & 1;
   }
@@ -1164,13 +1192,13 @@ export class Engine {
   }
 
   private swap(a: number, b: number): void {
-    // Une cellule différée qu'on pousse ne rejouera pas à sa place d'avant (`release()`).
-    this.held[b] = 0;
     const c = this.cells[a]; this.cells[a] = this.cells[b]; this.cells[b] = c;
     const l = this.life[a]; this.life[a] = this.life[b]; this.life[b] = l;
     const t = this.temp[a]; this.temp[a] = this.temp[b]; this.temp[b] = t;
-    this.clock[a] = this.parity;
-    this.clock[b] = this.parity;
+    const f = this.flags, p = this.parity;
+    f[a] = (f[a] & ~F_CLOCK) | p;
+    // Une cellule différée qu'on pousse ne rejouera pas à sa place d'avant (`release()`).
+    f[b] = (f[b] & ~(F_CLOCK | F_HELD)) | p;
     this.wake(a);
     this.wake(b);
   }
@@ -1219,7 +1247,6 @@ export class Engine {
     const tick = this.state;
     this.tickSeed = mix(tick);
     Atomics.store(this.control, CTL.later, 0);
-    Atomics.store(this.control, CTL.held, 0);
     this.gusty = Atomics.load(this.control, CTL.gust) === 1;
     this.publish();
     for (let p = 0; p < 4; p++) {
@@ -1327,38 +1354,45 @@ export class Engine {
    * alternant d'un tick à l'autre, en sautant la portion de rangée d'un bloc
    * de veille endormi. Le tirage repart de la graine du bloc.
    *
-   * Une cellule qui passe son tour à cause de `clock` tient son bloc éveillé
+   * Une cellule qui passe son tour à cause de `F_CLOCK` tient son bloc éveillé
    * au tick suivant. Un bloc qui a dormi n'a plus touché à ses horloges, et
    * une cellule vide n'y touche jamais : au réveil (gravité retournée, grain
    * peint dans le vide), la moitié du temps tout le bloc passait son tour,
    * n'écrivait rien, et se rendormait — le sable restait collé au plafond.
    */
   private block(b: number): void {
-    const { width: w, height: h, cells, frozen, clock, life, awake, stir, cols, parity } = this;
+    const { width: w, height: h, cells, frozen, flags, life, awake, stir, cols, parity } = this;
     const x0 = (b % this.parts) << PART_SHIFT, y0 = Math.trunc(b / this.parts) << PART_SHIFT;
     const x1 = Math.min(w, x0 + PART), y1 = Math.min(h, y0 + PART);
     this.state = mix(this.tickSeed ^ Math.imul(b + 1, 0x9e3779b1));
     const leftToRight = parity === 0;
     const down = this.fall === 1;
+    // Une rangée du bloc, découpée en portions de bloc de veille (`CHUNK`) :
+    // `awake` et `stir` ne changent pas d'une cellule à l'autre d'une même
+    // portion, et les relire par cellule faisait le quart du balayage. `x0`
+    // est un multiple de `PART`, donc de `CHUNK` : les portions tombent juste.
+    const segs = (x1 - x0 + CHUNK - 1) >> SHIFT;
     for (let k = y0; k < y1; k++) {
       const y = down ? y1 - 1 - (k - y0) : k;
-      const row = (y >> SHIFT) * cols;
-      for (let j = x0; j < x1; j++) {
-        const x = leftToRight ? j : x1 - 1 - (j - x0);
-        const c = row + (x >> SHIFT);
-        if (!awake[c]) {
-          j += leftToRight ? (CHUNK - 1) - (x & (CHUNK - 1)) : x & (CHUNK - 1);
-          continue;
+      const row = (y >> SHIFT) * cols, base = y * w;
+      for (let m = 0; m < segs; m++) {
+        const lo = x0 + ((leftToRight ? m : segs - 1 - m) << SHIFT);
+        const c = row + (lo >> SHIFT);
+        if (!awake[c]) continue;
+        const hi = Math.min(x1, lo + CHUNK);
+        for (let j = lo; j < hi; j++) {
+          const x = leftToRight ? j : hi - 1 - (j - lo);
+          const i = base + x;
+          const id = cells[i];
+          if (id === EMPTY) continue;
+          if (frozen[i]) continue; // figée : aucune règle ne s'applique
+          const f = flags[i], ticked = (f & F_CLOCK) === parity;
+          if (ticked || ACTIVE[id] || (id === METAL && life[i] > 0)) stir[c] = 1;
+          if (ticked) continue;
+          flags[i] = (f & ~F_CLOCK) | parity;
+          if (FALLS[id] && this.hold(i, x, y)) continue;
+          this.update(i, x, y, id);
         }
-        const i = y * w + x;
-        const id = cells[i];
-        if (id === EMPTY) continue;
-        if (frozen[i]) continue; // figée : aucune règle ne s'applique
-        if (clock[i] === parity || ACTIVE[id] || (id === METAL && life[i] > 0)) stir[c] = 1;
-        if (clock[i] === parity) continue;
-        clock[i] = parity;
-        if (FALLS[id] && this.hold(i, x, y)) continue;
-        this.update(i, x, y, id);
       }
     }
   }
@@ -1381,23 +1415,24 @@ export class Engine {
    * différée l'est aussi : elle ne peut tomber qu'après elle.
    */
   private hold(i: number, x: number, y: number): boolean {
-    const { fall, width: w, cells, clock, frozen, parity } = this;
+    const { fall, width: w, cells, flags, frozen, parity } = this;
     const below = y + fall;
     if (below < 0 || below >= this.height) return false;
     const j = i + fall * w;
-    if (!this.held[j]) {
+    if (!(flags[j] & F_HELD)) {
       if ((y >> PART_SHIFT) & 1 || below >> PART_SHIFT === y >> PART_SHIFT) return false;
-      if (!FALLS[cells[j]] || clock[j] === parity || frozen[j]) return false;
+      if (!FALLS[cells[j]] || (flags[j] & F_CLOCK) === parity || frozen[j]) return false;
       for (let k = 1; ; k++) {
         const yy = below + k * fall;
         if (k === 15 || yy < 0 || yy >= this.height) return false;
         const c = yy * w + x, kind = KIND[cells[c]];
         if (kind === KINDS.empty || kind === KINDS.gas) break;
-        if (!FALLS[cells[c]] || clock[c] === parity || frozen[c]) return false;
+        if (!FALLS[cells[c]] || (flags[c] & F_CLOCK) === parity || frozen[c]) return false;
       }
     }
-    this.held[i] = 1;
-    this.waiting[Atomics.add(this.control, CTL.held, 1)] = i;
+    flags[i] |= F_HELD;
+    this.heldRow[y] = 1;
+    this.heldSeg[y * this.cols + (x >> SHIFT)] = 1;
     return true;
   }
 
@@ -1406,29 +1441,41 @@ export class Engine {
    * balayage (celles du bas d'abord) : ce qui ne dépend ni du nombre de fils
    * ni de l'ordre où ils les ont posées.
    *
-   * Une place dont `held` a été effacé est sautée : `swap()` a déplacé la
+   * Cet ordre se retrouve en balayant les rangées et les blocs où `hold()` a
+   * dit avoir différé quelque chose (`heldRow`, `heldSeg`), plutôt qu'en
+   * triant la liste des cellules. Un chantier 1280×720 en diffère 28 000 par
+   * tick : le tri seul coûtait 1,8 ms, et chaque différé un `Atomics.add`
+   * pour prendre sa place dans la liste.
+   *
+   * Une place dont `F_HELD` a été effacé est sautée : `swap()` a déplacé la
    * cellule différée entre-temps (un liquide plus dense passé dessous), et sa
    * place porte maintenant ce qui l'a remplacée — qui faisait sinon un pas de
    * trop. La cellule différée, elle, a été bougée comme toute cellule qu'on
-   * pousse : elle attend le tick suivant.
+   * pousse : elle attend le tick suivant. Aucune ne peut échapper au balayage
+   * en route : `release()` descend, une cellule poussée l'est vers une rangée
+   * déjà vue, et `swap()` lui retire son drapeau en la poussant.
    */
   private release(): void {
-    const count = Atomics.load(this.control, CTL.held);
-    if (count === 0) return;
-    const { width: w, height: h, held, cells, frozen } = this;
+    const { width: w, height: h, cols, heldRow, heldSeg, flags, cells, frozen } = this;
     const down = this.fall === 1, leftToRight = this.parity === 0;
-    const order = this.waiting.subarray(0, count);
-    for (let k = 0; k < count; k++) {
-      const at = order[k], x = at % w, y = Math.trunc(at / w);
-      order[k] = (down ? h - 1 - y : y) * w + (leftToRight ? x : w - 1 - x);
-    }
-    order.sort();
-    for (let k = 0; k < count; k++) {
-      const ry = Math.trunc(order[k] / w), rx = order[k] - ry * w;
-      const x = leftToRight ? rx : w - 1 - rx, y = down ? h - 1 - ry : ry, i = y * w + x;
-      if (!held[i]) continue; // déplacée par `swap()` : voir plus haut
-      held[i] = 0;
-      if (cells[i] !== EMPTY && !frozen[i]) this.update(i, x, y, cells[i]);
+    for (let k = 0; k < h; k++) {
+      const y = down ? h - 1 - k : k;
+      if (!heldRow[y]) continue;
+      heldRow[y] = 0;
+      const row = y * cols, base = y * w;
+      for (let m = 0; m < cols; m++) {
+        const cx = leftToRight ? m : cols - 1 - m;
+        if (!heldSeg[row + cx]) continue;
+        heldSeg[row + cx] = 0;
+        const lo = cx << SHIFT, hi = Math.min(w, lo + CHUNK);
+        for (let j = lo; j < hi; j++) {
+          const x = leftToRight ? j : hi - 1 - (j - lo);
+          const i = base + x;
+          if (!(flags[i] & F_HELD)) continue; // déplacée par `swap()` : voir plus haut
+          flags[i] &= ~F_HELD;
+          if (cells[i] !== EMPTY && !frozen[i]) this.update(i, x, y, cells[i]);
+        }
+      }
     }
   }
 
@@ -2036,7 +2083,7 @@ export class Engine {
     this.cells[to] = id;
     this.life[to] = this.life[from];
     this.temp[to] = this.temp[from];
-    this.clock[to] = this.parity; // le débris a déjà bougé ce tick
+    this.flags[to] = (this.flags[to] & ~F_CLOCK) | this.parity; // le débris a déjà bougé ce tick
     this.cells[from] = EMPTY;
     this.life[from] = 0;
     return true;
@@ -2916,7 +2963,7 @@ export class Engine {
       const j = to[k];
       cells[j] = id[k];
       life[j] = this.moveLife[k];
-      this.clock[j] = this.parity; // il a bougé ce tick, ses cellules aussi
+      this.flags[j] = (this.flags[j] & ~F_CLOCK) | this.parity; // il a bougé ce tick, ses cellules aussi
     }
     for (let k = 0; k < size && carried > 0; k++) {
       const j = from[k];
@@ -2924,7 +2971,7 @@ export class Engine {
       carried--;
       cells[j] = this.carryId[carried];
       life[j] = this.carryLife[carried];
-      this.clock[j] = this.parity;
+      this.flags[j] = (this.flags[j] & ~F_CLOCK) | this.parity;
     }
     return true;
   }

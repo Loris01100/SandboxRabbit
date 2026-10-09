@@ -297,7 +297,7 @@ function volley(e: Engine): void {
 const AIR_MODES = [
   { mode: 0, name: "Rust, f64 (copie)" },
 ];
-const GUST = 8; // CTL.gust d'engine.ts
+const GUST = 7; // CTL.gust d'engine.ts
 
 for (const [name, W, H] of [["salve", 1920, 1080], ["salve", 1917, 1077]] as const) {
   const N = W * H, chunks = Math.ceil(W / 16) * Math.ceil(H / 16);

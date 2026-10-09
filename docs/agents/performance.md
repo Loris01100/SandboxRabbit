@@ -28,6 +28,22 @@ machine (le bench passe de 2,8 à 5 ms d'une exécution à l'autre sur un poste
 occupé). Relancer, prendre le minimum de plusieurs exécutions, et comparer sur la
 même machine.
 
+**`npm run drift` lui-même se fait avoir sur un portable.** Il mesure la base
+puis ici, l'une après l'autre : sur une machine qui chauffe, la seconde paie la
+première. Un `drift` a annoncé quatre scènes à +34 à +66 % ; relancé, les
+**mêmes** scènes sortaient à −15 à −36 %, et mesurées une par une dans des
+processus séparés et alternés elles étaient neutres ou plus rapides. Deux
+pièges à connaître :
+
+- un rouge isolé de `drift` se **relance** avant de se croire ;
+- ne pas comparer deux moteurs **dans le même processus** (deux imports du
+  module) : les deux se partagent le cache et le tas, et le second mesuré
+  paraît plus lent qu'il n'est. Un processus par mesure, en alternance.
+
+Ce qui tranche vraiment : un rouge qui revient au même endroit, ou un profil
+(`--cpu-prof`) où le temps propre a bougé **dans la fonction touchée** — un
+écart réparti sur des fonctions qu'on n'a pas modifiées est du bruit.
+
 ## Trouver ce qui coûte
 
 `node --cpu-prof` sur un script qui fait tourner une scène, puis additionner le
@@ -44,6 +60,24 @@ savoir pour lire le résultat :
 
 C'est ainsi que la lave a été vue relisant ses quatre voisines dans `ignite()`
 sans rien d'inflammable autour : 40 % du tick d'un lac qui coule.
+
+## Ce qui plafonne le tick : la mémoire, pas le calcul
+
+Mesuré sur un Ryzen 5 7520U (4 cœurs, 8 fils) :
+
+- `npm run directions` donne ×1,3 à ×1,5 seulement en passant de 1 à 4 ou 8
+  cœurs, **sur le noyau sable nu** — où il n'y a ni barrière ni passe
+  sérielle à blâmer. Ce n'est pas Amdahl : c'est la bande passante ;
+- l'état par cellule fait 29 octets (`cells`, `life`, deux tampons de `temp`,
+  deux de `press`, `windX`/`windY`, `flags`, `frozen`, `noise`, `asked`),
+  plus les 4 de la file `later`. En 1920×1080 cela fait **près de 70 Mo**,
+  pour 2 à 4 Mo de L3 : ce qu'un tick relit vient de la RAM, chaque fois ;
+- le vrai moteur coûte 128,8 ns par cellule éveillée, le noyau sable nu 17,6.
+
+D'où deux consignes pour qui optimise le chemin chaud : **réduire le nombre de
+flux de mémoire** qu'une passe lit par cellule (c'est ce qu'a fait `flags`), et
+se méfier d'un gain de parallélisme attendu sur une grosse grille — il n'y est
+pas.
 
 ## Les deux leviers qui ont tout changé
 
@@ -82,6 +116,7 @@ parallèle**. Le reste (micro-optimisations, portage) vient après.
 | Rayons de `FlatLight` dans un fil à lui (sim/flatlight-worker.ts) : la page ne garde que la collecte | page : ~4,5 ms de rayons à chaque éclairage → collecte 0,3 à 0,9 ms ; la grille passe de 80 à 160 texels de large (rayons ~50 ms, hors de la page) | [rendu.md](rendu.md#le-secours-2d) |
 | Glissement de la fenêtre d'exploration : la page fait glisser son miroir (`glide()`) au lieu de tout recevoir, chunk sortant encodé une image plus tard et chunk rangé décodé d'avance, `lay()` et `paste()` par rangées, grain précalculé, pression glissée seulement s'il a soufflé | frame du glissement (4 fils, héros qui marche) 16–25 → 9–13 ms ; glissement seul 11–19 → 5–6 ms ; décalage au bench 4 → 1,1 ms ; plus de 11 Mo par chunk traversé | [exploration.md](exploration.md#images-sautées--réglé) |
 | Mode exploration chargé à la demande (sim/explore.ts, `import()` dans le Worker, Workers bâtis en modules ES) | moteur 81 647 → 77 456 octets (plafond 81 920) ; `explore-*.js` 4 822 octets, au premier clic sur Explorer | [exploration.md](exploration.md) |
+| `flags` : `clock` et `held` fondus en un octet de drapeaux par cellule (un flux de mémoire de moins par cellule balayée) ; `block()` ne relit plus `awake` et `stir` qu'une fois par portion de `CHUNK` cellules au lieu d'une fois par cellule (21 % du temps propre du tick était dans ce balayage, dont 44 % des cellules visitées sont vides) ; `release()` retrouve l'ordre du balayage en relisant deux tableaux de drapeaux (`heldRow`, `heldSeg`) au lieu de trier la liste des différés — 28 000 par tick en 1280×720, 1,8 ms de tri et un `Atomics.add` chacun | tick 320×180 2,34 → 1,95 ms, 640×360 7,9 → 5,4, 1280×720 22,7 → 20,9, 1920×1080 50,5 → 43,5 (`npm run drift`, même machine, les trois ensemble) ; `waiting` (1,8 Mo en 1080p) et un octet par cellule en moins | [simulation.md](simulation.md#un-tick-step) |
 | Plafond de fils porté de 7 à 14 | bac plein de nanites en 1080p : 28 ms à 7 fils → 19 à 15 (16 cœurs) | `helpers()` de sim/worker.ts |
 
 ## Les pistes mesurées et laissées de côté
