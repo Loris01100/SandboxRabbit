@@ -242,12 +242,15 @@ const KNOWN = new Uint8Array(256);
 const SPREAD = new Uint8Array(256);
 const LIFE = new Uint8Array(256);
 const FLAMMABLE = new Float64Array(256);
+/** Température d'une matière tout juste posée (`spawn`, sinon `heat`) ; NaN : `set()` garde celle de la cellule. */
+const SPAWN = new Float32Array(256).fill(Number.NaN);
 for (const key of Object.keys(MATERIALS)) {
   const m = MATERIALS[Number(key)];
   KNOWN[m.id] = 1;
   SPREAD[m.id] = m.spread ?? 1;
   LIFE[m.id] = m.life ?? 0;
   FLAMMABLE[m.id] = m.flammable ?? 0;
+  SPAWN[m.id] = m.spawn ?? m.heat ?? Number.NaN;
   KIND[m.id] = KINDS[m.kind];
   DENSITY[m.id] = m.density;
   if (m.heat !== undefined) HEAT[m.id] = m.heat;
@@ -984,9 +987,9 @@ export class Engine {
     this.cells[i] = id;
     this.frozen[i] = 0; // repeindre par-dessus libère la cellule
     // Une source garde dans `life` la matière qu'elle crache.
-    this.life[i] = id === SOURCE ? this.emit : (MATERIALS[id].life ?? 0);
-    const spawn = MATERIALS[id].spawn ?? MATERIALS[id].heat;
-    if (spawn !== undefined) this.temp[i] = spawn;
+    this.life[i] = id === SOURCE ? this.emit : LIFE[id];
+    const spawn = SPAWN[id];
+    if (!Number.isNaN(spawn)) this.temp[i] = spawn;
   }
 
   /**
@@ -2222,7 +2225,7 @@ export class Engine {
     if (this.cells[j] !== METAL || this.life[j] !== 0) return;
     this.wake(j);
     this.cells[j] = SPARK;
-    this.life[j] = MATERIALS[SPARK].life!;
+    this.life[j] = LIFE[SPARK];
   }
 
   /** Pile : une étincelle dans le métal voisin toutes les `PULSE` frames. */
@@ -3223,7 +3226,7 @@ export class Engine {
   private convert(i: number, into: MaterialId): void {
     this.wake(i);
     this.cells[i] = into;
-    this.life[i] = MATERIALS[into].life ?? 0;
+    this.life[i] = LIFE[into];
   }
 
 }
