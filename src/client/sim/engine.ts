@@ -494,6 +494,11 @@ export interface Clip {
  */
 export class Engine {
   readonly width: number;
+  /**
+   * `1 / width`, pour `wake()` : une division flottante par cellule déplacée
+   * (deux par `swap()`) coûtait ~5 % du tick d'un chantier 1280×720.
+   */
+  private readonly perRow: number;
   readonly height: number;
   readonly cells: Uint8Array;
   readonly life: Uint8Array;
@@ -648,6 +653,7 @@ export class Engine {
     // Un xorshift32 meurt sur 0 : toute graine nulle devient 1.
     this.state = seed >>> 0 || 1;
     this.width = width;
+    this.perRow = 1 / width;
     this.height = height;
     const n = width * height;
     this.cols = Math.ceil(width / CHUNK);
@@ -886,9 +892,15 @@ export class Engine {
     for (let cy = 0; cy < rows; cy++) stir.fill(1, cy * cols + c0, cy * cols + c1);
   }
 
-  /** Le bloc de la cellule `i` a changé : il est diffusé à ce tick et balayé au suivant, avec ses voisins. */
+  /**
+   * Le bloc de la cellule `i` a changé : il est diffusé à ce tick et balayé au
+   * suivant, avec ses voisins. La rangée vient d'une multiplication par
+   * `perRow` : le demi ajouté tient le produit à au moins `0,5 / width` d'un
+   * entier, bien au-delà de l'erreur d'arrondi, d'où la même rangée qu'avec
+   * la division.
+   */
   private wake(i: number): void {
-    const y = Math.trunc(i / this.width);
+    const y = Math.trunc((i + 0.5) * this.perRow);
     this.stir[(y >> SHIFT) * this.cols + ((i - y * this.width) >> SHIFT)] = 1;
   }
 
