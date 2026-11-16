@@ -22,11 +22,11 @@
     "loc": "node test/loc.ts"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.62.3",
-    "@types/node": "^26.6.3",
-    "playwright": "^1.63.0",
+    "@cloudflare/vite-plugin": "^1.66.0",
+    "@types/node": "^26.6.6",
+    "playwright": "^1.64.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.2",
+    "vite": "^8.3.5",
     "wrangler": "^4.145.0"
   },
   "dependencies": {
