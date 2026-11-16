@@ -13,7 +13,7 @@
 import { Engine } from "./engine.ts";
 import { Tracker, type Patch } from "./render.ts";
 import type { Pool } from "./pool.ts";
-import { encode } from "./codec.ts";
+import { encode, encoding } from "./codec.ts";
 import { EMBER, FIRE, HERO, HERO_SLOTS, LAVA, SAND, STONE, WATER, type MaterialId } from "./materials.ts";
 import { applyGesture, heroName, weather, type Gesture } from "../gestures.ts";
 import { Player, Recorder, fair, isGesture, put, vet, vetBeats, type Beat, type Recording } from "../replay.ts";
@@ -94,6 +94,8 @@ const UNDO_BYTES = 64 * 1024 * 1024;
 type Snapshot = { cells: Uint8Array; life: Uint8Array; temp: Float32Array; frozen: Uint8Array };
 
 const STATS = 500;
+/** En combien de frames le recensement des stats fait le tour de la grille (`count()`). */
+const CENSUS = 8;
 /** Ce que compte le fond sonore : 1 ce qui crépite (flamme, braise), 2 ce qui gronde (lave). */
 const HUM = new Uint8Array(256);
 HUM[FIRE] = HUM[EMBER] = 1;
@@ -159,6 +161,16 @@ export class Sandbox {
   private sinceGrid = 0;
   /** Le bac a changé depuis la dernière copie de secours (`grid`) : un ordre, ou un tick où quelque chose était éveillé. */
   private touched = true;
+  /**
+   * Copie de secours en cours d'encodage (`encoding()` de codec.ts), une
+   * étape par frame, sur des copies de la grille prises au même tick ; et la
+   * largeur de ce bac-là.
+   */
+  private backup: { steps: Generator<void, string, void>; width: number } | null = null;
+  /** Le recensement en cours (`count()`) : où il en est de la grille, et ses comptes. */
+  private counting = { at: 0, filled: 0, fire: 0, lava: 0 };
+  /** Le dernier recensement complet, que portent les stats. */
+  private census = { filled: 0, fire: 0, lava: 0 };
   /**
    * Hôte d'un salon : la partie diffusée aux invités. C'est un enregistrement
    * comme un autre, vidé à chaque envoi — chaque invité simule de son côté en
@@ -301,6 +313,31 @@ export class Sandbox {
    * `slice` : ce plafond, plus large quand les frames sont plus espacées
    * (images limitées à 30 par seconde, worker.ts).
    */
+  /**
+   * Compte un `CENSUS`-ième de la grille : cellules pleines, feu et lave
+   * (le fond sonore). D'un bloc, toutes les 500 ms, ce comptage prenait
+   * 5,7 ms en 1920×1080 et faisait déborder une image sur trente. Un tour
+   * complet devient `census` ; les stats ont donc jusqu'à `CENSUS` frames de
+   * retard, invisible sur un compteur et un bruit de fond.
+   */
+  private count(): void {
+    const { cells } = this.engine, c = this.counting;
+    if (c.at >= cells.length) c.at = 0;
+    const end = Math.min(cells.length, c.at + Math.ceil(cells.length / CENSUS));
+    for (let i = c.at; i < end; i++) {
+      const id = cells[i];
+      if (id === 0) continue;
+      c.filled++;
+      const hum = HUM[id];
+      if (hum === 1) c.fire++;
+      else if (hum === 2) c.lava++;
+    }
+    c.at = end;
+    if (end < cells.length) return;
+    this.census = { filled: c.filled, fire: c.fire, lava: c.lava };
+    this.counting = { at: 0, filled: 0, fire: 0, lava: 0 };
+  }
+
   frame(ms: number, slice = SLICE): void {
     this.slice = slice;
     const budget = ticksFor(this.knobs.speed, ms, this.pending);
@@ -347,19 +384,11 @@ export class Sandbox {
     noise.booms = noise.loudest = noise.at = noise.bolts = noise.boltAt = 0;
     this.send({ t: "frame", patches, w, h, ambient: this.engine.ambient, probe, hero, heard, origin: this.voyage?.x0 ?? null });
 
+    this.count();
     this.sinceStats += ms;
     if (this.sinceStats >= STATS) {
       this.sinceStats = 0;
-      const { cells } = this.engine;
-      let filled = 0, fire = 0, lava = 0;
-      for (let i = 0; i < cells.length; i++) {
-        const id = cells[i];
-        if (id === 0) continue;
-        filled++;
-        const hum = HUM[id];
-        if (hum === 1) fire++;
-        else if (hum === 2) lava++;
-      }
+      const { filled, fire, lava } = this.census;
       // En pause, plus rien ne crépite : le fond sonore se tait avec le bac.
       const on = this.knobs.running;
       this.send({ t: "stats", filled, hum: on ? { fire, lava, rain: this.knobs.weather } : { fire: 0, lava: 0, rain: 0 } });
@@ -375,13 +404,24 @@ export class Sandbox {
     this.sinceGrid += ms;
     // Pas dans la frame qui vient de glisser : la copie de secours encode toute
     // la grille (plusieurs ms en 1280×720), et tombait parfois sur elle.
-    if (this.touched && !slid && this.sinceGrid >= GRID * Math.max(1, this.engine.cells.length / GRID_CELLS)) {
+    if (this.backup) {
+      const step = this.backup.steps.next();
+      if (step.done) {
+        this.send({ t: "grid", full: step.value, w: this.backup.width, voyage: false });
+        this.backup = null;
+      }
+    } else if (this.touched && !slid && this.sinceGrid >= GRID * Math.max(1, this.engine.cells.length / GRID_CELLS)) {
       this.sinceGrid = 0;
       this.touched = false;
       // En exploration, la partie entière (sim/explore.ts, `save()`) : la
-      // fenêtre seule reviendrait sans le monde déjà parcouru.
-      const full = this.encoded();
-      this.send({ t: "grid", full: this.voyage ? this.voyage.save(this.engine, full) : full, w: this.engine.width, voyage: this.voyage !== null });
+      // fenêtre seule reviendrait sans le monde déjà parcouru. D'un bloc :
+      // la fenêtre peut glisser entre deux étapes, et `save()` lit le moteur.
+      if (this.voyage) {
+        this.send({ t: "grid", full: this.voyage.save(this.engine, this.encoded()), w: this.engine.width, voyage: true });
+      } else {
+        const { cells, frozen, life, temp, names, width } = this.engine;
+        this.backup = { steps: encoding(cells.slice(), frozen.slice(), life.slice(), temp.slice(), new Map(names)), width };
+      }
     }
 
     this.sinceTurn += ms;

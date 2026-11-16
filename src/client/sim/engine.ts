@@ -717,6 +717,15 @@ export class Engine {
     Atomics.store(this.control, CTL.hero, at);
   }
 
+  /**
+   * Y a-t-il de la pression quelque part ? Sinon `press` est nulle partout
+   * (`CTL.gust`, voir `breathe()`) : `Tracker.take()` ne l'envoie pas, 8 Mo
+   * par frame en 1920×1080 tout changé.
+   */
+  get windy(): boolean {
+    return Atomics.load(this.control, CTL.gust) === 1;
+  }
+
   /** Sens de la gravité : 1 vers le bas, -1 vers le haut. La retourner réveille tout le bac. */
   get gravity(): 1 | -1 {
     return this.fall;

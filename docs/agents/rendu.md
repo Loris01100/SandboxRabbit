@@ -41,7 +41,7 @@ décale tout ce qui suit, c'est voulu — un seul endroit à changer.
 | `frozen` | `R8UI` | `usampler2D` | hachures du figé |
 | `noise` | `R8I` | `isampler2D` | grain signé, fixe pour un moteur |
 | `temp` | `R32F` | `sampler2D` | °C **bruts** : arrondir côté Worker coûtait 10 ms par frame en 1920×1080 |
-| `press` | `R32F` | `sampler2D` | pression brute, ramenée à son palier dans le shader |
+| `press` | `R32F` | `sampler2D` | pression brute, ramenée à son palier dans le shader ; envoyée à la carte dans la vue pression seulement (8 Mo par frame en 1920×1080 tout changé) — basculer de vue fait tout recolorier, donc tout renvoyer |
 
 Les textures entières exigent `NEAREST` ; seule la texture d'éclairage est en
 `LINEAR` (elle est étirée). Une taille de grille qui change refait les six

@@ -119,6 +119,11 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   let écarts = 0;
   for (let i = 0; i < page.pixels.length; i++) if (Math.abs(page.pixels[i] - moteur.pixels[i]) > 2) écarts++;
   assert.ok(écarts < page.pixels.length / 1000, `le miroir se colorie comme le moteur, à l'arrondi des températures près (${écarts} canaux écartés)`);
+
+  sim.order({ t: "do", g: { t: "paint", x: 70, y: 5, r: 1, id: SAND, d: 1, over: true } });
+  sim.frame(16);
+  const calme = last(news, "frame")!;
+  assert.ok(calme.patches.length > 0 && calme.patches.every((p) => !p.press), "sans pression nulle part, les bandes ne la portent plus : 8 Mo par frame en 1920×1080");
 }
 
 /**
@@ -538,14 +543,15 @@ const area = (f: Frame): number => f.patches.reduce((s, p) => s + p.w * p.h, 0);
   assert.equal(count(sim.engine, STONE), 0, "« keep » ne regraîne pas");
 }
 
-// Les réglages passent au moteur ; la copie de secours de la grille part quand le bac change.
+// Les réglages passent au moteur ; la copie de secours de la grille part quand
+// le bac change : déclenchée à 250 ms (16 frames), encodée en cinq frames.
 {
   const { sim, news } = bac();
   sim.order({ t: "set", k: { wind: 0.5, ambient: -30, gravity: -1 } });
   assert.equal(sim.engine.wind, 0.5, "le vent est arrivé au moteur");
   assert.equal(sim.engine.ambient, -30, "l'ambiante aussi");
   assert.equal(sim.engine.gravity, -1, "et la gravité");
-  run(sim, 20);
+  run(sim, 25);
   assert.ok(last(news, "grid")!.full.length > 0, "la copie de secours part quand le bac a changé");
   assert.equal(last(news, "grid")!.w, W, "avec la largeur du bac qui l'a faite : rangée sous une autre, elle revenait cisaillée");
 }

@@ -513,6 +513,7 @@ function glScreen(gl: WebGL2RenderingContext): Screen {
         gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, x0);
         gl.pixelStorei(gl.UNPACK_SKIP_ROWS, y0);
         LAYERS.forEach((name, unit) => {
+          if (name === "press" && view !== "air") return;
           gl.activeTexture(gl.TEXTURE0 + unit);
           gl.bindTexture(gl.TEXTURE_2D, textures[unit]);
           gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, x1 - x0, y1 - y0, formats[name][2], formats[name][1], grid[name] as unknown as ArrayBufferView);

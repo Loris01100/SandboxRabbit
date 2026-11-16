@@ -42,7 +42,8 @@ export interface Patch {
   life: Uint8Array;
   frozen: Uint8Array;
   temp: Float32Array;
-  press: Float32Array;
+  /** Absente tant qu'il n'y a de pression nulle part (`Engine.windy`) : le miroir garde la sienne, déjà nulle. */
+  press?: Float32Array;
   noise?: Int8Array;
 }
 
@@ -64,7 +65,7 @@ export function land(m: Mirror, p: Patch): void {
     m.frozen.set(p.frozen.subarray(from, from + p.w), to);
     if (p.noise) m.noise.set(p.noise.subarray(from, from + p.w), to);
     m.temp.set(p.temp.subarray(from, from + p.w), to);
-    m.press.set(p.press.subarray(from, from + p.w), to);
+    if (p.press) m.press.set(p.press.subarray(from, from + p.w), to);
   }
 }
 
@@ -128,6 +129,12 @@ export class Tracker {
   private full = true;
   /** Les bandes de la prochaine frame portent leur grain (`grained()`). */
   private grain = false;
+  /**
+   * Il y avait de la pression à la frame précédente : celle-ci envoie encore
+   * la sienne, où les blocs calmés viennent d'être remis à zéro. Sans ça, le
+   * miroir de la page garderait la dernière onde dans la vue pression.
+   */
+  private aired = true;
 
   constructor(engine: Engine) {
     this.engine = engine;
@@ -160,6 +167,8 @@ export class Tracker {
     const { dirty } = this;
     this.engine.changed(dirty);
     const full = this.full, grained = full || this.grain;
+    const windy = this.engine.windy, aired = full || windy || this.aired;
+    this.aired = windy;
     if (full) { dirty.fill(1); this.full = false; }
     this.grain = false;
     // D'abord les rectangles, pour tailler le tampon d'un coup.
@@ -180,18 +189,20 @@ export class Tracker {
     }
     if (total === 0) return [];
     // Les flottants en tête : leurs vues exigent un décalage multiple de 4.
-    const buffer = claim(total * (8 + 3 + (grained ? 1 : 0)));
-    let floats = 0, bytes = total * 8;
+    const floatSize = aired ? 8 : 4;
+    const buffer = claim(total * (floatSize + 3 + (grained ? 1 : 0)));
+    let floats = 0, bytes = total * floatSize;
     const patches: Patch[] = [];
     for (const [x, y0, pw, ph] of rects) {
       const n = pw * ph;
       const p: Patch = {
         x, y: y0, w: pw, h: ph,
-        temp: new Float32Array(buffer, floats, n), press: new Float32Array(buffer, floats + n * 4, n),
+        temp: new Float32Array(buffer, floats, n),
         cells: new Uint8Array(buffer, bytes, n), life: new Uint8Array(buffer, bytes + n, n),
         frozen: new Uint8Array(buffer, bytes + 2 * n, n),
       };
-      floats += n * 8;
+      if (aired) p.press = new Float32Array(buffer, floats + n * 4, n);
+      floats += n * floatSize;
       bytes += n * 3;
       if (grained) { p.noise = new Int8Array(buffer, bytes, n); bytes += n; }
       for (let r = 0; r < ph; r++) {
@@ -201,7 +212,7 @@ export class Tracker {
         p.frozen.set(frozen.subarray(from, from + pw), to);
         p.noise?.set(noise.subarray(from, from + pw), to);
         p.temp.set(temp.subarray(from, from + pw), to);
-        p.press.set(press.subarray(from, from + pw), to);
+        p.press?.set(press.subarray(from, from + pw), to);
       }
       patches.push(p);
     }

@@ -31,10 +31,32 @@ const STEP = 8;
 const FLOOR = -60;
 
 export function encode(cells: Uint8Array, frozen?: Uint8Array, life?: Uint8Array, temp?: Float32Array, names?: Map<number, string>): string {
+  const steps = encoding(cells, frozen, life, temp, names);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * `encode()` en étapes : rend la main après chaque couche et après la
+ * conversion des températures, cinq étapes de ~4 ms en 1920×1080. La copie
+ * de secours de sandbox.ts en joue une par frame ; d'un bloc, ses 21 ms
+ * faisaient sauter deux images toutes les deux secondes. Les tableaux ne
+ * doivent pas changer d'ici la fin : en passer des copies.
+ */
+export function* encoding(cells: Uint8Array, frozen?: Uint8Array, life?: Uint8Array, temp?: Float32Array, names?: Map<number, string>): Generator<void, string, void> {
   const blocks = [rle(cells)];
   // Les blocs sont positionnels : garder `life` impose d'écrire le figé, même vide.
   if (life && temp) {
-    blocks.push(rle(frozen ?? new Uint8Array(cells.length)), rle(life), rle(bytes(temp)));
+    yield;
+    blocks.push(rle(frozen ?? new Uint8Array(cells.length)));
+    yield;
+    blocks.push(rle(life));
+    yield;
+    const quantized = bytes(temp);
+    yield;
+    blocks.push(rle(quantized));
     if (names?.size) blocks.push(url(String.fromCodePoint(...new TextEncoder().encode(JSON.stringify([...names])))));
   } else if (frozen?.some(Boolean)) {
     blocks.push(rle(frozen));
