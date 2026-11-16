@@ -354,7 +354,7 @@ const F_CLOCK = 1;
 const F_HELD = 2;
 
 /** Les travaux que `run()` répartit entre les fils, exécutés par `job()`. */
-export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, air: 5, gust: 6, hush: 7, wind: 8, stop: 9 } as const;
+export const JOB = { cells: 1, heat: 2, diffuse: 3, settle: 4, air: 5, gust: 6, hush: 7, wind: 8, stop: 9, release: 10 } as const;
 /** Cases de `control` (Int32 partagé) : génération, travail, prochain, finis, nombre, différés, héros, de la pression quelque part. */
 export const CTL = { gen: 0, job: 1, next: 2, done: 3, count: 4, later: 5, hero: 6, gust: 7 } as const;
 /** Cases de `params` (Float64 partagé) : ce qu'un fil auxiliaire recopie avant chaque travail (`sync`). */
@@ -553,7 +553,8 @@ export class Engine {
    *
    * Un fil auxiliaire n'y écrit que des 1, jamais un 0 : deux fils qui
    * tombent sur la même rangée y écrivent la même chose, et il n'y a rien à
-   * sérialiser. `release()` les remet à zéro, seul, après le damier.
+   * sérialiser. `release()` remet à zéro les `heldSeg` de sa bande ; les
+   * `heldRow`, que toutes les bandes relisent, le sont après les deux phases.
    */
   private readonly heldRow: Uint8Array;
   private readonly heldSeg: Uint8Array;
@@ -1239,8 +1240,9 @@ export class Engine {
    * 1. `rouse()` : quels blocs de veille sont éveillés ;
    * 2. le damier : quatre phases de blocs `PART`×`PART` (`block()`), deux
    *    blocs d'une même phase ne se touchant jamais ;
-   * 3. `release()` : les chutes différées par `hold()`, dans l'ordre des
-   *    cellules ;
+   * 3. `release()` : les chutes différées par `hold()`, par bandes de `PART`
+   *    colonnes en deux phases (paires, impaires), dans l'ordre des cellules
+   *    de chaque bande ;
    * 4. `settle()` : les explosions mises de côté, une à une, dans l'ordre des
    *    cellules — elles portent trop loin pour le damier ;
    * 5. la chaleur, en trois passes par bloc de veille (`thermal()`).
@@ -1268,8 +1270,12 @@ export class Engine {
       const count = this.phase(p & 1, p >> 1);
       if (count > 0) this.run(JOB.cells, count);
     }
-    this.state = mix(tick ^ 0x27d4eb2f);
-    this.release();
+    for (let px = 0; px < 2; px++) {
+      let count = 0;
+      for (let s = px; s < this.parts; s += 2) this.jobs[count++] = s;
+      this.run(JOB.release, count);
+    }
+    this.heldRow.fill(0);
     this.state = mix(tick ^ 0x5bd1e995);
     this.settle();
     this.state = xorshift(tick);
@@ -1337,6 +1343,7 @@ export class Engine {
   job(kind: number, item: number): void {
     switch (kind) {
       case JOB.cells: this.block(item); return;
+      case JOB.release: this.release(item); return;
       case JOB.heat: this.heatChunk(item); return;
       case JOB.diffuse: this.diffuseChunk(item); return;
       case JOB.settle: this.settleChunk(item); return;
@@ -1452,9 +1459,13 @@ export class Engine {
   }
 
   /**
-   * Joue les cellules différées par `hold()`, seul et dans l'ordre du
-   * balayage (celles du bas d'abord) : ce qui ne dépend ni du nombre de fils
-   * ni de l'ordre où ils les ont posées.
+   * Joue les cellules différées par `hold()` dans la bande `strip` (`PART`
+   * colonnes), dans l'ordre du balayage (celles du bas d'abord), depuis la
+   * graine de la bande. Les bandes vont aux fils comme les blocs du damier :
+   * paires puis impaires, deux bandes d'une même phase séparées d'une bande
+   * entière. Joué seul sur le fil principal, ce rejeu faisait 46 % d'un tick
+   * 1280×720 sur huit fils dès qu'une masse tombait (100 000 différés par
+   * tick), les sept autres attendant : 6,8 → 4,4 ms par tick.
    *
    * Cet ordre se retrouve en balayant les rangées et les blocs où `hold()` a
    * dit avoir différé quelque chose (`heldRow`, `heldSeg`), plutôt qu'en
@@ -1470,16 +1481,17 @@ export class Engine {
    * en route : `release()` descend, une cellule poussée l'est vers une rangée
    * déjà vue, et `swap()` lui retire son drapeau en la poussant.
    */
-  private release(): void {
+  private release(strip: number): void {
     const { width: w, height: h, cols, heldRow, heldSeg, flags, cells, frozen } = this;
     const down = this.fall === 1, leftToRight = this.parity === 0;
+    this.state = mix(this.tickSeed ^ Math.imul(strip + 1, 0x85ebca6b) ^ 0x27d4eb2f);
+    const c0 = strip << (PART_SHIFT - SHIFT), n = Math.min(cols, c0 + (PART >> SHIFT)) - c0;
     for (let k = 0; k < h; k++) {
       const y = down ? h - 1 - k : k;
       if (!heldRow[y]) continue;
-      heldRow[y] = 0;
       const row = y * cols, base = y * w;
-      for (let m = 0; m < cols; m++) {
-        const cx = leftToRight ? m : cols - 1 - m;
+      for (let m = 0; m < n; m++) {
+        const cx = leftToRight ? c0 + m : c0 + n - 1 - m;
         if (!heldSeg[row + cx]) continue;
         heldSeg[row + cx] = 0;
         const lo = cx << SHIFT, hi = Math.min(w, lo + CHUNK);

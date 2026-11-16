@@ -185,6 +185,11 @@ chute, feu, eau, souffle et circuit) est hachée (FNV-1a sur `cells`, `life` et
 `temp` arrondie) et comparée à une constante. C'est le **contrat
 d'équivalence** du moteur : un portage Rust/WASM devra sortir la même.
 
+Une seconde empreinte, « chute » (160×128, 120 ticks), fait tomber sable,
+eau et huile à travers plusieurs rangées de blocs : la première, en 60×40,
+ne diffère presque rien, et n'avait pas bougé quand `release()` a changé ses
+tirages. C'est elle qui couvre le rejeu des cellules différées.
+
 Elle casse dès qu'une règle change son comportement **ou l'ordre de ses
 tirages**. Quand le changement est voulu :
 

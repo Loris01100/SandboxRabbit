@@ -1405,6 +1405,22 @@ function top(e: Engine, id: MaterialId): number {
   assert.equal(empreinte, "ce7a1a98", `300 ticks depuis la graine 1234 — empreinte obtenue : ${empreinte}`);
   assert.equal(fingerprint(run(1234)), empreinte, "et rejouable : deux fois la même graine, la même grille");
   assert.notEqual(fingerprint(run(9876)), empreinte, "une autre graine donne une autre partie");
+
+  /**
+   * La scène ci-dessus, en 60×40, ne diffère presque rien (`hold()`) : quand
+   * `release()` est passé du fil principal aux bandes, son empreinte n'a pas
+   * bougé. Une masse qui tombe tout droit ne tire rien non plus : il faut de
+   * l'huile qui croise l'eau en tombant, sur plusieurs rangées de blocs et
+   * plusieurs bandes, pour que le rejeu des différés tire au sort.
+   */
+  const chute = new Engine(160, 128, 1234);
+  chute.rect(0, 124, 159, 127, STONE);
+  chute.rect(0, 0, 79, 42, SAND);
+  chute.rect(80, 0, 159, 42, WATER);
+  chute.rect(70, 0, 90, 21, OIL);
+  for (let t = 0; t < 120; t++) chute.step();
+  const empreinteChute = fingerprint(chute);
+  assert.equal(empreinteChute, "36c85c0b",`chute 160×128, 120 ticks — empreinte obtenue : ${empreinteChute}`);
 }
 
 /**

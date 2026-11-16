@@ -62,7 +62,7 @@ Blocs de veille (privés, un octet par bloc de 16×16) : `stir` (bloc écrit ou
 tenu éveillé depuis le dernier tick), `awake` (blocs traités à ce tick),
 `was` (`awake` du tick d'avant). Voir [Blocs de veille](#blocs-de-veille).
 
-Différés du tick (privés, remis à zéro par `release()`) : `heldRow` (un octet
+Différés du tick (privés ; `release()` remet à zéro les `heldSeg` de sa bande, `step()` les `heldRow` après les deux phases) : `heldRow` (un octet
 par rangée) et `heldSeg` (un par rangée et par colonne de bloc de veille) —
 où `hold()` a différé quelque chose.
 
@@ -98,10 +98,15 @@ où `hold()` a différé quelque chose.
    d'arrivée : une cellule différée qu'un liquide plus dense passe dessous a
    bougé, et sa place d'avant porte ce qui l'a remplacée — qui, rejoué par
    `release()`, faisait un pas de trop.
-4. `release()` : les cellules différées, dans l'ordre du balayage (celles du
-   bas d'abord) et jouées seules, avec une graine à elles
-   (`mix(tick ^ 0x27d4eb2f)`) : ni le nombre de fils ni l'ordre où ils les
-   ont posées ne comptent. Cet ordre se retrouve en balayant les rangées et
+4. `release()` : les cellules différées, par bandes de `PART` colonnes
+   réparties entre les fils comme le damier (bandes paires, puis impaires :
+   deux bandes d'une même phase sont séparées d'une bande entière, au-delà
+   des 15 cellules d'une règle). Chaque bande rejoue les siennes dans l'ordre
+   du balayage (celles du bas d'abord), avec sa propre graine
+   (`mix(graine du tick ^ bande ^ 0x27d4eb2f)`) : ni le nombre de fils ni
+   l'ordre où ils les ont posées ne comptent. Jouées seules sur le fil
+   principal, une masse qui tombe en 1280×720 (100 000 différés par tick)
+   en faisait 46 % du tick sur huit fils. Cet ordre se retrouve en balayant les rangées et
    les portions que `hold()` a marquées (`heldRow`, `heldSeg`), et non en
    triant une liste de cellules : un chantier 1280×720 en diffère 28 000 par
    tick, et le tri seul coûtait 1,8 ms. Une place dont `F_HELD` a été effacé
