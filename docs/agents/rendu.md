@@ -148,6 +148,11 @@ Sans WebGL2 (`getContext("webgl2")` nul — le choix est définitif, un canvas n
 qu'un contexte), `flatScreen()` fait tourner le même `Renderer` qu'en test sur le
 miroir, puis un `putImageData` du rectangle changé.
 
+Le repli se signale : `createScreen()` envoie « secours 2D : pas de WebGL2 »
+vers `POST /api/error` (`sendBeacon`, une fois par chargement). Les journaux du
+Worker en donnent la part de joueurs, celle qui dira si la seconde copie du
+coloriage (`Renderer`) mérite encore d'être tenue.
+
 **Il éclaire aussi**, par `FlatLight`
 ([sim/flatlight.ts](../../src/client/sim/flatlight.ts)), qui **ressemble** au
 shader sans en être une copie — les *radiance cascades* demandent des milliers

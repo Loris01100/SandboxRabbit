@@ -44,10 +44,17 @@ export interface Screen {
   detail(width: number): void;
 }
 
-/** L'écran du canvas : WebGL2 s'il le peut, sinon 2D. Un canvas n'a qu'un contexte : le choix est définitif. */
+/**
+ * L'écran du canvas : WebGL2 s'il le peut, sinon 2D. Un canvas n'a qu'un contexte : le choix est définitif.
+ * Le repli sur la 2D part vers `/api/error` : c'est le seul moyen de savoir combien de joueurs vivent
+ * encore du secours, donc si la copie du coloriage dans `Renderer` mérite d'être tenue.
+ * ponytail: le compte se mêle aux vraies erreurs, dans les logs du Worker ; une route `/api/stat` le jour où l'on mesure autre chose.
+ */
 export function createScreen(canvas: HTMLCanvasElement): Screen {
   const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true });
-  return gl ? restartable(canvas, gl) : flatScreen(canvas);
+  if (gl) return restartable(canvas, gl);
+  navigator.sendBeacon?.("/api/error", "secours 2D : pas de WebGL2");
+  return flatScreen(canvas);
 }
 
 /**

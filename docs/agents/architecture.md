@@ -414,8 +414,12 @@ tout passe.
 `unhandledrejection` sur la page, et `error` sur le Worker de simulation
 (`watchErrors(sim)`, appelé par world.ts) : une exception du Worker n'atteint
 jamais le `window` de la page. `reporter()` n'envoie chaque message qu'une fois,
-cinq au plus par visite, coupé à 4 000 caractères. Rien d'autre ne part : ni
-la grille ni rien qui désigne le joueur.
+cinq au plus par visite, coupé à 4 000 caractères. Un seul rapport n'est pas
+une exception : « secours 2D : pas de WebGL2 », envoyé par `createScreen()`
+de screen.ts (hors `reporter()`) quand la page se replie sur la 2D. Il sert à
+compter les joueurs sans WebGL2 (filtre `report` sur ce texte), voir
+[rendu.md](rendu.md#le-secours-2d). Rien d'autre ne part : ni la grille ni
+rien qui désigne le joueur.
 
 Les rapports se lisent dans les journaux du Worker, gardés par
 `observability` (wrangler.jsonc) : tableau de bord Cloudflare → Workers →
